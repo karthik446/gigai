@@ -74,7 +74,8 @@ from .ats_board_clients import (
     _published_at_from_epoch_ms,
 )
 from .contracts import PostingRow
-from .providers import jobs_from_payload, provider_names, registry
+from .providers import jobs_from_payload, provider_names, token_from_list_url
+from .providers import list_url as provider_list_url
 from .providers import spec as provider_spec
 
 COMPANY_INDEX_SCHEMA = "scout-company-index:1"
@@ -87,9 +88,9 @@ REMOVED_RETENTION_DAYS = 90
 #: says "run Update sources" instead of presenting old postings as current.
 DEFAULT_STALE_AFTER_HOURS = 24.0
 
-#: 0.1.11.8: every registry provider (``providers.py``); the three older ones first.
+#: 0.1.11.8: every registry provider (``providers.py``); the three older ones first. The list URL of a board is
+#: ``providers.list_url`` (0.1.11.12: Workday's three-part token has no ``{token}`` template).
 _PROVIDERS = provider_names()
-_LIST_URLS = {name: item.list_url for name, item in registry().items()}
 
 #: ``CompanyChange.status`` values.
 STATUS_INDEXED = "indexed"  # first time this company is written (also a rebuild)
@@ -164,10 +165,12 @@ def _published_kind(ats: str, published_at: str | None) -> str | None:
 def board_list_url(ats: str, slug: str) -> str:
     """The list URL the acquire path fetches (and caches) for this company's board."""
 
-    template = _LIST_URLS.get(ats)
-    if template is None:
-        raise CompanyIndexError("unsupported_provider", f"unsupported ATS provider {ats!r}")
-    return template.format(token=slug)
+    url = provider_list_url(ats, slug)
+    if url is None:
+        if provider_spec(ats) is None:
+            raise CompanyIndexError("unsupported_provider", f"unsupported ATS provider {ats!r}")
+        raise CompanyIndexError("bad_slug", f"{ats} company slug {slug!r} is not a board token")
+    return url
 
 
 @dataclass(frozen=True)
@@ -272,16 +275,9 @@ def _optional_str(value: object) -> str | None:
 
 
 def slug_from_list_url(ats: str, url: str) -> str | None:
-    """The board slug when ``url`` is ``ats``'s list URL, else ``None`` (a detail URL, another provider's)."""
+    """The board slug when ``url`` is ``ats``'s list URL, else ``None`` (a detail URL, another provider's, a POST list)."""
 
-    template = _LIST_URLS.get(ats)
-    if template is None:
-        return None
-    prefix, _, suffix = template.partition("{token}")
-    if not url.startswith(prefix) or not url.endswith(suffix) or len(url) <= len(prefix) + len(suffix):
-        return None
-    slug = url[len(prefix) : len(url) - len(suffix)]
-    return slug if slug and "/" not in slug and "?" not in slug else None
+    return token_from_list_url(ats, url)
 
 
 @dataclass(frozen=True)

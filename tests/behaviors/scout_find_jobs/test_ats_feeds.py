@@ -43,12 +43,14 @@ def _config(roles: tuple[str, ...] = ("software engineer",)) -> FindJobsConfig:
 def test_registry_covers_every_enum_member_in_order() -> None:
     assert providers.provider_names() == tuple(member.value for member in ATSProvider)
     assert providers.provider_names()[:3] == ("greenhouse", "lever", "ashby")
+    assert providers.provider_names()[-1] == "workday"  # 0.1.11.12: the tenth, last in the enum
 
 
 def test_published_tables_match_the_registry() -> None:
     assert providers.published_fields() == PUBLISHED_FIELDS
     assert providers.published_kinds() == PUBLISHED_KINDS
     assert "pinpoint" not in PUBLISHED_FIELDS  # its feed carries no posted date
+    assert PUBLISHED_FIELDS["workday"] == "postedOn" and PUBLISHED_KINDS["workday"] == "posted"
 
 
 def test_registry_urls_and_helpers() -> None:
@@ -62,6 +64,14 @@ def test_registry_urls_and_helpers() -> None:
     assert providers.interval_for("recruitee", 0.125) == 0.125  # no evidence of a limit on a tenant host: the default pace
     assert providers.interval_for("workable", 0.125) == 2.0  # apply.workable.com answers 429 at a faster pace (1 s was refused in the end)
     assert providers.interval_for("lever", 0.125) == 0.125
+    assert providers.interval_for("workday", 0.125) == 1.0  # one tenant host at a time, one request a second (plan D4)
+    assert providers.catalog_aliases()["myworkdayjobs"] is ATSProvider.WORKDAY
+    assert providers.source_from_host("nvidia.wd5.myworkdayjobs.com") == "workday"
+    assert "myworkdayjobs.com" in providers.board_hosts()
+    assert providers.spec("workday").concurrency == 1 and providers.spec("workday").public_paths is None
+    assert all(item.url_rules is None and item.concurrency is None and item.public_paths is None for item in providers.registry().values() if item.name != "workday")
+    assert providers.token_from_list_url("workable", "https://apply.workable.com/api/v1/widget/accounts/acme?details=true") == "acme"
+    assert providers.token_from_list_url("workable", "https://apply.workable.com/api/v1/widget/accounts/a/b?details=true") is None
 
 
 def test_jobs_from_payload_reads_each_envelope() -> None:
@@ -90,10 +100,59 @@ def test_jobs_from_payload_reads_each_envelope() -> None:
         ("https://a.b.recruitee.com/", None),
         ("https://careers.acme.com/", None),
         ("https://jobs.lever.co/acme", ("lever", "acme")),
+        # 0.1.11.12 Workday: tenant and pod from the host, site from the path after an optional locale.
+        ("https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite", ("workday", "nvidia.wd5.NVIDIAExternalCareerSite")),
+        ("https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/", ("workday", "nvidia.wd5.NVIDIAExternalCareerSite")),
+        ("https://salesforce.wd12.myworkdayjobs.com/fr-CA/External_Career_Site/job/Toronto/Software-Engineer_JR-290013", ("workday", "salesforce.wd12.External_Career_Site")),
+        ("https://nvidia.wd5.myworkdayjobs.com/en-US", None),
+        ("https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs", None),
+        ("https://nvidia.myworkdayjobs.com/NVIDIAExternalCareerSite", None),
+        ("https://a.b.wd5.myworkdayjobs.com/site", None),
+        ("https://myworkdayjobs.com/site", None),
+        ("https://wd5.myworkday.com/nvidia/d/home.htmld", None),
+        ("https://nvidia.wd5.myworkday.com/en-US/NVIDIAExternalCareerSite", None),
     ],
 )
 def test_parse_board_url_new_hosts(url: str, expected: tuple[str, str] | None) -> None:
     assert parse_board_url(url) == expected
+
+
+def test_workday_token_splits_and_urls() -> None:
+    from gigai.scout.find_jobs.company_catalog import parse_company_record
+    from gigai.scout.find_jobs.company_index import board_list_url, slug_from_list_url
+    from gigai.scout.find_jobs.contracts import split_workday_token
+    from gigai.scout.find_jobs.posting_live import board_job_url
+    from gigai.scout.find_jobs.watchlist import watchlist_entry_from_url
+
+    token = "nvidia.wd5.NVIDIAExternalCareerSite"
+    assert split_workday_token(token) == ("nvidia", "wd5", "NVIDIAExternalCareerSite")
+    assert split_workday_token("nvidia.wd5") is None and split_workday_token("nvidia.wd5/Site") is None and split_workday_token("Nvidia.wd5.Site") is None
+    assert split_workday_token("acme.wd5.a.b") is None and split_workday_token(None) is None
+    list_url = "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs"
+    assert providers.list_url("workday", token) == list_url
+    assert providers.board_url("workday", token) == "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite"
+    assert providers.list_url("workday", "nvidia") is None and providers.board_url("workday", "nvidia/site") is None
+    assert providers.token_from_list_url("workday", list_url) is None  # a POST list never carries validators
+    assert slug_from_list_url("workday", list_url) is None
+    assert board_list_url("workday", token) == list_url
+    with pytest.raises(Exception) as excinfo:
+        board_list_url("workday", "nvidia")
+    assert excinfo.value.code == "bad_slug"  # type: ignore[attr-defined]
+    rules = providers.spec("workday").url_rules
+    assert rules is not None
+    detail = rules.detail_url(token, {"externalPath": "/job/US-CA-Santa-Clara/Senior-Software-Engineer_JR1990000"})
+    assert detail == "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Senior-Software-Engineer_JR1990000"
+    assert rules.detail_url(token, {"externalPath": "job/x"}) is None and rules.detail_url(token, {"externalPath": "/job/../x"}) is None
+    assert rules.detail_url(token, {}) is None
+    with pytest.raises(NotImplementedError):  # packet 2 replaces the stand-in with ats_feeds.workday_rows
+        providers.spec("workday").rows([], token, _config())
+    # The other sites go through the same rules: liveness has no job URL from an id, the catalog builds the board page.
+    assert board_job_url("workday", token, "JR1990000") is None
+    record = parse_company_record({"name": "NVIDIA", "ats": "workday", "board_slug": token})
+    assert record is not None and record.board_url == "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite"
+    assert parse_company_record({"name": "NVIDIA", "ats": "workday", "board_slug": "nvidia"}) is None
+    entry = watchlist_entry_from_url("https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Senior-Software-Engineer_JR1990000")
+    assert entry.watchlist_id == f"scout_watchlist:workday:{token}" and entry.provider is ATSProvider.WORKDAY
 
 
 # --- dates ----------------------------------------------------------------------------------------------------

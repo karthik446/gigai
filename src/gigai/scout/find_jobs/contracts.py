@@ -82,6 +82,9 @@ class ATSProvider(StrEnum):
     RECRUITEE = "recruitee"
     PINPOINT = "pinpoint"
     BREEZY = "breezy"
+    # 0.1.11.12: Workday, the first provider whose board is named by three parts (tenant, pod, site); the token is
+    # ``<tenant>.wd<N>.<site>`` (``WORKDAY_BOARD_SUFFIX`` / ``split_workday_token`` below; the URLs in ``providers.py``).
+    WORKDAY = "workday"
 
 
 #: A board's public page host -> provider, for hosts where the board token is the FIRST PATH SEGMENT
@@ -108,6 +111,18 @@ _NOT_A_BOARD_FIRST_SEGMENT: dict[str, frozenset[str]] = {"apply.workable.com": f
 _LOCALE_SEGMENT = re.compile(r"[a-z]{2}[-_][A-Za-z]{2,4}")
 #: Subdomains of those suffixes that are the vendor's own sites, never a company board.
 _VENDOR_SUBDOMAINS = frozenset({"www", "app", "api", "apply", "docs", "help", "support", "status", "blog", "developer", "developers", "static", "assets", "cdn", "mail", "email", "jobs", "careers", "my", "admin", "login", "auth", "accounts", "account"})
+#: 0.1.11.12: a Workday board's host is ``<tenant>.wd<N>.myworkdayjobs.com`` (``*.myworkday.com`` is the employee side,
+#: never a board) and its token is the three parts joined by dots, ``<tenant>.wd<N>.<site>``: no ``/``, so it is safe as a
+#: path segment and a journal filename. ``parse_board_url`` reads it; ``providers.py`` splits it back for the URLs.
+WORKDAY_BOARD_SUFFIX = "myworkdayjobs.com"
+_WORKDAY_TOKEN = re.compile(r"(?P<tenant>[a-z0-9-]+)\.(?P<pod>wd\d+)\.(?P<site>[A-Za-z0-9][A-Za-z0-9_-]*)")
+
+
+def split_workday_token(token: object) -> tuple[str, str, str] | None:
+    """``<tenant>.wd<N>.<site>`` -> ``(tenant, pod, site)``; ``None`` when ``token`` is not that shape."""
+
+    found = _WORKDAY_TOKEN.fullmatch(token) if type(token) is str else None
+    return None if found is None else (found["tenant"], found["pod"], found["site"])
 
 
 class RowOutcome(StrEnum):
@@ -2462,6 +2477,8 @@ def parse_board_url(url: str) -> tuple[str, str] | None:
                 if not label or "." in label or label in _VENDOR_SUBDOMAINS:
                     return None
                 return subdomain_provider, label
+        if host.endswith("." + WORKDAY_BOARD_SUFFIX):
+            return _parse_workday_board(host[: -len(WORKDAY_BOARD_SUFFIX) - 1], parts)
         return None
     if parts and parts[0].lower() == "embed":
         if parts != ("embed", "job_board"):
@@ -2479,6 +2496,21 @@ def parse_board_url(url: str) -> tuple[str, str] | None:
         # locale-shaped first segment (``/en-GB/acme/jobs``) is not read as a board named ``en-GB``.
         return None
     return provider, parts[0]
+
+
+def _parse_workday_board(labels: str, parts: tuple[str, ...]) -> tuple[str, str] | None:
+    """``https://<tenant>.wd<N>.myworkdayjobs.com/[<locale>/]<site>[/job/...]`` -> ``("workday", "<tenant>.wd<N>.<site>")``.
+
+    ``labels`` is the host before the suffix. A locale segment (``en-US``, ``fr-CA``) before the site is skipped; the
+    tenant API path (``/wday/cxs/...``) names no board.
+    """
+
+    if parts and _LOCALE_SEGMENT.fullmatch(parts[0]):
+        parts = parts[1:]
+    if not parts or parts[0].lower() == "wday":
+        return None
+    split = split_workday_token(f"{labels}.{parts[0]}")
+    return None if split is None else (ATSProvider.WORKDAY.value, ".".join(split))
 
 
 def normalize_url(url: str) -> str:

@@ -484,6 +484,7 @@ PUBLISHED_FIELDS = {
     "gem": "first_published_at",
     "recruitee": "published_at",
     "breezy": "published_date",
+    "workday": "postedOn",
 }
 
 

@@ -233,8 +233,9 @@ def watchlist_entry_from_url(url: str, *, observed_at: str | None = None) -> Wat
     if parsed is None:
         raise WatchlistUrlError(
             "unsupported_board_host",
-            "url must be a Greenhouse (boards.greenhouse.io / job-boards.greenhouse.io), "
-            "Lever (jobs.lever.co) or Ashby (jobs.ashbyhq.com) board or job URL",
+            "url must be a board or job URL on a hiring system Scout reads: Greenhouse (boards.greenhouse.io / "
+            "job-boards.greenhouse.io), Lever (jobs.lever.co), Ashby (jobs.ashbyhq.com), Workable, Rippling, Gem, "
+            "Recruitee, Pinpoint, Breezy or Workday (<tenant>.wd<N>.myworkdayjobs.com/<site>)",
         )
     provider_name, board_token = parsed
     provider = _PROVIDER_BY_NAME[provider_name]

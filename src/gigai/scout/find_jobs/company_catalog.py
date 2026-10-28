@@ -84,7 +84,8 @@ from typing import Any
 
 from ...canonical import digest_imported_bytes
 from .contracts import ATSProvider, SourceKind, WatchlistEntry, WatchlistFirstSeen
-from .providers import catalog_aliases, registry
+from .providers import catalog_aliases
+from .providers import board_url as provider_board_url
 
 #: Package-relative path of the shipped resource, under ``gigai.scout``.
 COMPANY_CATALOG_RESOURCE = "data/companies.json.gz"
@@ -121,10 +122,10 @@ def min_us_postings(provider: object) -> int:
 
     return 1 if provider in _CLASSIFIED_PROVIDERS else UNCLASSIFIED_MIN_US_POSTINGS
 
-#: 0.1.11.8: every registry provider and its spellings (``providers.catalog_aliases()``); the board page per provider.
+#: 0.1.11.8: every registry provider and its spellings (``providers.catalog_aliases()``); a record's board page is
+#: ``providers.board_url`` (0.1.11.12: Workday's three-part token has no ``{token}`` template).
 _PROVIDER_ALIASES = catalog_aliases()
 _SAFE_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-_BOARD_URL_TEMPLATES = {item.provider: item.board_url for item in registry().values()}
 
 
 class CompanyCatalogError(ValueError):
@@ -339,7 +340,9 @@ def parse_company_record(raw: object) -> CompanyRecord | None:
         # and "1st Formations") is not a usable board and is skipped, counted.
         return None
     name = _optional_str(raw.get("name")) or token
-    board_url = _optional_str(raw.get("board_url")) or _BOARD_URL_TEMPLATES[provider].format(token=token)
+    board_url = _optional_str(raw.get("board_url")) or provider_board_url(provider.value, token)
+    if board_url is None:
+        return None  # a token that is not the provider's shape (a Workday token without its pod or site)
     h1b_raw = raw.get("h1b")
     h1b = bool(h1b_raw) if not isinstance(h1b_raw, str) else h1b_raw.strip().lower() in {"1", "true", "yes"}
     h1b_summary = parse_company_h1b(h1b_raw)

@@ -18,6 +18,14 @@ two-phase provider (Greenhouse, Rippling), the public board and job page URL
 templates, and the provider's own request interval when it should be slower
 than the default pace (``None``: the default).
 
+0.1.11.12: Workday is the first provider whose board token has three parts
+(``<tenant>.wd<N>.<site>``), so one ``{token}`` template cannot build its URLs;
+its spec carries :class:`BoardUrlRules`, and :func:`list_url`, :func:`board_url`
+and :func:`token_from_list_url` go through the rules when a spec has them. Every
+other spec keeps its templates (``url_rules`` is ``None``). The Workday list is a
+POST, so its ``token_from_list_url`` is always ``None``: no validator is ever
+seeded for it.
+
 Greenhouse keeps two special paths (its one-time ``?content=true`` fill and the
 ``updated_at`` marker on its detail cache); ``company_index`` and
 ``ats_board_clients`` still branch on ``"greenhouse"`` for those two things only.
@@ -28,17 +36,34 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
-from .contracts import BOARD_PATH_HOSTS, BOARD_SUBDOMAIN_HOSTS, ATSProvider, PostingRow
+from .contracts import BOARD_PATH_HOSTS, BOARD_SUBDOMAIN_HOSTS, WORKDAY_BOARD_SUFFIX, ATSProvider, PostingRow, split_workday_token
 
 RowsParser = Callable[..., tuple[PostingRow, ...]]
 
 
 @dataclass(frozen=True)
+class BoardUrlRules:
+    """The URLs of a provider whose board token is more than one part (``str.format(token=...)`` cannot split it).
+
+    Each callable answers ``None`` for a token that is not the provider's shape. ``detail_url`` takes the LIST's job
+    dict (the posting), because the detail address is a field of it, not the posting id.
+    """
+
+    list_url: Callable[[str], str | None]
+    board_url: Callable[[str], str | None]
+    detail_url: Callable[[str, Mapping[str, object]], str | None]
+    #: The board token when ``url`` is this provider's list URL; ``None`` otherwise, and ALWAYS ``None`` when the list is
+    #: a POST (``company_index.validators_for_url`` must never seed ``If-None-Match`` for it).
+    token_from_list_url: Callable[[str], str | None]
+
+
+@dataclass(frozen=True)
 class ProviderSpec:
     name: str
-    #: The public, unauthenticated list endpoint; ``{token}`` is the board token.
+    #: The public, unauthenticated list endpoint; ``{token}`` is the board token. With ``url_rules`` set the template
+    #: is the shape only (``{tenant}``/``{pod}``/``{site}``) and ``.format(token=...)`` raises: use :func:`list_url`.
     list_url: str
-    #: The board's public page (the catalog's ``board_url``); ``{token}``.
+    #: The board's public page (the catalog's ``board_url``); ``{token}`` (or the shape, as above).
     board_url: str
     #: Where the jobs sit in the list payload: ``None`` for a top-level array, else the envelope key.
     jobs_key: str | None
@@ -66,6 +91,13 @@ class ProviderSpec:
     aliases: tuple[str, ...] = ()
     #: ``True`` when a board can run past one list page (``page=0`` in ``list_url``; the payload's ``totalItems``).
     paged: bool = False
+    #: 0.1.11.12: how the URLs are built when the token is more than one part; ``None`` = the ``{token}`` templates.
+    url_rules: BoardUrlRules | None = None
+    #: 0.1.11.12: the path prefixes of the board's public pages a robots.txt must allow before its API is asked
+    #: (``robots_guard``, the stricter scope); ``None`` = the per-URL check only.
+    public_paths: tuple[str, ...] | None = None
+    #: 0.1.11.12: at most this many requests in flight per provider (``market_acquisition._fetch_boards``); ``None`` = the limit's.
+    concurrency: int | None = None
 
     @property
     def provider(self) -> ATSProvider:
@@ -77,6 +109,57 @@ class ProviderSpec:
         reads dates a posting that way when it dates it at all; Pinpoint gives no date, so its postings are undated)."""
 
         return "posted"
+
+
+def _workday_host(tenant: str, pod: str) -> str:
+    return f"https://{tenant}.{pod}.{WORKDAY_BOARD_SUFFIX}"
+
+
+def _workday_list_url(token: str) -> str | None:
+    parts = split_workday_token(token)
+    if parts is None:
+        return None
+    tenant, pod, site = parts
+    return f"{_workday_host(tenant, pod)}/wday/cxs/{tenant}/{site}/jobs"
+
+
+def _workday_board_url(token: str) -> str | None:
+    parts = split_workday_token(token)
+    if parts is None:
+        return None
+    tenant, pod, site = parts
+    return f"{_workday_host(tenant, pod)}/{site}"
+
+
+def _workday_detail_url(token: str, posting: Mapping[str, object]) -> str | None:
+    """``.../wday/cxs/<tenant>/<site><externalPath>``: the list row's ``externalPath`` (``/job/<location>/<title>_<reqid>``)."""
+
+    parts = split_workday_token(token)
+    path = posting.get("externalPath")
+    if parts is None or type(path) is not str or not path.startswith("/") or "//" in path or ".." in path:
+        return None
+    tenant, pod, site = parts
+    return f"{_workday_host(tenant, pod)}/wday/cxs/{tenant}/{site}{path}"
+
+
+def _workday_token_from_list_url(url: str) -> None:
+    """Always ``None``: the Workday list is a POST, which never carries validators."""
+
+    return None
+
+
+_WORKDAY_URL_RULES = BoardUrlRules(
+    list_url=_workday_list_url,
+    board_url=_workday_board_url,
+    detail_url=_workday_detail_url,
+    token_from_list_url=_workday_token_from_list_url,
+)
+
+
+def _workday_rows_pending(*_args: object, **_kwargs: object) -> tuple[PostingRow, ...]:
+    """Packet 1 stand-in for ``ats_feeds.workday_rows`` (packet 2): never answers rows, so no Workday body is read as empty."""
+
+    raise NotImplementedError("workday rows are not read yet (ats_feeds.workday_rows is packet 2)")
 
 
 def _build() -> dict[str, ProviderSpec]:
@@ -232,6 +315,28 @@ def _build() -> dict[str, ProviderSpec]:
             list_has_text=False,
             source_hosts=("breezy.hr",),
         ),
+        ProviderSpec(
+            name="workday",
+            # The shapes only: the real URLs come from ``url_rules`` (a three-part token; see ``BoardUrlRules``).
+            list_url="https://{tenant}.{pod}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs",
+            board_url="https://{tenant}.{pod}.myworkdayjobs.com/{site}",
+            jobs_key="jobPostings",
+            # The list row has no scalar id: the requisition id is the ``_<reqid>`` suffix of ``externalPath`` (and
+            # ``bulletFields`` is a list), so ``externalPath`` is both keys; ``ats_feeds.workday_rows`` (packet 2)
+            # derives the id from it. It is a path, not a URL: ``url_rules.detail_url`` makes the detail address.
+            id_key="externalPath",
+            title_key="title",
+            url_key="externalPath",
+            rows=_workday_rows_pending,
+            published_field="postedOn",
+            updated_field=None,
+            list_has_text=False,
+            source_hosts=(WORKDAY_BOARD_SUFFIX,),
+            min_interval_seconds=1.0,
+            aliases=("myworkdayjobs",),
+            url_rules=_WORKDAY_URL_RULES,
+            concurrency=1,
+        ),
     )
     table = {spec.name: spec for spec in specs}
     missing = {member.value for member in ATSProvider} - set(table)
@@ -265,13 +370,40 @@ def provider_names() -> tuple[str, ...]:
 
 
 def list_url(provider: str, token: str) -> str | None:
+    """The list endpoint of ``token``'s board, or ``None`` for an unknown provider or a token not of its shape."""
+
     found = spec(provider)
-    return None if found is None else found.list_url.format(token=token)
+    if found is None:
+        return None
+    if found.url_rules is not None:
+        return found.url_rules.list_url(token)
+    return found.list_url.format(token=token)
 
 
 def board_url(provider: str, token: str) -> str | None:
+    """The public page of ``token``'s board, or ``None`` for an unknown provider or a token not of its shape."""
+
     found = spec(provider)
-    return None if found is None else found.board_url.format(token=token)
+    if found is None:
+        return None
+    if found.url_rules is not None:
+        return found.url_rules.board_url(token)
+    return found.board_url.format(token=token)
+
+
+def token_from_list_url(provider: str, url: str) -> str | None:
+    """The board token when ``url`` is ``provider``'s list URL, else ``None`` (a detail URL, another provider's, a POST list)."""
+
+    found = spec(provider)
+    if found is None:
+        return None
+    if found.url_rules is not None:
+        return found.url_rules.token_from_list_url(url)
+    prefix, _, suffix = found.list_url.partition("{token}")
+    if not url.startswith(prefix) or not url.endswith(suffix) or len(url) <= len(prefix) + len(suffix):
+        return None
+    token = url[len(prefix) : len(url) - len(suffix)]
+    return token if token and "/" not in token and "?" not in token else None
 
 
 def jobs_from_payload(provider: str, payload: object) -> list[dict[str, object]] | None:
@@ -326,7 +458,7 @@ def source_from_host(host: str) -> str | None:
 def board_hosts() -> tuple[str, ...]:
     """Every host (or host suffix) that is a board's own page, not a company site."""
 
-    return tuple(BOARD_PATH_HOSTS) + tuple(BOARD_SUBDOMAIN_HOSTS)
+    return tuple(BOARD_PATH_HOSTS) + tuple(BOARD_SUBDOMAIN_HOSTS) + (WORKDAY_BOARD_SUFFIX,)
 
 
 def interval_for(provider: str, default: float) -> float:
@@ -339,6 +471,7 @@ def interval_for(provider: str, default: float) -> float:
 
 
 __all__ = [
+    "BoardUrlRules",
     "ProviderSpec",
     "board_hosts",
     "board_url",
@@ -352,4 +485,5 @@ __all__ = [
     "registry",
     "source_from_host",
     "spec",
+    "token_from_list_url",
 ]

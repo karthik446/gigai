@@ -119,7 +119,7 @@ def test_record_to_watchlist_entry_records_the_catalog_revision() -> None:
 
 def test_parse_company_record_is_tolerant_and_fails_closed_on_non_boards() -> None:
     assert parse_company_record({"name": "X", "ats": "GreenHouse", "board_slug": "x"}) is not None
-    assert parse_company_record({"name": "X", "ats": "workday", "board_slug": "x"}) is None
+    assert parse_company_record({"name": "X", "ats": "nonexistent_ats", "board_slug": "x"}) is None
     assert parse_company_record({"name": "X", "ats": "lever"}) is None
     assert parse_company_record({"name": "X", "ats": "lever", "board_slug": "a/b"}) is None
     assert parse_company_record({"name": "X", "ats": "greenhouse", "board_slug": "harrison&star"}) is None
@@ -140,7 +140,7 @@ def test_parse_catalog_payload_accepts_an_array_or_a_wrapping_object_and_dedupes
         {"name": "A again", "ats": "greenhouse", "board_slug": "a"},
         {"name": "A upper", "ats": "greenhouse", "board_slug": "A"},
         {"name": "B", "ats": "lever", "board_slug": "b"},
-        {"name": "bad", "ats": "workday", "board_slug": "z"},
+        {"name": "bad", "ats": "nonexistent_ats", "board_slug": "z"},
     ]
     from_array, skipped_array = parse_catalog_payload(rows)
     from_object, skipped_object = parse_catalog_payload({"companies": rows})

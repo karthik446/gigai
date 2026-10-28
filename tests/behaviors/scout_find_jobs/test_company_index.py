@@ -265,7 +265,7 @@ def test_a_foreign_or_torn_payload_reads_as_not_indexed() -> None:
     assert CompanyIndexEntry.from_json(None) is None
     assert CompanyIndexEntry.from_json([]) is None
     assert CompanyIndexEntry.from_json({**good, "schema_version": "scout-company-index:0"}) is None
-    assert CompanyIndexEntry.from_json({**good, "ats": "workday"}) is None
+    assert CompanyIndexEntry.from_json({**good, "ats": "nonexistent_ats"}) is None
     assert CompanyIndexEntry.from_json({**good, "postings": []}) is None
     # One torn posting is dropped; the rest of the file still reads.
     torn = CompanyIndexEntry.from_json({**good, "postings": {**good["postings"], "12": {"title": "No stamps"}}})
@@ -389,7 +389,7 @@ def test_a_body_that_is_not_the_providers_list_is_bad_json(ats: str, body: bytes
 
 def test_an_unknown_provider_is_refused() -> None:
     with pytest.raises(CompanyIndexError) as caught:
-        board_list_url("workday", "acme")
+        board_list_url("nonexistent_ats", "acme")
     assert caught.value.code == "unsupported_provider"
 
 
@@ -497,7 +497,7 @@ def test_a_slug_can_never_name_a_file_outside_the_index(tmp_path: Path) -> None:
     assert list(index.keys()) == [("lever", "a/b")]
     assert sorted(item.name for item in tmp_path.rglob("*.json")) == ["lever:a%2Fb.json"]
 
-    for ats, slug in (("workday", "acme"), ("", "acme")):
+    for ats, slug in (("nonexistent_ats", "acme"), ("", "acme")):
         with pytest.raises(CompanyIndexError):
             index.path(ats, slug)
     with pytest.raises(CompanyIndexError):

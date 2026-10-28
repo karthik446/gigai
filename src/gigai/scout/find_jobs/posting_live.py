@@ -75,6 +75,7 @@ from urllib.parse import quote, urlsplit
 from ...canonical import digest_imported_bytes
 from .contracts import FindJobsContractError, normalize_url, parse_board_url
 from .outbound_guard import pinned_stream, public_looking_host, safe_path_segment, safe_public_target
+from .providers import list_url as provider_list_url
 from .providers import registry
 from .providers import spec as provider_spec
 
@@ -347,7 +348,9 @@ def _read_board(client: "httpx.Client", home_root: Path, provider: str, token: s
     found = provider_spec(provider)
     if found is None:
         return None
-    endpoint = found.list_url.format(token=token)
+    endpoint = provider_list_url(provider, token)
+    if endpoint is None:
+        return None
     cache = BoardCache(_cache_root(home_root) / "boards", validator_source=lambda _provider, _url: None)
     try:
         body, _status = _cached_request(client, endpoint, provider, token, cache=cache, stats=BoardFetchStats())

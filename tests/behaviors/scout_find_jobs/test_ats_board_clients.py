@@ -855,7 +855,7 @@ def test_ats_board_clients_unsupported_provider() -> None:
     client_impl = ATSBoardClients()
     with _client(lambda request: httpx.Response(200, json={})) as http_client:
         with pytest.raises(ATSBoardClientError) as exc_info:
-            client_impl.list_board(http_client, "workday", "acme", _config())
+            client_impl.list_board(http_client, "nonexistent_ats", "acme", _config())
 
     assert exc_info.value.code == "unsupported_provider"
 

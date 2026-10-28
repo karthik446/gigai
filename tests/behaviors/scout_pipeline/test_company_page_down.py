@@ -304,7 +304,7 @@ def test_the_board_address_is_built_from_the_provider_the_index_token_and_the_po
     assert build("ashby", "Acme Labs", "0a1b2c3d-1111-2222-3333-444455556666") == "https://jobs.ashbyhq.com/Acme%20Labs/0a1b2c3d-1111-2222-3333-444455556666"
     for provider, token, posting_id in [
         ("greenhouse", "acme", None), ("greenhouse", "", "5"), ("greenhouse", "acme", "five"), ("lever", "acme", "a/../b"),
-        ("lever", "acme", "a?b=c"), ("workday", "acme", "5"), (None, "acme", "5"),
+        ("lever", "acme", "a?b=c"), ("nonexistent_ats", "acme", "5"), (None, "acme", "5"),
     ]:
         assert build(provider, token, posting_id) is None, (provider, token, posting_id)
 

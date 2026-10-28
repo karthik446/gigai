@@ -523,7 +523,7 @@ def test_rows_this_version_cannot_store_refuse_the_whole_snapshot(tmp_path: Path
             ({**_INDEX_ROW, "url": "javascript:alert(1)"}, _BOARD_ROW),
             ({**_INDEX_ROW, "title": ""}, _BOARD_ROW),
             ({**_INDEX_ROW, "slug": "elsewhere"}, _BOARD_ROW),  # a posting of a board the snapshot does not list
-            (_INDEX_ROW, {**_BOARD_ROW, "ats": "workday"}),
+            (_INDEX_ROW, {**_BOARD_ROW, "ats": "nonexistent_ats"}),
         )
     ):
         release = _craft(tmp_path / f"bad-{number}", index_rows=[index_row], board_rows=[board_row])

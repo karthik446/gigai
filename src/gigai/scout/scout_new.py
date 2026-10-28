@@ -304,6 +304,7 @@ PUBLISHED_KINDS = {
     "recruitee": "posted",
     "pinpoint": "posted",
     "breezy": "posted",
+    "workday": "posted",
 }
 
 
