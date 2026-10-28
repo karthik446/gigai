@@ -106,6 +106,8 @@ def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptur
     for name in ("id_example", "note_example", "pick_lines", "requirements"):
         shipped = shipped.replace("{{" + name + "}}", "x")
     monkeypatch.setattr(assessment_core, "load_assess_instructions", lambda: shipped)
+    # These tests pin the v9 sources and pick as the model gave them; the strict read of a met row (0.1.11.12 F1) adds and lowers rows and has its own tests.
+    monkeypatch.setattr("gigai.scout.assess_strict.strict_rows", lambda *_args, **_kwargs: [])
     base = build_pipeline_fixture(tmp_path, monkeypatch, base=False, resume=RESUME)
     monkeypatch.setattr("gigai.config.load_config", fixture_config)
     fixture = PostingsFixture(base, second_profile_id="", deleted_profile_id=None)

@@ -127,24 +127,32 @@ def test_a_tool_a_bullet_names_is_met_with_that_line_and_its_question_is_not_ask
     assert attempt.attempts == 1
 
 
-def test_a_tool_in_the_skills_line_is_met_with_the_skills_line() -> None:
+def test_a_tool_only_the_skills_line_names_is_settled_by_the_stated_check_then_lowered_by_the_strict_read() -> None:
+    # 0.1.11.12 F1: the stated check settles the row with the skills line, then the strict read (T1) lowers it: a skills-only
+    # tool is ``unclear`` with a ``code_note``, and code asks the row's own question again (until 0.1.11.11 the row stayed met).
     attempt = _assess([GO_ROW, _row("Strong Kubernetes experience")], [_question("Strong Kubernetes experience", "kubernetes")])
     row = _stored(attempt, "Strong Kubernetes experience")
-    assert row.status.value == "met" and list(row.resume_evidence) == [SKILLS_LINE]
-    assert list(row.sources) == []  # the view prints the skills line without an id
-    assert _open(attempt) == [] and attempt.parsed.verdict.value == MATCHED
+    assert row.status.value == "unclear" and list(row.resume_evidence) == [SKILLS_LINE]
+    assert list(row.sources) == []  # the view prints the skills line without an id, so the strict master holds no line naming Kubernetes
+    assert row.code_note is not None and row.code_note.startswith("Strict read (T1): Kubernetes on no line of your master")
+    assert attempt.extras.stated_questions == ("tooling:kubernetes",) and [step_status[1:] for step_status in attempt.extras.strict_rows] == [("T1", "unclear")]
+    assert _open(attempt) == ["Strong Kubernetes experience"] and attempt.parsed.verdict.value == PENDING
 
 
-def test_years_a_line_states_are_met_with_that_line() -> None:
+def test_years_a_line_states_are_met_with_that_line_and_the_dated_roles_as_sources() -> None:
+    # 0.1.11.12 F1: the stated check keeps the summary line as evidence; the strict read (T3) sums the dated roles (13 years
+    # across the three) and makes the ``r-`` ids the sources.
     requirement = "8+ years of software engineering experience"
     attempt = _assess([GO_ROW, _row(requirement, klass="hard")], [_question(requirement, "years")])
     row = _stored(attempt, requirement)
     assert row.status.value == "met" and list(row.resume_evidence) == ["Platform engineer with ten years on distributed services."]
-    assert list(row.sources) == ["sum-000001"] and _open(attempt) == [] and attempt.parsed.verdict.value == MATCHED
+    assert list(row.sources) == ["r-000001", "r-000002", "r-000003"] and _open(attempt) == [] and attempt.parsed.verdict.value == MATCHED
 
 
 def test_years_the_role_dates_cover_are_met_with_the_dated_lines_and_the_bullets() -> None:
-    attempt = _assess([GO_ROW, _row("8+ years on AWS", klass="hard")], [_question("8+ years on AWS", "aws")])
+    # 0.1.11.12 F1: the row names AWS in ``alternatives`` (an acronym the requirement alone does not name); the strict read (T3)
+    # sums the roles within the window that name it (2016 to today) and makes the ``r-`` ids the sources.
+    attempt = _assess([GO_ROW, _row("8+ years on AWS", klass="hard", alternatives=["AWS"])], [_question("8+ years on AWS", "aws")])
     row = _stored(attempt, "8+ years on AWS")
     assert row.status.value == "met"
     assert list(row.resume_evidence) == [
@@ -153,7 +161,7 @@ def test_years_the_role_dates_cover_are_met_with_the_dated_lines_and_the_bullets
         "Engineer | 2016 - 2021",
         "Moved a batch ingest job to a Go queue worker on AWS, raising uptime to 99.9%.",
     ]
-    assert list(row.sources) == ["b-000001", "b-000003"]
+    assert list(row.sources) == ["r-000001", "r-000002"]
     assert _open(attempt) == [] and attempt.parsed.verdict.value == MATCHED
 
 
@@ -168,7 +176,8 @@ def test_one_stated_alternative_of_a_list_is_enough() -> None:
     requirement = "Experience with AWS, GCP, or similar cloud platforms"
     attempt = _assess([GO_ROW, _row(requirement, alternatives=["AWS", "GCP"])], [_question(requirement, "cloud")])
     row = _stored(attempt, requirement)
-    assert row.status.value == "met" and list(row.sources) == ["b-000001"] and _open(attempt) == []
+    # 0.1.11.12 F1: the strict read (T1) adds every line of a role within the window that names AWS to the sources.
+    assert row.status.value == "met" and list(row.sources) == ["b-000001", "b-000003"] and _open(attempt) == []
 
 
 def test_an_unclear_must_have_the_master_states_does_not_spend_the_retry_or_get_a_code_question() -> None:
@@ -235,13 +244,14 @@ def test_a_requirement_the_master_does_not_settle_is_left_exactly_as_it_came(req
 
 
 def test_a_met_row_and_an_unmet_row_are_never_touched() -> None:
-    # The model met Go with its own source; it found React unmet (nice to have). Neither is this check's.
-    rows = [GO_ROW, _row("Experience with React", "unmet", "nice_to_have"), _row("Experience with Docker", "met", sources=["b-000001"])]
+    # The model met JavaScript with its own source (a line of a role within the window, so the strict read keeps it); it found
+    # React unmet (nice to have). Neither is this check's.
+    rows = [GO_ROW, _row("Experience with React", "unmet", "nice_to_have"), _row("Experience with JavaScript", "met", sources=["b-000004"])]
     attempt = _assess(rows, [], verdict=MATCHED)
     assert _stored(attempt, "Experience with React").status.value == "unmet"
-    docker = _stored(attempt, "Experience with Docker")
-    assert docker.status.value == "met" and list(docker.sources) == ["b-000001"]
-    assert list(docker.resume_evidence) == ["Ran the on-call rota for six services on AWS and cut resolution time by half."]
+    javascript = _stored(attempt, "Experience with JavaScript")
+    assert javascript.status.value == "met" and list(javascript.sources) == ["b-000004"]
+    assert list(javascript.resume_evidence) == ["Wrote the REST API layer for the billing service in JavaScript."]
     assert list(_stored(attempt, "Go services").sources) == ["b-000003"] and _settled(attempt) == ()
 
 

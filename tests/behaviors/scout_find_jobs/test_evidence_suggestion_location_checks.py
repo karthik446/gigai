@@ -130,7 +130,8 @@ def test_a_met_row_without_a_usable_source_cites_a_line_as_written_or_nothing() 
     answer = _answer([_row("Go services", "met", [], ["Built Go services."], "hard"), _row("Billing APIs", "met", [], ["Wrote the REST API layer"])])
     matrix = _assess(answer).parsed.matrix
     # 0.1.11.10 B2: a short form of a line (its words, in its order, >= 3 shared) is traced to that line by the word rule.
-    assert list(matrix[0].resume_evidence) == [check.parse_master_lines(MASTER)["b-000002"].text] and matrix[0].status.value == "met"
+    # 0.1.11.12 F1: the evidence is still traced, but a met row that cites no line is lowered by the strict read (T5); the row that cites by words and meets the window keeps met.
+    assert list(matrix[0].resume_evidence) == [check.parse_master_lines(MASTER)["b-000002"].text] and matrix[0].status.value == "unclear"
     assert list(matrix[1].resume_evidence) == [check.parse_master_lines(MASTER)["b-000004"].text]
     # A prompt that showed no ids has no lines: the answer is read as before.
     plain = build_assess_context(resume_text="- Built Go services")
@@ -361,7 +362,8 @@ def test_a_state_limited_posting_still_asks() -> None:
 
 def test_another_unmet_hard_row_keeps_the_no_and_a_met_location_is_untouched() -> None:
     answer = _location_answer()
-    answer["matrix"][0] = {**answer["matrix"][0], "status": "unmet", "sources": [], "resume_evidence": []}  # type: ignore[index]
+    # 0.1.11.12 F1 (T7): an unmet row that cites no resume line is read as unclear (a silence is a question), so this one says what the resume shows.
+    answer["matrix"][0] = {**answer["matrix"][0], "status": "unmet", "sources": [], "resume_evidence": ["Wrote the REST API layer for the billing service in Node."]}  # type: ignore[index]
     attempt = _assess(answer, job=AssessJob("Staff Engineer", "Acme", "Poland", WORLDWIDE_BODY))
     assert attempt.parsed.verdict.value == NOT_A_MATCH  # Go is unmet too: the location row alone did not decide it
 

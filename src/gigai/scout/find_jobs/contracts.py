@@ -181,6 +181,8 @@ class MatrixStatus(StrEnum):
     MET = "met"
     UNMET = "unmet"
     UNCLEAR = "unclear"
+    # 0.1.11.12 F1: a must-have the candidate answered yes to but no resume line shows ("You said yes; add a line").
+    ANSWERED = "answered"
     # P2 (v0.1.9): the S29 r1 assess prompt only ever emits met/unmet/unclear.
     # PARTIAL/GAP are kept solely so an OLD serialized assessment result (the
     # pre-P2 prompt's met/partial/gap vocabulary) still parses; the P2
@@ -1559,6 +1561,8 @@ class RequirementMatrixRow(_Contract):
     alternatives: tuple[str, ...] = ()
     sources: tuple[str, ...] = ()
     class_from: str | None = None
+    # 0.1.11.12 F1: what the strict post-check (``assess_strict``) did to the row and why, for the reader; omitted when None.
+    code_note: str | None = None
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {"requirement": self.requirement, "resume_evidence": _json_strings(self.resume_evidence), "status": _json_enum(self.status)}
@@ -1574,12 +1578,14 @@ class RequirementMatrixRow(_Contract):
             value["sources"] = _json_strings(self.sources)
         if self.class_from is not None:
             value["class_from"] = self.class_from
+        if self.code_note is not None:
+            value["code_note"] = self.code_note
         return value
 
     @classmethod
     def from_json(cls, obj: object) -> "RequirementMatrixRow":
         value = _object_with_optional(
-            obj, ("requirement", "resume_evidence", "status"), ("class", "id", "class_basis", "alternatives", "sources", "class_from"), "matrix_row"
+            obj, ("requirement", "resume_evidence", "status"), ("class", "id", "class_basis", "alternatives", "sources", "class_from", "code_note"), "matrix_row"
         )
         requirement_class = None if "class" not in value else _enum(value["class"], RequirementClass, "matrix_row.class")
         row_id = None
@@ -1603,6 +1609,7 @@ class RequirementMatrixRow(_Contract):
             () if "alternatives" not in value else _bounded_strings(value["alternatives"], "matrix_row.alternatives", most=MAX_ROW_ALTERNATIVES, chars=MAX_ALTERNATIVE_CHARS),
             () if "sources" not in value else _bounded_strings(value["sources"], "matrix_row.sources", most=MAX_ROW_SOURCES, chars=MAX_SOURCE_CHARS),
             class_from,
+            None if "code_note" not in value else _string(value["code_note"], "matrix_row.code_note"),
         )
 
 

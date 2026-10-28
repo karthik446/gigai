@@ -32,8 +32,10 @@ from gigai.scout.assessment_core import (
     AssessJob,
     PriorAnswer,
     assess_once,
+    build_assess_context,
     load_assess_instructions,
     render_assess_prompt,
+    row_question_id,
 )
 from gigai.scout.find_jobs.contracts import NotAssessedReason
 from gigai.scout.proposals import parse_assessment_proposal
@@ -149,10 +151,10 @@ GOLDEN_PROMPT = (
     '\n'
     'RULES:\n'
     "1. Status is decided from the candidate's facts (resume text plus CANDIDATE CONSTRAINTS plus PRIOR ANSWERS), never from your overall impression:\n"
-    '   - The facts satisfy the requirement\'s substance, stated or clearly paraphrased -> "met". Put the quote or close paraphrase you relied on in resume_evidence. A row with "alternatives" is met when the facts satisfy any ONE of them.\n'
+    '   - The facts satisfy the requirement\'s substance, stated or clearly paraphrased -> "met". Put the quote or close paraphrase you relied on in resume_evidence. A row with "alternatives" is met when the facts satisfy any ONE of them. "Met" is what a strict screener sees on the submitted resume, so the lines of the RESUME block come in two tiers: a CLEAR line is a bullet or the heading of a role that ended within the last 8 years (or is current) or of a project; a BURIED line is the summary, the skills line, an "Other" line, or any line of a role that ended more than 8 years ago. A HARD or ASKABLE row is "met" only when a CLEAR line satisfies it; buried lines alone never make it "met" (the row is "unclear", and you ask), however plainly they state it. A dated fact (years of experience, a degree) is read from the role headings\' dates and the degree entries, never from the summary.\n'
     '   - The facts explicitly contradict it (their own words state a lower level, fewer years, the wrong domain, or that the candidate lacks it) -> "unmet". Quote the contradicting text in resume_evidence. An explicit disclaimer in the resume ("has not worked on X", "does not do X", "no experience with X") is a judgement call, not a keyword match: weigh how explicit the statement is and how central the requirement is to the role. A clear disclaimer against a core HARD requirement usually means "unmet" (a resume that says "has not worked on cloud infrastructure, SRE, or platform engineering" is unmet for an SRE posting\'s production-infrastructure requirement; do not ask about it), while partial or adjacent evidence is not a contradiction ("writes little product code" or "minimal application-level coding" against a required language does not rule the language out: that row stays "unclear" and you ask). A disclaimer that covers an area ("has not worked on X") answers every row about that area, HARD or ASKABLE: mark each of them unmet and ask nothing about it. A degree, enrolment or student-status requirement ("currently pursuing a degree", "enrolled student") is ASKABLE and is never "unmet" on the resume alone: a resume that states current enrolment meets it; a completed degree or years of full-time work do not settle whether the candidate is enrolled now, so otherwise the row is "unclear" and you ask once, with the question_id "education:enrolled".\n'
     '   - A must-have bullet that names SEVERAL practices ("feature flags, staged rollout and rollback"; "compliance, tracing, evals") is "met" when a recruiter would accept the cited lines as covering them; ask only about a named tool or number they do not show, or where the resume is silent.\n'
-    '   - The standard for "met" is the reasonable reader: would a recruiter reading the cited line(s) accept them? A scope or strength word the posting adds ("strong", "deep", "at scale", "large, complex", "high-volume", "significant", "proven") does not turn stated work into a question. A line that merely names X, or shows a neighbouring technology (React Native for "modern front-end development: React, TypeScript, component architecture, state management, testing, design systems"), leaves the row "unclear", and you ask.\n'
+    '   - The standard for "met" is the reasonable reader: would a recruiter reading the cited line(s) accept them? On a PRACTICE ("ownership", "operating production systems", "mentoring") a scope or strength word the posting adds ("at scale", "large, complex", "high-volume", "significant", "proven") does not turn stated work into a question. On a NAMED tool a level word ("strong", "deep", "fluent", "proficient", "expert", "hands-on", "advanced") is part of the requirement: the row is "met" only when the tool sits on a line of the current role, or on lines of two roles within the last 8 years; a tool named only in one past role, only in a project or only on the skills line leaves the row "unclear", and you ask. A line that merely names X, or shows a neighbouring technology (React Native for "modern front-end development: React, TypeScript, component architecture, state management, testing, design systems"), leaves the row "unclear", and you ask.\n'
     '   - Numbers and named tools are strict: "5+ years in cloud data platforms" is not met by general years, nor a named set by one item (Protobuf alone does not meet Parquet, Arrow and Iceberg): it stays "unclear" and you ask. When a resume line or a prior answer plainly states what the row asks, the row is "met" and never asked; do not ask what the facts already settle.\n'
     '   - The facts are simply silent (the topic is not mentioned at all) -> "unclear", with an empty resume_evidence list. Silence is never "unmet", no matter how central the requirement looks.\n'
     '   - Before you call the facts silent, read EVERY line of the RESUME block, under every role and every project, the older ones too: evidence for a requirement can stand anywhere in it and need not share a word with the posting. Never write that no resume line states, mentions or shows X (in resume_evidence, a question or a suggestion) when a line of the block does: a row whose requirement a line states is "met" by that line. When a line shows work NEXT TO what the row asks without stating it (an MQTT telemetry pipeline or a Zigbee device gateway against "a low-level or hardware-adjacent background" or "firmware"), the facts are not silent: decide the row by the reasonable-reader standard above ("met" when a recruiter would accept the line, otherwise "unclear"; never "met" just because a line exists), and in either case put in resume_evidence a quote of at most 160 characters from the closest such line, followed for an "unclear" row by the few words that say what the line does not state ("device gateway over MQTT; firmware or kernel work not stated"). The question on such a row asks about what is missing, not about what the line already says.\n'
@@ -234,15 +236,15 @@ GOLDEN_RETRY_PROMPT = (
 )
 
 # sha256 of the golden prompts (the strings above are the source of truth;
-# the digests guard the transcription). Re-captured for assess-prompt-v8.
-GOLDEN_SHA256 = "2b7b8bae1388a26e790c96289dd6a60c5601d57630d771eccd0a18adf7638ed2"
-GOLDEN_RETRY_SHA256 = "f9306a8b7ca79055803d10fae8d84317adb6cd25decf158b0e374c0d4daa0a8d"
+# the digests guard the transcription). Re-captured for assess-prompt-v10.
+GOLDEN_SHA256 = "0c46526f5d234fb1b98ce23074b9484a9b1ff726c194d44a4233fcf164440f0b"
+GOLDEN_RETRY_SHA256 = "25bccf7a69bb4beb393ef66a89daef59f3edc1c0ba1f5bf9ecfa46176e0c0847"
 # 25,000-byte posting text and resume plus a 400-char validation error:
 # the three ``_MAX_PROMPT_*`` bounds (12_000 / 24_000 / 300) produce this exact prompt.
 # 0.1.11.10 INTENTIONAL CHANGE: the resume bound is 24,000 (it was 12,000; the inputs here were 13,000 bytes), so the
 # prompt cuts nothing off the assess view of a master of ordinary size (``assess_master.ASSESS_EVIDENCE_CAP``).
-GOLDEN_BOUNDED_SHA256 = "be0b63b0e6d9f63c95ebc4dd06d3edf8d76ef367b0b9406aee38a13459516084"
-GOLDEN_BOUNDED_LEN = 67_991
+GOLDEN_BOUNDED_SHA256 = "37f81825d91ed2cd1ed5bdb72d295d77fbb5789cf73f0891aa6397065b954c88"
+GOLDEN_BOUNDED_LEN = 69_080
 
 # Digest of the shipped ``assess.md`` bytes; bump ONLY when the template changes on purpose.
 # assess-prompt-v2 (v0.1.9) INTENTIONAL CHANGE: bumped for the rewritten body (see above).
@@ -274,8 +276,15 @@ GOLDEN_BOUNDED_LEN = 67_991
 # states it), THE PICK may take the line an unclear row quotes, and rule 5's label gained ``transfer_only`` (no NEW
 # sponsorship, H-1B transfers taken: not a flat no; still a label). Every golden above was re-captured (EXECUTED, from
 # ``render_assess_prompt`` on the same fixed inputs).
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:2386f5a5aebdf0b5aefd96f46bc3b4fe38e47dd79933ad984b8fa58efbb4d59c"
-SHIPPED_PROMPT_VERSION = "assess-prompt-v9"
+# assess-prompt-v10 (0.1.11.12 F1) INTENTIONAL CHANGE: "met" means what a strict screener sees. Rule 1 gained the
+# evidence tiers (a CLEAR line is a bullet or heading of a role within the last 8 years or of a project; the summary,
+# the skills line, "Other" and older roles are BURIED and never make a must-have row "met" alone; dated facts come
+# from the role headings and degree entries), a level word on a NAMED tool is part of the requirement (current role,
+# or two roles within 8 years), and RESUME LINE IDS says a met must-have row cites a clear line. ``assess_strict``
+# enforces the same tiers deterministically after the model answers. Every golden above was re-captured (EXECUTED,
+# from ``render_assess_prompt`` on the same fixed inputs) and v9 became v10 for every work mode.
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:d04ae5eb07ca3a459532d585dc3ba0d0ab18b4b90aac8cb8eac3f5358e76835f"
+SHIPPED_PROMPT_VERSION = "assess-prompt-v10"
 
 
 def _sha256(text: str) -> str:
@@ -1006,3 +1015,97 @@ def test_a_thin_matrix_that_is_not_matched_is_left_alone() -> None:
     })
     outcome = assess_once(_ScriptedBinding([output]), _job(posting_text=_LONG_POSTING), _ctx(), parse=_parse)
     assert outcome.ok and outcome.parsed.verdict.value == "not_a_match"
+
+
+# --- 0.1.11.12 F1: the strict-met post-check at the boundary --------------------------------------------------
+
+
+_STRICT_RESUME = """\
+# Summary
+- Fluent in Go and Kubernetes, strong written communication. <!-- id: sum-1 -->
+
+# Experience
+### Engineer, Acme <!-- id: r-cur -->
+Jun 2022 - Present
+- Built Ruby services with Datadog dashboards. <!-- id: b-cur1 -->
+"""
+_GO_LINE = "- Ran Go services on Kubernetes in production. <!-- id: b-cur2 -->\n"
+_STRICT_IDS = ("sum-1", "r-cur", "b-cur1", "b-cur2")
+_STRICT_JOB = AssessJob("Staff Engineer", "Acme", "Remote", "Requirements: Go in production; Kubernetes. Nice to have: Helm.")
+
+
+def _strict_answer(sources: list[str], *, asked: bool = False) -> str:
+    rows = [
+        {"requirement": "Go in production", "class": "hard", "class_basis": "Requirements: Go in production", "status": "met",
+         "resume_evidence": ["Go"], "sources": sources, "alternatives": ["Go"]},
+        # A requirement whose words the stated check does not find in the block (it reads "container orchestration", the strict
+        # check reads the alternative "Kubernetes"), so a model question on it survives to the strict check.
+        {"requirement": "Container orchestration experience", "class": "askable", "class_basis": "Requirements: container orchestration", "status": "met",
+         "resume_evidence": ["Kubernetes"], "sources": sources, "alternatives": ["Kubernetes"]},
+    ]
+    questions = [{"question_id": "tooling:kubernetes", "question": "Have you run Kubernetes?", "requirement": "Container orchestration experience"}] if asked else []
+    return json.dumps({"verdict": "matched_above_threshold", "matrix": rows, "questions": questions, "suggestions": [], "not_a_match_reason": None})
+
+
+def _strict_assess(output: str, **ctx: object):
+    from gigai.scout.quick_assess import _parse_body
+
+    return assess_once(_ScriptedBinding([output]), _STRICT_JOB, build_assess_context(pick_lines=20, **ctx), parse=_parse_body)
+
+
+def test_the_strict_post_check_lowers_a_met_row_resting_on_the_summary_and_asks_its_own_question_once() -> None:
+    from gigai.scout import resume_gate
+
+    # Without id comments in the block the check has no line to read and the answer stands: both met, suggest.
+    outcome = _strict_assess(_strict_answer(["sum-1"]), resume_text=_STRICT_RESUME.replace(" <!-- id: sum-1 -->", ""))
+    assert outcome.ok and outcome.extras.strict_rows == () and outcome.parsed.structured_questions == ()
+    assert resume_gate.gate(outcome.parsed.matrix, outcome.parsed.structured_questions, outcome.parsed.verdict).decision == "suggest"
+
+    # With ids: a met row resting on the summary alone is lowered (T1), carries its code note, and code asks its own question,
+    # so the verdict holds for the answer; the record names what the check did per row.
+    outcome = _strict_assess(_strict_answer(["sum-1"], asked=True), resume_text=_STRICT_RESUME, resume_ids=_STRICT_IDS)
+    assert outcome.ok
+    go, kubernetes = outcome.parsed.matrix
+    assert go.status.value == "unclear" and kubernetes.status.value == "unclear"
+    assert go.code_note is not None and go.code_note.startswith("Strict read (T1)") and "sum-1 (summary)" in go.code_note
+    (go_id, *go_rest), (kubernetes_id, *kubernetes_rest) = outcome.extras.strict_rows
+    assert go_id.startswith("req-") and kubernetes_id.startswith("req-") and go_rest == kubernetes_rest == ["T1", "unclear"]
+    # One question per lowered row, code's own, and never a second one: the model's question on the (then met) Kubernetes row
+    # was dropped by the stated check before this one ran (``stated_questions``), and the strict check asks the row's once.
+    assert outcome.extras.stated_questions == ("tooling:kubernetes",)
+    assert [item.question_id for item in outcome.parsed.structured_questions] == [row_question_id(go_id), row_question_id(kubernetes_id)]
+    assert len({item.requirement for item in outcome.parsed.structured_questions}) == 2
+    assert outcome.parsed.verdict.value == "pending_user_answers"
+    assert resume_gate.gate(outcome.parsed.matrix, outcome.parsed.structured_questions, outcome.parsed.verdict).decision == "hold_question"
+
+    # The same rows with the tools on the current role's own line stay met (the check reads the whole block, not the sources
+    # alone), cite that line too, and the record says so.
+    outcome = _strict_assess(_strict_answer(["sum-1"]), resume_text=_STRICT_RESUME + _GO_LINE, resume_ids=_STRICT_IDS)
+    assert outcome.ok and [(row.status.value, row.sources) for row in outcome.parsed.matrix] == [("met", ("sum-1", "b-cur2"))] * 2
+    assert [change[1:] for change in outcome.extras.strict_rows] == [("T1", "met")] * 2
+
+
+def test_the_strict_post_check_reads_the_whole_master_when_the_view_left_the_cited_line_out() -> None:
+    # M3: a master over ASSESS_EVIDENCE_CAP shows the prompt a view without some lines; a row citing one of them is read
+    # against the whole stored master (``AssessContext.master_markdown``), not against the view.
+    from gigai.scout.assess_master import ASSESS_EVIDENCE_CAP, AssessInput
+
+    filler = "".join(f"- Shipped release {n} of the billing service with its migration and runbook, reviewed by the team. <!-- id: b-f{n:04d} -->\n" for n in range(260))
+    master = _STRICT_RESUME + filler + _GO_LINE
+    assert len(master) > ASSESS_EVIDENCE_CAP
+    view = _STRICT_RESUME + filler
+    assert "b-cur2" not in view
+    ids = _STRICT_IDS + tuple(f"b-f{n:04d}" for n in range(260))
+
+    outcome = _strict_assess(_strict_answer(["b-cur2"]), resume_text=view, resume_ids=ids, master_markdown=master)
+    assert outcome.ok and [row.status.value for row in outcome.parsed.matrix] == ["met", "met"]
+    assert [change[1:] for change in outcome.extras.strict_rows] == [("T1", "met")] * 2
+    # Against the view alone the same rows would read as resting on no line.
+    outcome = _strict_assess(_strict_answer(["b-cur2"]), resume_text=view, resume_ids=ids)
+    assert outcome.ok and [row.status.value for row in outcome.parsed.matrix] == ["unclear", "unclear"]
+
+    # The input's property: the stored master with ids when the view carries ids, else nothing.
+    stored = SimpleNamespace(master=SimpleNamespace(markdown=lambda ids: f"## Summary (ids={ids})"))
+    assert AssessInput(view=SimpleNamespace(ids=True), basis=None, stored=stored).master_markdown == "## Summary (ids=True)"
+    assert AssessInput(view=SimpleNamespace(ids=False), basis=None, stored=stored).master_markdown == ""
+    assert AssessInput(view=SimpleNamespace(ids=True), basis=None, stored=None).master_markdown == ""

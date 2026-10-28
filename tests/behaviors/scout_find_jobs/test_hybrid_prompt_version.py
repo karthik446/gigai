@@ -49,7 +49,7 @@ from .test_run_assess_sealed_config import _job
 from .test_stale_assessments import _assess, _calls, _reason, _state
 from .test_story_bank_run_assess import _Binding, _run_id
 
-V4, V5, V6, V7, V8, V9 = "assess-prompt-v4", "assess-prompt-v5", "assess-prompt-v6", "assess-prompt-v7", "assess-prompt-v8", "assess-prompt-v9"
+V4, V5, V6, V7, V8, V9, V10 = "assess-prompt-v4", "assess-prompt-v5", "assess-prompt-v6", "assess-prompt-v7", "assess-prompt-v8", "assess-prompt-v9", "assess-prompt-v10"
 #: The name each work mode's prompt had before the fence (P5).
 EARLIER = {"": V4, "remote": V5, "onsite": V5, "hybrid": V6}
 
@@ -60,13 +60,22 @@ PROMPT_SHA256_V8 = {
     "onsite": "1435bc410449b861fdbc9062767f92a7f841fcc1ebd25e33f98b688ecd5ffc4d",
     "hybrid": "91e8cd53e8d76726094bfb77876b6123fc4345bf00b27271fd31a4de651e96ed",
 }
-#: sha256 of the prompt each work mode renders for ``_JOB`` / ``_ctx`` now (assess-prompt-v9; 0.1.11.10 wording: rule 1 reads
-#: every line of the RESUME block before a row is silent, rule 5 names ``transfer_only``; re-captured from the renderer).
-PROMPT_SHA256 = {
+#: The same under assess-prompt-v9 (0.1.11.10 wording: rule 1 reads every line of the RESUME block before a row is silent,
+#: rule 5 names ``transfer_only``), before the v10 evidence tiers.
+PROMPT_SHA256_V9 = {
     "": "9b7f375e44b030e5b5fe5cf1ec9b6a5ac8d58228f95eec53a71b15a396ead48c",
     "remote": "a7a4cb51e0b7eb13d736c78c65363d629f6935a972dd7ec4d7e7efa489de4702",
     "onsite": "9917b8bc3d84adaf9ffc0b8007970073292a2525888b2f4a68d9cfdccdbbd318",
     "hybrid": "3d4e4eda57eb8ba7cec223a2c8348d4d6a7530cf9c0659d399551c10672817bd",
+}
+#: sha256 of the prompt each work mode renders for ``_JOB`` / ``_ctx`` now (assess-prompt-v10; 0.1.11.12 F1 wording: rule 1
+#: reads "met" from CLEAR lines only (a role within 8 years, a project), a level word on a named tool is part of the
+#: requirement, and a met row cites a clear line; re-captured from the renderer).
+PROMPT_SHA256 = {
+    "": "f878fb8ff5ee8f1c3df39a71454a07321ef8f953e5f8c3c8660dab04b994a2c1",
+    "remote": "97d4e2d9bc6639eca66ea0869810e38e714b42906c714f10679272630bf1bb65",
+    "onsite": "b143949abc48e21f53b4ea9f617966df069719f8e110accbdb718dabab6c6558",
+    "hybrid": "1533a5df9a9d64c4cbe5b6dd6db2561bcb4746461cf0d498ee5fb7400e9bfd8f",
 }
 #: The same under assess-prompt-v7: the fenced prompt, before the requirement weights (0110-10-03).
 PROMPT_SHA256_V7 = {
@@ -97,22 +106,22 @@ def _has_the_fence(prompt: str) -> bool:
     ["", None, "any", WorkModePreference.ANY, "remote", WorkModePreference.REMOTE, "onsite", WorkModePreference.ONSITE, "hybrid", WorkModePreference.HYBRID],
 )
 def test_each_work_mode_names_the_prompt_it_renders(mode: object) -> None:
-    assert assess_prompt_version(mode) == V9
+    assert assess_prompt_version(mode) == V10
 
 
 def test_the_shipped_version_names() -> None:
-    assert assessment_core.ASSESS_PROMPT_VERSION_HYBRID == V9
-    assert assessment_core.ASSESS_PROMPT_VERSION == V9
-    assert assessment_core.ASSESS_PROMPT_VERSION_NO_WORK_MODE == V9
-    assert assessment_core.CURRENT_ASSESS_PROMPT_VERSIONS == {V9}
-    assert not {V4, V5, V6, V7, V8} & assessment_core.CURRENT_ASSESS_PROMPT_VERSIONS, "the prompts before the weights are older wording"
+    assert assessment_core.ASSESS_PROMPT_VERSION_HYBRID == V10
+    assert assessment_core.ASSESS_PROMPT_VERSION == V10
+    assert assessment_core.ASSESS_PROMPT_VERSION_NO_WORK_MODE == V10
+    assert assessment_core.CURRENT_ASSESS_PROMPT_VERSIONS == {V10}
+    assert not {V4, V5, V6, V7, V8, V9} & assessment_core.CURRENT_ASSESS_PROMPT_VERSIONS, "the prompts before the evidence tiers are older wording"
 
 
 def test_every_prompt_has_new_bytes_and_keeps_the_fence() -> None:
     for mode, digest in PROMPT_SHA256.items():
         prompt = render_assess_prompt(_JOB, _ctx(mode))
         assert _sha256(prompt) == digest, f"the {mode or 'no work mode'} prompt changed bytes"
-        assert digest != PROMPT_SHA256_V7[mode] and digest != PROMPT_SHA256_V8[mode], "v9 changed every prompt, so every prompt has a new name"
+        assert digest not in (PROMPT_SHA256_V7[mode], PROMPT_SHA256_V8[mode], PROMPT_SHA256_V9[mode]), "v10 changed every prompt, so every prompt has a new name"
         assert _has_the_fence(prompt), f"the {mode or 'no work mode'} prompt lost the untrusted fence"
         assert "LIST_ITEM" in prompt and "1 to 12 rows" not in prompt
     hybrid = render_assess_prompt(_JOB, _ctx("hybrid"))
@@ -154,7 +163,7 @@ def test_an_assessment_from_the_unfenced_prompt_reads_as_made_with_older_setting
 
     item = _assess(fx)
 
-    assert item.prompt_version == V9, "a new assessment seals the fenced prompt's name"
+    assert item.prompt_version == V10, "a new assessment seals the fenced prompt's name"
     assert _reason(fx, item) is None and "assessment_stale" not in _state(fx, item)
     assert BasisCheck(home_root=fx.home_root, target=fx.target, resolved=fx.resolved).served(item) == {"basis_stale": False}
     assert FENCE_OPEN in binding.port.prompts[-1] and UNTRUSTED_POSTING_RULE in binding.port.prompts[-1]
@@ -174,7 +183,7 @@ def test_an_assessment_from_the_unfenced_prompt_reads_as_made_with_older_setting
 
     again = _assess(fx)  # assessed again: sealed under the fenced prompt's name, and current
 
-    assert again.prompt_version == V9 and _reason(fx, again) is None
+    assert again.prompt_version == V10 and _reason(fx, again) is None
     assert [entry.trigger for entry in again.history] == ["assess", "reassess"], "the earlier verdict stays in the history"
 
 
@@ -198,7 +207,7 @@ def test_a_run_assesses_an_unchanged_posting_again_when_its_assessment_is_from_t
     config = _with_mode(mode)
 
     _first_acquire, first = _run(fx, 911, posting, config)
-    assert first is not None and first.prompt_version == V9
+    assert first is not None and first.prompt_version == V10
     # Nothing changed: carried forward, no model call. A v7 assessment stands.
     second_acquire, second = _run(fx, 912, posting, config)
     assert {row.outcome for row in second_acquire.rows} == {RowOutcome.UNCHANGED}
@@ -210,7 +219,7 @@ def test_a_run_assesses_an_unchanged_posting_again_when_its_assessment_is_from_t
     third_acquire, third = _run(fx, 913, posting, config)
 
     assert third_acquire.carried_forward_assessments == (), "a verdict made with the unfenced prompt is not served"
-    assert third is not None and third.prompt_version == V9
+    assert third is not None and third.prompt_version == V10
     assert len(binding.port.prompts) == 2
     assert FENCE_OPEN in binding.port.prompts[-1] and UNTRUSTED_POSTING_RULE in binding.port.prompts[-1]
 

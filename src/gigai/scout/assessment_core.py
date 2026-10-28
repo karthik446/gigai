@@ -38,6 +38,7 @@ from importlib import resources
 import json
 import re
 import time
+from typing import TYPE_CHECKING
 
 from ..adapters.port import ModelInvocationError, NormalizedUsage
 from ..canonical import digest_imported_bytes
@@ -86,6 +87,9 @@ from .resume_gate import (
 from .master_lab import shows_lab
 from .resume_privacy import model_resume
 from .untrusted_text import fence_untrusted_posting
+
+if TYPE_CHECKING:
+    from .assess_master import StrictMaster
 
 _INSTRUCTIONS_RESOURCE = "scout/data/instructions/assess.md"
 _ROLE = "reviewer"
@@ -148,11 +152,11 @@ REQUIREMENTS_BLOCK_HEADER = "REQUIREMENTS (id | class | requirement | the postin
 #: to 12 rows and no weights, and reads as older wording.
 #: ``tests/behaviors/scout_find_jobs/test_assessment_core.py`` pins it with
 #: the file's digest.
-ASSESS_PROMPT_VERSION = "assess-prompt-v9"
+ASSESS_PROMPT_VERSION = "assess-prompt-v10"
 #: The name of a prompt rendered with no CANDIDATE WORK MODE paragraph.
-ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v9"
+ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v10"
 #: The name of a prompt rendered for a HYBRID candidate (decision #207).
-ASSESS_PROMPT_VERSION_HYBRID = "assess-prompt-v9"
+ASSESS_PROMPT_VERSION_HYBRID = "assess-prompt-v10"
 #: The versions the shipped ``assess.md`` renders today. An assessment sealed
 #: with none of them is older wording. One sealed with one of them is current
 #: when the constraints digest (which includes the work mode) is the same and
@@ -317,6 +321,9 @@ class AssessContext:
     resume_notes: bool = False
     pick_lines: int = 0
     requirements: tuple[ListedRequirement, ...] = ()
+    # 0.1.11.12 F1: the whole stored master with its ids, for the strict post-check (the RESUME block may be a capped view
+    # of it). Empty: the check reads the RESUME block.
+    master_markdown: str = ""
 
 
 def build_assess_context(
@@ -332,6 +339,7 @@ def build_assess_context(
     resume_notes: bool = False,
     pick_lines: int = 0,
     requirements: tuple[ListedRequirement, ...] = (),
+    master_markdown: str = "",
 ) -> AssessContext:
     """The candidate side of one assessment: the ONE builder every path uses.
 
@@ -358,6 +366,7 @@ def build_assess_context(
         resume_notes=bool(resume_notes),
         pick_lines=int(pick_lines),
         requirements=tuple(requirements),
+        master_markdown=master_markdown,
     )
 
 
@@ -642,6 +651,7 @@ def assess_once(
     dropped_count = 0
     # 0.1.11 N3 (v9): what THIS prompt offered: the ids a row's sources may name, the requirement list it carried.
     from .assessment_basis import posting_sha256  # that module imports this one
+    from .assess_master import strict_master  # 0.1.11.12 F1; lazy: the master modules import this one
 
     boundary = Boundary(
         source_ids=offered_sources(ctx), listed=ctx.requirements, posting_sha256=posting_sha256(job.title, job.posting_text), posting_text=job.posting_text,
@@ -649,6 +659,7 @@ def assess_once(
         location=ctx.location.strip(), work_mode=ctx.work_mode, visa_required=ctx.visa_sponsorship_required,
         lines=parse_master_lines(ctx.resume_text) if ctx.resume_ids else {},
         master=read_master(ctx.resume_text) if ctx.resume_ids else None,
+        strict=strict_master(ctx.master_markdown or ctx.resume_text) if ctx.resume_ids else None,
         answers={item.question_id.lower(): item.answer for item in ctx.prior_answers},
         stories={item.question_id.lower(): item.summary for item in ctx.bank_answers},
         known_text="\n".join([
@@ -1045,6 +1056,8 @@ class AssessExtras:
     checked_citations: tuple[str, ...] = ()
     #: 0.1.11.4 Q4: how many questions were dropped for naming a city no text the prompt showed names (``suggestion_check.names_unknown_place``).
     unplaced_questions: int = 0
+    #: 0.1.11.12 F1: what the strict post-check (``assess_strict``) did: ``(row id, step, status after)`` per touched row.
+    strict_rows: tuple[tuple[str, str, str], ...] = ()
 
 
 @dataclass
@@ -1091,6 +1104,8 @@ class Boundary:
     #: 0.1.11.4 Q4: every text the prompt showed (role, company, location, posting, master, setup, answers, stories): where a
     #: city a question or a suggestion names must come from. Empty: no check.
     known_text: str = ""
+    #: 0.1.11.12 F1: the whole master as the strict post-check reads it (``assess_master.strict_master``). ``None``: no check.
+    strict: StrictMaster | None = None
 
 
 def offered_sources(ctx: AssessContext) -> frozenset[str] | None:
@@ -1613,6 +1628,23 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         plain_questions = [text for index, text in enumerate(plain_questions) if index not in gone]
         plain_at = {key: at - sum(1 for index in gone if index < at) for key, at in plain_at.items()}
 
+    # 0.1.11.12 F1: the strict-met post-check (``assess_strict``), after the stated check so nothing re-promotes a row it
+    # lowered, before the caps so a lowered must-have row's own question competes for a place and ``_unasked`` finds it.
+    # A resume block without id comments (a fixture, an older prompt) gives the check no line to read, so it stays out.
+    strict_rows_changed: list[tuple[str, str, str]] = []  # (row id, step, status after)
+    if is_v9 and boundary.strict is not None and boundary.strict.lines:
+        from .assess_strict import strict_rows  # lazy: the master modules import this one
+
+        asked_rows = {fold(str(item.get("requirement") or "")) for item in structured_questions if isinstance(item, dict)}
+        for change in strict_rows(normalized_matrix, boundary.strict, id_of_row):  # type: ignore[arg-type]
+            strict_rows_changed.append((change.row_id or "", change.step, change.after))
+            if change.after != "unclear" or change.row_id is None or fold(change.requirement) in asked_rows:
+                continue
+            asked = row_question(change.row_id, change.requirement)
+            structured_questions.append(asked)
+            plain_at[id(asked)] = len(plain_questions)
+            plain_questions.append(str(asked["question"]))
+
     said = _normalize_verdict(decoded.get("verdict")) if "verdict" in decoded else None
     # Orchestrator #14: at most three questions on one-of-a-list rows, those of the rows first in the matrix; the rest
     # are dropped here (no retry) and their rows read as minor gaps. A not_a_match answer keeps none at all (below).
@@ -1712,6 +1744,7 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         stated_questions=tuple(stated_questions),
         checked_citations=tuple(cited),
         unplaced_questions=unplaced,
+        strict_rows=tuple(strict_rows_changed),
     )
     # Drop any other unknown keys (e.g. a model echoing "posting" back, or
     # inventing extra fields): the frozen contract is a closed object, and

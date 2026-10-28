@@ -101,7 +101,8 @@ def _rules(attempt) -> list[str]:
         ("Proficiency in React or a similar frontend framework", {}, "kind_words", [rules.REACT], ["b-000001"]),
         # an alternative track: the row's own "any one of", one of them stated
         ("Hands-on experience with cloud infrastructure tooling", {"alternatives": ["Pulumi", "Terraform"]}, "alternative", [rules.TERRAFORM], ["b-000005"]),
-        ("5+ years with a major cloud provider", {"alternatives": ["GCP", "AWS"]}, "alternative", ["Engineer | 2016 - 2021", rules.TERRAFORM], ["b-000005"]),
+        # 0.1.11.12 F1: the strict read (T3) makes the dated roles the sources of a years row (the evidence stays the stated check's)
+        ("5+ years with a major cloud provider", {"alternatives": ["GCP", "AWS"]}, "alternative", ["Engineer | 2016 - 2021", rules.TERRAFORM], ["r-000001", "r-000002"]),
     ],
 )
 def test_a_stated_requirement_is_met_with_the_masters_own_line_and_not_asked(requirement, more, rule, evidence, sources) -> None:
@@ -122,7 +123,8 @@ def test_a_stated_requirement_is_met_with_the_masters_own_line_and_not_asked(req
         # the degree track is met by a line the prompt showed; the question can only be about the other track
         (_row(DEGREE, "met", resume_evidence=["B.S. Computer Science | 2009 - 2013"], sources=["e-000001"]), "alternative_track_question"),
         (_row("A major cloud provider", "met", sources=["b-000005"], alternatives=["GCP", "Azure", "AWS"]), "met_row_question"),
-        (_row("A build system", "met", sources=["b-000005"], alternatives=["Bazel", "Buck"]), "alternative_track_question"),
+        # a track of practices (no tool named) met by a line of the current role: the strict read (0.1.11.12 F1, T5) keeps it
+        (_row("A monorepo or trunk-based workflow", "met", sources=["b-000003"], alternatives=["a monorepo", "trunk-based development"]), "alternative_track_question"),
     ],
 )
 def test_a_question_on_a_row_that_is_met_already_is_not_asked_and_the_row_is_what_it_was(row, rule) -> None:

@@ -1131,6 +1131,7 @@ def run_quick_assessment(
         resume_notes=master_input is not None and master_input.resume_notes,
         pick_lines=0 if master_input is None else master_input.pick_lines,
         requirements=() if listed is None else listed.rows,
+        master_markdown="" if master_input is None else master_input.master_markdown,  # 0.1.11.12 F1: the strict check reads the whole master
     )
     # 0.1.11 (orchestrator #44): a model that returns too few real requirement rows for a posting that states many
     # (the guard below refuses to store it) gets ONE more call before the user sees an error. The refused call is

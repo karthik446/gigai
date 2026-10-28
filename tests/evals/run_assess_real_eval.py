@@ -526,6 +526,104 @@ def render_report(report: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+# --- replay: the strict post-check over stored results (0.1.11.12 F1) ---------------------------------------
+
+POSTCHECK_SCHEMA = "gigai-assess-postcheck:1"
+
+
+def replay_postcheck(data_dir: Path, source: Path, out: Path, *, today: date | None = None) -> dict[str, Any]:
+    """Run ``assess_strict`` over every ``<source>/*/*/assessment.json`` against ``<data-dir>/master.md``; the copies go to ``out``.
+
+    No model call. Each case folder is copied whole (the scorer reads its selection files too), its ``assessment.json``
+    rewritten with the checked rows, the row questions the check adds (capped as the product caps them), the verdict
+    (``settled_verdict``) and the gate (``resume_gate.gate``) read again, and a ``postcheck`` block naming every change.
+    """
+
+    import shutil
+
+    from gigai.scout.assess_master import strict_master
+    from gigai.scout.assess_strict import strict_rows
+    from gigai.scout.assessment_core import row_question
+    from gigai.scout.requirement_weights import cap_mandatory_questions, settled_verdict
+    from gigai.scout.requirements_list import fold
+    from gigai.scout.resume_gate import gate
+
+    master_path = Path(data_dir) / "master.md"
+    if not master_path.is_file():
+        raise ValueError(f"{master_path} is missing")
+    if not Path(source).is_dir():
+        raise ValueError(f"{source} holds no results to replay")
+    today = today or date.today()
+    master = strict_master(master_path.read_text(encoding="utf-8"), today=today)
+    out.mkdir(parents=True, exist_ok=True)
+    cases: list[dict[str, Any]] = []
+    for path in sorted(Path(source).glob("*/*/assessment.json")):
+        slug, cli = path.parent.parent.name, path.parent.name
+        folder = out / slug / cli
+        if folder.exists():
+            shutil.rmtree(folder)
+        shutil.copytree(path.parent, folder)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        result = payload.get("result") if isinstance(payload.get("result"), dict) else None
+        if result is None or not isinstance(result.get("matrix"), list):
+            cases.append({"slug": slug, "cli": cli, "ok": False, "error": "no result.matrix"})
+            continue
+        rows = result["matrix"]
+        questions = list(result.get("structured_questions") or [])
+        plain = list(result.get("questions") or [])
+        verdict_before, gate_before = result.get("verdict"), (payload.get("resume_gate") or {}).get("decision")
+        changes = strict_rows(rows, master)
+        asked = {fold(str(item.get("requirement") or "")) for item in questions if isinstance(item, dict)}
+        for change in changes:
+            if change.after == "unclear" and change.row_id and fold(change.requirement) not in asked:
+                item = row_question(change.row_id, change.requirement)
+                questions.append(item)
+                plain.append(str(item["question"]))
+                asked.add(fold(change.requirement))
+        if verdict_before != "not_a_match":
+            questions, over = cap_mandatory_questions(rows, questions)
+            dropped = {str(item.get("question")) for item in over}
+            plain = [text for text in plain if text not in dropped]
+        result["structured_questions"], result["questions"] = questions, plain
+        if verdict_before is not None:
+            result["verdict"] = settled_verdict(verdict_before, rows, questions)
+        payload["resume_gate"] = gate(rows, questions, result.get("verdict")).record().to_json()
+        listed = [{"row": c.row_id, "requirement": c.requirement, "before": c.before, "after": c.after, "step": c.step, "note": c.note} for c in changes]
+        payload["postcheck"] = {"schema_version": POSTCHECK_SCHEMA, "source": str(path), "today": today.isoformat(), "changes": listed}
+        (folder / "assessment.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        cases.append({
+            "slug": slug, "cli": cli, "ok": True, "changes": listed,
+            "verdict": {"before": verdict_before, "after": result.get("verdict")}, "gate": {"before": gate_before, "after": payload["resume_gate"]["decision"]},
+        })
+    summary = {"schema_version": POSTCHECK_SCHEMA, "source": str(source), "master": str(master_path), "today": today.isoformat(), "cases": cases}
+    (out / "postcheck.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    (out / "report.md").write_text(postcheck_report(summary), encoding="utf-8")
+    return summary
+
+
+def postcheck_report(summary: Mapping[str, Any]) -> str:
+    """The replay's report: one line per touched row, then the verdicts and gates that moved, then the counts by step."""
+
+    lines = [f"# Strict post-check replay of {summary['source']}", "", f"Master: {summary['master']}; today: {summary['today']}.", "",
+             "| posting | cli | row | requirement | before | after | step | note |", "|---|---|---|---|---|---|---|---|"]
+    by_step: dict[str, int] = {}
+    moved: list[str] = []
+    for case in summary["cases"]:
+        if not case.get("ok"):
+            lines.append(f"| {case['slug'][:2]} | {case['cli']} | | | | | | {case.get('error')} |")
+            continue
+        for change in case["changes"]:
+            key = f"{change['step']} {change['before']}->{change['after']}"
+            by_step[key] = by_step.get(key, 0) + 1
+            lines.append(f"| {case['slug'][:2]} | {case['cli']} | {change['row'] or ''} | {change['requirement'][:60]} | {change['before']} | {change['after']} | {change['step']} | {change['note'][:160]} |")
+        if case["verdict"]["before"] != case["verdict"]["after"] or case["gate"]["before"] != case["gate"]["after"]:
+            moved.append(f"- {case['slug'][:2]} {case['cli']}: verdict {case['verdict']['before']} -> {case['verdict']['after']}; gate {case['gate']['before']} -> {case['gate']['after']}")
+    lines += ["", "## Verdicts and gates that moved", "", *(moved or ["- none"]), "", "## By step", ""]
+    lines += [f"- {key}: {count}" for key, count in sorted(by_step.items())] or ["- no row touched"]
+    return "\n".join(lines) + "\n"
+
+
+
 # --- main -----------------------------------------------------------------------------------------------
 
 
@@ -544,23 +642,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-selector", action="store_true", help="skip the code selector's selection")
     parser.add_argument("--stop-after-failures", type=int, default=2, help="stop when this many cases in a row fail (a CLI signed out fails every case); 0: never")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--replay-postcheck", action="store_true", help="no model call: run the strict post-check (assess_strict) over <data-dir>/results/<label>/ and write the copies to --out (default <data-dir>/results/<label>-postcheck/)")
     parser.add_argument("--quiet", action="store_true")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.replay_postcheck:
+        out = (args.out or args.data_dir / "results" / f"{args.label}-postcheck").resolve()
+    else:
+        out = (args.out or args.data_dir / "results" / args.label).resolve()
+    repo = harness.REPO_ROOT.resolve()
+    if out == repo or repo in out.parents:
+        print(f"--out {out} is inside the repository: results of a real-data run are never written there", file=sys.stderr)
+        return 2
+    if args.replay_postcheck:
+        try:
+            summary = replay_postcheck(args.data_dir, args.data_dir / "results" / args.label, out)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        if not args.quiet:
+            print((out / "report.md").read_text(encoding="utf-8"))
+        return 0 if all(case.get("ok") for case in summary["cases"]) else 1
     try:
         data = load_data(args.data_dir)
         targets = list(MODEL_TARGETS) if args.model_target == "both" else [args.model_target]
         planned = plan(data, targets, args.posting)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
-        return 2
-    out = (args.out or args.data_dir / "results" / args.label).resolve()
-    repo = harness.REPO_ROOT.resolve()
-    if out == repo or repo in out.parents:
-        print(f"--out {out} is inside the repository: results of a real-data run are never written there", file=sys.stderr)
         return 2
     if args.dry_run:
         for index, item in enumerate(planned, 1):

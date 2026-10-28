@@ -114,7 +114,7 @@ import threading
 
 from .find_jobs.assess_contracts import MAX_PICK_LINES, RESUME_INPUT_EVIDENCE, ResumeBasis
 from .master_resume import KIND_SKILLS, Master, skill_names
-from .master_selection import CitedRequirement, EvidenceView, SelectionPosting, SelectionProfile, evidence_view, select
+from .master_selection import CitedRequirement, EvidenceView, SelectionPosting, SelectionProfile, evidence_view, is_old_role, select
 
 #: 0.1.11.10: how much of the master one assessment's prompt may hold, in characters of the rendered view (ids and
 #: notes included). Twice the selector's own default (``master_selection.EVIDENCE_CAP``): a requirement can rest on a
@@ -215,6 +215,14 @@ class AssessInput:
     @property
     def resume_notes(self) -> bool:
         return self.view.notes > 0
+
+    @property
+    def master_markdown(self) -> str:
+        """0.1.11.12 F1: the whole stored master with its ids (what the strict post-check reads; the view may leave lines out under
+        ``ASSESS_EVIDENCE_CAP``); empty when no master is stored or the view carries no ids."""
+
+        master = getattr(self.stored, "master", None)
+        return str(master.markdown(ids=True)) if self.view.ids and master is not None else ""
 
 
 def reads_evidence(home_root: Path, profile: object) -> bool:
@@ -774,6 +782,169 @@ class ResumeCheck:
         return resume_changes(matrix=result.matrix, questions=result.structured_questions, then=then, now=now)
 
 
+# --- the master as the strict post-check reads it (0.1.11.12 F1) -----------------------------------------
+
+#: A line's id comment, with or without the stored form's ``tags:`` / ``backed:`` fields after the id.
+_ID_FIELD = re.compile(r"<!--\s*id:\s*(\S+?)(?:\s[^>]*)?-->")
+#: 0.1.11.12 F1: where a line sits. A line is CLEAR only as a bullet or heading of a role within the window or of a
+#: project; the summary, the skills line, an Other line and a role older than the window are BURIED (never ``met`` alone).
+LINE_SUMMARY = "summary"
+LINE_SKILLS = "skills"
+LINE_OTHER = "other"
+LINE_ROLE = "role"
+LINE_PROJECT = "project"
+LINE_DEGREE = "degree"
+
+
+@dataclass(frozen=True)
+class StrictLine:
+    """One line of the master with its place: a bullet under ``entry`` (a role, a project or a degree), a heading, or a loose line."""
+
+    id: str
+    kind: str
+    text: str
+    entry: str | None = None
+    heading: bool = False
+
+
+@dataclass(frozen=True)
+class StrictEntry:
+    """A role, a project or a degree: its heading, its dated sublines, its bullets' ids, and (a role) the months it covers."""
+
+    id: str
+    kind: str
+    heading: str
+    sublines: tuple[str, ...] = ()
+    bullets: tuple[str, ...] = ()
+    #: Months since year 0 (``stated_check._months``); ``None`` for a project, a degree or an undated role.
+    start: int | None = None
+    end: int | None = None
+    current: bool = False
+    #: ``master_selection.is_old_role``: a role that ended more than ``LENGTH_RULE.old_role_years`` back.
+    old: bool = False
+
+    @property
+    def text(self) -> str:
+        return " ".join((self.heading, *self.sublines))
+
+    @property
+    def in_window(self) -> bool:
+        return self.kind == LINE_ROLE and not self.old
+
+
+@dataclass(frozen=True)
+class StrictMaster:
+    """The whole master as the strict post-check reads it: every line by id, and the entries (roles, projects, degrees)."""
+
+    lines: dict[str, StrictLine]
+    entries: tuple[StrictEntry, ...]
+
+    @property
+    def roles(self) -> tuple[StrictEntry, ...]:
+        return tuple(entry for entry in self.entries if entry.kind == LINE_ROLE)
+
+    @property
+    def degrees(self) -> tuple[StrictEntry, ...]:
+        return tuple(entry for entry in self.entries if entry.kind == LINE_DEGREE)
+
+    def entry_of(self, line_id: str) -> StrictEntry | None:
+        line = self.lines.get(line_id)
+        if line is None or line.entry is None:
+            return None
+        return next((entry for entry in self.entries if entry.id == line.entry), None)
+
+    def lines_of(self, entry: StrictEntry) -> tuple[StrictLine, ...]:
+        """The entry's heading line and its bullets, in the file's order."""
+
+        return tuple(line for line in self.lines.values() if line.entry == entry.id)
+
+    def is_clear(self, line_id: str) -> bool:
+        """Whether a met hard/askable row may rest on this line: a line of a role within the window, or of a project."""
+
+        line = self.lines.get(line_id)
+        if line is None or line.kind not in (LINE_ROLE, LINE_PROJECT):
+            return False
+        entry = self.entry_of(line_id)
+        return entry is not None and (entry.kind == LINE_PROJECT or entry.in_window)
+
+
+_SECTION_KINDS = {"summary": LINE_SUMMARY, "skills": LINE_SKILLS, "other": LINE_OTHER, "experience": LINE_ROLE, "projects": LINE_PROJECT, "education": LINE_DEGREE}
+
+
+def strict_master(markdown: str, *, today: date | None = None) -> StrictMaster:
+    """The evidence view (``evidence_text(ids=True)``) or a stored master (``Master.markdown(ids=True)``) as the strict check reads it. Pure.
+
+    Private note lines and comment bodies are not read; a personal lab line is left out (0.1.11.7 T2). The skills line of the
+    evidence view has no id and gives nothing: a ``/``-joined skills name is a list there (``Go/Ruby/Python``), never aliases.
+    """
+
+    from .master_lab import is_lab_text
+    from .master_resume import MasterEntry
+    from .stated_check import _months  # noqa: SLF001 - the one reading of a role's months the stated check uses
+
+    today = today or date.today()
+    lines: dict[str, StrictLine] = {}
+    entries: list[StrictEntry] = []
+    section = ""
+    open_entry: tuple[str, str, str] | None = None  # (id, kind, heading) of the entry whose lines are being read
+    sublines: list[str] = []
+    bullets: list[str] = []
+
+    def close() -> None:
+        nonlocal open_entry, sublines, bullets
+        if open_entry is not None:
+            entry_id, kind, heading = open_entry
+            start = end = None
+            current = old = False
+            if kind == LINE_ROLE:
+                span = _months(sublines, today)
+                if span is not None:
+                    start, end = span
+                dated = MasterEntry(id=entry_id, section="experience", heading=heading, sublines=tuple(sublines))
+                current, old = dated.ongoing, is_old_role(dated, today)
+            entries.append(StrictEntry(entry_id, kind, heading, tuple(sublines), tuple(bullets), start, end, current, old))
+            lines[entry_id] = StrictLine(entry_id, kind, " ".join((heading, *sublines)), entry=entry_id, heading=True)
+        open_entry, sublines, bullets = None, [], []
+
+    for raw in markdown.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("<!--"):
+            continue
+        found = _ID_FIELD.search(stripped)
+        line_id = found.group(1) if found else None
+        text = " ".join(_COMMENT.sub("", stripped).split())
+        if text.startswith("###"):
+            close()
+            heading = text.lstrip("#").strip()
+            kind = _SECTION_KINDS.get(section)
+            if line_id is not None and kind in (LINE_ROLE, LINE_PROJECT, LINE_DEGREE):
+                open_entry = (line_id, kind, heading)
+                lines[line_id] = StrictLine(line_id, kind, heading, entry=line_id, heading=True)
+            continue
+        if text.startswith("#"):
+            close()
+            section = text.lstrip("#").strip().casefold()
+            continue
+        if not text.startswith(("- ", "* ")):
+            if open_entry is not None and not bullets:
+                sublines.append(text)
+            continue
+        text = text[2:].strip()
+        if section == "skills":
+            if line_id is not None and not is_lab_text(text):
+                lines[line_id] = StrictLine(line_id, LINE_SKILLS, text)
+            continue
+        if line_id is None or is_lab_text(text):
+            continue
+        if open_entry is not None:
+            bullets.append(line_id)
+            lines[line_id] = StrictLine(line_id, open_entry[1], text, entry=open_entry[0])
+        else:
+            lines[line_id] = StrictLine(line_id, _SECTION_KINDS.get(section, LINE_OTHER), text)
+    close()
+    return StrictMaster(lines, tuple(entries))
+
+
 __all__ = [
     "ASSESS_EVIDENCE_CAP",
     "ASSESS_INPUT",
@@ -783,11 +954,20 @@ __all__ = [
     "CITED_QUOTE_CHARS",
     "INPUT_EVIDENCE",
     "INPUT_VIEW",
+    "LINE_DEGREE",
+    "LINE_OTHER",
+    "LINE_PROJECT",
+    "LINE_ROLE",
+    "LINE_SKILLS",
+    "LINE_SUMMARY",
     "AssessInput",
     "MasterCitations",
     "ResumeChange",
     "ResumeCheck",
     "ResumeLines",
+    "StrictEntry",
+    "StrictLine",
+    "StrictMaster",
     "SOURCE_MASTER_EVIDENCE",
     "SOURCE_PROFILE_VIEW",
     "assess_input",
@@ -804,4 +984,5 @@ __all__ = [
     "resume_source",
     "source_changes",
     "stored_citations",
+    "strict_master",
 ]

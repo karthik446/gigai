@@ -77,7 +77,7 @@ def test_fake_model_run_goes_end_to_end_and_keeps_to_its_call_budget(tmp_path: P
     run, summary = report["run"], report["summary"]
     assert report["schema"] == "gigai-assess-rules-eval-report:1"
     assert run["fake_model"] is True and run["model_target"] == "ollama_local"
-    assert run["instructions_digest"] == INSTRUCTIONS_DIGEST and run["prompt_version"] == "assess-prompt-v9"
+    assert run["instructions_digest"] == INSTRUCTIONS_DIGEST and run["prompt_version"] == "assess-prompt-v10"
     # Two calls are held back for each case (the product's own retry), so a budget of 9 runs 8 one-call cases.
     assert summary["calls"] == 8 == len(report["rows"]) and summary["calls"] <= run["max_calls"]
     assert len(run["skipped"]) == run["planned_calls"] - 8

@@ -186,8 +186,8 @@ CITABLE = frozenset(TEXT.values())
 def test_every_citation_is_one_verbatim_line_or_the_row_cites_nothing() -> None:
     stretched = "Built ten agents with retrieval memory across ten domains."
     rows = [
-        # a `;` join of two real lines -> each line on its own
-        _row("Operate services", "met", [], ["Ran the on-call rota for six services; Built a service SDK in Go that adds tracing to forty functions"], "hard"),
+        # a `;` join of two real lines -> each line on its own (nice to have: a met must-have with no source is the strict read's, 0.1.11.12 F1)
+        _row("Operate services", "met", [], ["Ran the on-call rota for six services; Built a service SDK in Go that adds tracing to forty functions"]),
         # a `...` cut of one line -> the line
         _row("On-call", "unclear", [], ["Ran the on-call rota for six services ... used by two teams."]),
         # a role title merged with a bullet -> the bullet

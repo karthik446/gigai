@@ -126,6 +126,9 @@ def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptur
         shipped = shipped.replace("{{" + name + "}}", "x")
     # The prompt shows each line's id and asks for a pick (the shipped v9 paragraphs, in short): a Matched answer keeps its pick.
     monkeypatch.setattr(assessment_core, "load_assess_instructions", lambda: shipped + V9_PARAGRAPHS)
+    # These tests are about the pick and the page, not the strict read of a met row (0.1.11.12 F1): the invented master puts each must-have
+    # on a different role (the React one on a role that ended in 2015) and the scripted Matched answer is taken as the model gave it.
+    monkeypatch.setattr("gigai.scout.assess_strict.strict_rows", lambda *_args, **_kwargs: [])
     base = build_pipeline_fixture(tmp_path, monkeypatch, base=False, resume=RESUME)
     monkeypatch.setattr("gigai.config.load_config", fixture_config)
     fixture = PostingsFixture(base, second_profile_id="", deleted_profile_id=None)
