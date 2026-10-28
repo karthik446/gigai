@@ -74,12 +74,13 @@ PROMPT_SHA256_V9 = {
 #: 0.1.11.12 F5b: rule 4 reads an office list in several countries alone as "unclear", and a LOCATION line such as
 #: "Remote - US" as the statement that the role may be done from that country; 0.1.11.12 F2b: NICE_TO_HAVE reads an
 #: only "Preferred"/"Desired"/"Nice to have" list as the posting's requirements and class_basis allows the prefix
-#: "only list: "; re-captured from the renderer).
+#: "only list: "; 0.1.11.12 F6: rule 1 reads a row that NAMES a counterpart, job condition or domain as "met" only when a
+#: resume line states it; re-captured from the renderer).
 PROMPT_SHA256 = {
-    "": "b9feb8c1864db5b9d33390c2a7a44b8719abd339e140c70906fcb39f21630cd9",
-    "remote": "61cf67b2266d49796c3257d4d00380ed8d891efb358cacaf1a9cfe61794e97d9",
-    "onsite": "fb46cff4586b0674941441661e96b4fefbbe0305a09dad2af077f74e7cf725a6",
-    "hybrid": "75476f9d11fca51320b0436b33d96c45752967ac584cae67c6cf47738a42a7a0",
+    "": "c73814d0609dfcb8ec438c0f5ff28bb2c4eb1cc56d278d70a9c31b16ffa7deb1",
+    "remote": "ed93cc9dcdb7b1219cc1299f51e0d807f71a80b0975878eba77c961d3dfc9c0b",
+    "onsite": "87507e5a9872bfa3ee3a53f5ca126a6999142eee32d3b969ba6f4e06721a2b0b",
+    "hybrid": "845e6e03a4503ffcb247844a7c1301cfc283aba3f0371a17eb912f66ec01d258",
 }
 #: The same under assess-prompt-v7: the fenced prompt, before the requirement weights (0110-10-03).
 PROMPT_SHA256_V7 = {
