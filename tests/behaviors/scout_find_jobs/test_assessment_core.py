@@ -155,7 +155,6 @@ GOLDEN_PROMPT = (
     '   - The facts explicitly contradict it (their own words state a lower level, fewer years, the wrong domain, or that the candidate lacks it) -> "unmet". Quote the contradicting text in resume_evidence. An explicit disclaimer in the resume ("has not worked on X", "does not do X", "no experience with X") is a judgement call, not a keyword match: weigh how explicit the statement is and how central the requirement is to the role. A clear disclaimer against a core HARD requirement usually means "unmet" (a resume that says "has not worked on cloud infrastructure, SRE, or platform engineering" is unmet for an SRE posting\'s production-infrastructure requirement; do not ask about it), while partial or adjacent evidence is not a contradiction ("writes little product code" or "minimal application-level coding" against a required language does not rule the language out: that row stays "unclear" and you ask). A disclaimer that covers an area ("has not worked on X") answers every row about that area, HARD or ASKABLE: mark each of them unmet and ask nothing about it. A degree, enrolment or student-status requirement ("currently pursuing a degree", "enrolled student") is ASKABLE and is never "unmet" on the resume alone: a resume that states current enrolment meets it; a completed degree or years of full-time work do not settle whether the candidate is enrolled now, so otherwise the row is "unclear" and you ask once, with the question_id "education:enrolled".\n'
     '   - A must-have bullet that names SEVERAL practices ("feature flags, staged rollout and rollback"; "compliance, tracing, evals") is "met" when a recruiter would accept the cited lines as covering them; ask only about a named tool or number they do not show, or where the resume is silent.\n'
     '   - The standard for "met" is the reasonable reader: would a recruiter reading the cited line(s) accept them? On a PRACTICE ("ownership", "operating production systems", "mentoring") a scope or strength word the posting adds ("at scale", "large, complex", "high-volume", "significant", "proven") does not turn stated work into a question. On a NAMED tool a level word ("strong", "deep", "fluent", "proficient", "expert", "hands-on", "advanced") is part of the requirement: the row is "met" only when the tool sits on a line of the current role, or on lines of two roles within the last 8 years; a tool named only in one past role, only in a project or only on the skills line leaves the row "unclear", and you ask. A line that merely names X, or shows a neighbouring technology (React Native for "modern front-end development: React, TypeScript, component architecture, state management, testing, design systems"), leaves the row "unclear", and you ask.\n'
-    '   - When a row NAMES who the candidate worked with (product managers, designers, data scientists, clinicians, regulators), a job condition (on-call, weekend or holiday hours, travel, shifts) or a domain (financial systems, payments, fund movement, clinical), it is "met" only when a RESUME line states that counterpart, condition or domain in the same sense. Leading a team, shipping a related product, owning a platform or working in a neighbouring domain does not state it: the row is "unclear", and you ask what the lines do not state (the "work NEXT TO" case below). Only the named part is strict; the practice itself (partnering, owning, operating) keeps the reasonable-reader standard above.\n'
     '   - Numbers and named tools are strict: "5+ years in cloud data platforms" is not met by general years, nor a named set by one item (Protobuf alone does not meet Parquet, Arrow and Iceberg): it stays "unclear" and you ask. When a resume line or a prior answer plainly states what the row asks, the row is "met" and never asked; do not ask what the facts already settle.\n'
     '   - The facts are simply silent (the topic is not mentioned at all) -> "unclear", with an empty resume_evidence list. Silence is never "unmet", no matter how central the requirement looks.\n'
     '   - Before you call the facts silent, read EVERY line of the RESUME block, under every role and every project, the older ones too: evidence for a requirement can stand anywhere in it and need not share a word with the posting. Never write that no resume line states, mentions or shows X (in resume_evidence, a question or a suggestion) when a line of the block does: a row whose requirement a line states is "met" by that line. When a line shows work NEXT TO what the row asks without stating it (an MQTT telemetry pipeline or a Zigbee device gateway against "a low-level or hardware-adjacent background" or "firmware"), the facts are not silent: decide the row by the reasonable-reader standard above ("met" when a recruiter would accept the line, otherwise "unclear"; never "met" just because a line exists), and in either case put in resume_evidence a quote of at most 160 characters from the closest such line, followed for an "unclear" row by the few words that say what the line does not state ("device gateway over MQTT; firmware or kernel work not stated"). The question on such a row asks about what is missing, not about what the line already says.\n'
@@ -240,18 +239,16 @@ GOLDEN_RETRY_PROMPT = (
 # the digests guard the transcription). Re-captured for assess-prompt-v10, again for 0.1.11.12 F5a (``case_by_case``) and
 # again for 0.1.11.12 F5b (rule 4: an office list in several countries alone does not meet the country requirement) and
 # again for 0.1.11.12 F2b (NICE_TO_HAVE: an only "Preferred" list is the posting's requirements; the class_basis line allows
-# the prefix "only list: ") and again for 0.1.11.12 F6 (rule 1: a NAMED counterpart, job condition or domain is "met" only
-# when a resume line states it).
-GOLDEN_SHA256 = "d7f1f6b3cf448fb11c38c8671f3f21e979d57659fb023a8a38bd915989b5366f"
-GOLDEN_RETRY_SHA256 = "67718cf8c601542a454fa87fbf26c870953c6e6e46c4ebbb91641b1d16346055"
+# the prefix "only list: ").
+GOLDEN_SHA256 = "01ea95cd99a324cc7ae5e748ab80f4b5a16470a5457230b1fa0e7797631f9bb3"
+GOLDEN_RETRY_SHA256 = "6d60e137fc791e4bb9e12967649cbc34d6c88e10fcb5821920bf05aa54f827c2"
 # 25,000-byte posting text and resume plus a 400-char validation error:
 # the three ``_MAX_PROMPT_*`` bounds (12_000 / 24_000 / 300) produce this exact prompt.
 # 0.1.11.10 INTENTIONAL CHANGE: the resume bound is 24,000 (it was 12,000; the inputs here were 13,000 bytes), so the
 # prompt cuts nothing off the assess view of a master of ordinary size (``assess_master.ASSESS_EVIDENCE_CAP``).
 # 0.1.11.12 F2b: re-captured (EXECUTED) for the NICE_TO_HAVE only-list sentence and the class_basis "only list: " prefix.
-# 0.1.11.12 F6: re-captured (EXECUTED) for the named counterpart / condition / domain bullet of rule 1.
-GOLDEN_BOUNDED_SHA256 = "c167a6ae217ebdba8516b341f90c0ec753a1b38846965666e719cfd3be551505"
-GOLDEN_BOUNDED_LEN = 71_024
+GOLDEN_BOUNDED_SHA256 = "a23bf59ef0d85ff4685cbbda5d3be4b717786498dc0e1f81664ed6ca49525b0d"
+GOLDEN_BOUNDED_LEN = 70_325
 
 # Digest of the shipped ``assess.md`` bytes; bump ONLY when the template changes on purpose.
 # assess-prompt-v2 (v0.1.9) INTENTIONAL CHANGE: bumped for the rewritten body (see above).
@@ -300,12 +297,7 @@ GOLDEN_BOUNDED_LEN = 71_024
 # "Desired", "Desirable", "Nice to have" or "Ideal" (no "Required"/"Minimum"/"Must"/"Basic" list) is its requirements,
 # class_basis "only list: ..."; an only "Bonus"/"Pluses"/"Extra credit" list stays NICE_TO_HAVE (req-rules:2); the
 # class_basis line reads 'Apart from those fixed words (and the prefix "only list: ")'.
-# 0.1.11.12 F6 (still assess-prompt-v10, unreleased): rule 1 gained the bullet after the reasonable-reader one: a row that
-# NAMES who the candidate worked with (product managers, designers, data scientists, clinicians, regulators), a job
-# condition (on-call, weekend or holiday hours, travel, shifts) or a domain (financial systems, payments, fund movement,
-# clinical) is "met" only when a resume line states that counterpart, condition or domain; leading a team, a related product,
-# an owned platform or a neighbouring domain leaves it "unclear" (the "work NEXT TO" case). Goldens re-captured (EXECUTED).
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:5d2ee38dca3bc055514d4942942b3b3dbbd49b27e2c18c689b9a2c3c12d1af36"
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:c5ad813f882581a904072b1aed314a1ff09837c4998d23ca844740208d1327da"
 SHIPPED_PROMPT_VERSION = "assess-prompt-v10"
 
 
