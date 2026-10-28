@@ -67,7 +67,7 @@ from .find_jobs.contracts import (
     SponsorshipStatus,
     is_row_id,
 )
-from .find_jobs.filters import _CITY_COUNTRIES, _US_CITY_ALIASES, _US_STATE_NAMES, location_countries, sponsorship_from_text
+from .find_jobs.filters import _CITY_COUNTRIES, _US_CITY_ALIASES, _US_STATE_NAMES, aggregator_name, is_aggregator, location_countries, sponsorship_from_text
 from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
 from .requirement_weights import bound_rows, cap_list_item_questions, cap_mandatory_questions, settled_verdict
@@ -250,6 +250,21 @@ class AssessJob:
     company: str
     location: str
     posting_text: str
+    # F5c (gigai-18i): ``company`` is a job-board aggregator, not the employer (as ``PostingRow.employer_unknown``).
+    # Always derived from ``company`` (the list is the only source of truth), so every builder -- the stored
+    # posting's and a pasted job's -- reads the same way without passing anything.
+    employer_unknown: bool = field(init=False, default=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "employer_unknown", is_aggregator(self.company))
+
+    @property
+    def prompt_company(self) -> str:
+        """The COMPANY line's value: the company, or ``unknown (posted through <aggregator>)``."""
+
+        if not self.employer_unknown:
+            return self.company
+        return f"unknown (posted through {aggregator_name(self.company)})"
 
 
 @dataclass(frozen=True)
@@ -470,7 +485,7 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
 
     # 0.1.10.7 P5: everything a stranger wrote goes inside one fence the text cannot close.
     posting = (
-        f"ROLE: {job.title}\nCOMPANY: {job.company}\nLOCATION: {job.location or 'unspecified'}\n"
+        f"ROLE: {job.title}\nCOMPANY: {job.prompt_company}\nLOCATION: {job.location or 'unspecified'}\n"
         f"POSTING TEXT:\n{job.posting_text[:_MAX_PROMPT_POSTING_TEXT]}"
     )
     values = {

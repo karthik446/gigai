@@ -9,7 +9,7 @@ packets.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 import re
@@ -849,6 +849,17 @@ class PostingRow(_Contract):
     # just because these fields appeared.
     work_mode: WorkMode | None = None
     pay: PostingPay | None = None
+    # F5c (gigai-18i): the company named is a job-board aggregator (``filters.AGGREGATORS``), not the employer.
+    # Always derived from ``company`` (the list is the only source of truth: never passed in, a stored value is
+    # ignored); omitted from JSON at False, so every other row's to_json() and digest are byte-identical to before.
+    # Nothing excludes or gates on it.
+    employer_unknown: bool = field(init=False, default=False)
+
+    def __post_init__(self) -> None:
+        # Imported here: ``filters`` imports this module.
+        from .filters import is_aggregator
+
+        object.__setattr__(self, "employer_unknown", is_aggregator(self.company))
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {
@@ -879,6 +890,8 @@ class PostingRow(_Contract):
             value["work_mode"] = _json_enum(self.work_mode)
         if self.pay is not None:
             value["pay"] = self.pay.to_json()
+        if self.employer_unknown:
+            value["employer_unknown"] = True
         return value
 
     @classmethod
@@ -886,13 +899,15 @@ class PostingRow(_Contract):
         value = _object_with_optional(
             obj,
             ("url", "normalized_url", "provider", "board_token", "company", "title", "location", "published_at", "content_sha256", "source_kind", "query_key"),
-            ("text", "sponsorship", "countries", "work_mode", "pay"),
+            ("text", "sponsorship", "countries", "work_mode", "pay", "employer_unknown"),
             "posting_row",
         )
         sponsorship = None if "sponsorship" not in value else _enum(value["sponsorship"], SponsorshipStatus, "posting_row.sponsorship")
         countries = None if "countries" not in value else _country_codes(value["countries"], "posting_row.countries")
         work_mode = None if "work_mode" not in value else _enum(value["work_mode"], WorkMode, "posting_row.work_mode")
         pay = None if "pay" not in value else PostingPay.from_json(value["pay"])
+        if "employer_unknown" in value:
+            _bool(value["employer_unknown"], "posting_row.employer_unknown")  # checked, then derived from company again
         return cls(
             _string(value["url"], "url"),
             _string(value["normalized_url"], "normalized_url"),

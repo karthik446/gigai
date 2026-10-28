@@ -504,6 +504,50 @@ def _fold(value: str) -> str:
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
 
+# F5c (gigai-18i), operator decision 2026-10-22: job-board aggregators that republish other employers' postings
+# under their own name ("aggregators = jobgether, add on sight"). A posting whose company is one of these has an
+# unknown employer (``PostingRow.employer_unknown``); it is never excluded for it. One name per line.
+AGGREGATORS: tuple[str, ...] = (
+    "jobgether",
+)
+
+# Only these trailing words may follow an aggregator's name: "Jobgether Inc." is Jobgether, "Jobgether Talent" is not.
+_LEGAL_SUFFIX_WORDS: frozenset[str] = frozenset(
+    {"inc", "incorporated", "llc", "llp", "lp", "ltd", "limited", "corp", "corporation", "co", "plc", "gmbh", "ag", "bv", "sa", "sas", "sarl", "srl", "oy", "ab", "pty"}
+)
+
+
+def _company_key(company: str) -> str:
+    """``company`` folded to its words with any trailing legal-suffix words dropped. Pure.
+
+    ``"Jobgether, Inc."``, ``"JOBGETHER LLC"`` and the board slug ``"jobgether-inc"`` all give ``"jobgether"``; dots are
+    dropped first so ``"S.A."`` and ``"L.L.C."`` read as one word. The name itself is never shortened.
+    """
+
+    words = _PLAIN_WORD_RE.findall(_fold(company).replace(".", ""))
+    while len(words) > 1 and words[-1] in _LEGAL_SUFFIX_WORDS:
+        words.pop()
+    return " ".join(words)
+
+
+def aggregator_name(company: str | None) -> str | None:
+    """The ``AGGREGATORS`` entry ``company`` names, or ``None``. Pure.
+
+    The whole name must match (case, accents, punctuation and a trailing legal suffix aside): never a substring or one
+    word of a longer name, because flagging a real employer as an aggregator is the costly error.
+    """
+
+    if not isinstance(company, str):
+        return None
+    return _AGGREGATOR_KEYS.get(_company_key(company))
+
+
+def is_aggregator(company: str | None) -> bool:
+    """Whether ``company`` is a job-board aggregator on ``AGGREGATORS`` (see ``aggregator_name``). Pure."""
+
+    return aggregator_name(company) is not None
+
+
 # 0.1.11.3 item 11: brackets, "/" and "|" separate places as "," and ";" do.
 # "Remote (Germany)" used to be the one segment "remote (germany)", whose
 # token "(germany)" is no country, and "London / Remote" the one segment
@@ -683,6 +727,8 @@ _BARE_REMOTE_WORDS: frozenset[str] = frozenset(
 )
 _BARE_REMOTE_SIGNALS: frozenset[str] = frozenset({"remote", "remotely", "anywhere", "home", "wfh", "virtual", "telecommute"})
 _PLAIN_WORD_RE = re.compile(r"[a-z0-9]+")
+# F5c: built here because ``_company_key`` reads ``_PLAIN_WORD_RE``.
+_AGGREGATOR_KEYS: dict[str, str] = {_company_key(name): name for name in AGGREGATORS}
 
 
 def _is_bare_remote(location: str) -> bool:
