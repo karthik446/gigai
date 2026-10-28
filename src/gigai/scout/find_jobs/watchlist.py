@@ -28,6 +28,7 @@ from .contracts import (
     normalize_url,
     parse_board_url,
 )
+from .excluded_boards import find_excluded
 from ...workpad import ResolvedWorkpad, resolve_workpad
 
 
@@ -197,12 +198,14 @@ class WatchlistUrlError(FindJobsContractError):
 
     ``code`` is one of:
 
-    * ``unsupported_board_host`` -- parses as a URL but is not on one of the
-      four admitted ATS hosts (``boards.greenhouse.io``,
-      ``job-boards.greenhouse.io``, ``jobs.lever.co``, ``jobs.ashbyhq.com``),
-      or names no board token on one of them.
+    * ``unsupported_board_host`` -- parses as a URL but is not on a host of a
+      hiring system Scout reads (``providers.py``: ``contracts.parse_board_url``
+      is the one host/token rule), or names no board token on one of them.
     * ``invalid_value`` -- not a usable http(s) URL at all
       (``contracts.normalize_url``'s own refusal, re-raised under this type).
+    * ``excluded_board`` -- names a board on the shipped excluded list
+      (``excluded_boards``: the employer's terms or ``robots.txt`` forbid
+      reading it); the message says who and why (``add_company_from_url``).
     """
 
 
@@ -269,10 +272,14 @@ def add_company_from_url(
     (``JournalWatchlistClient.add_to_watchlist``) makes a second add of the
     same board return the ORIGINAL committed entry (its own ``first_seen``),
     never a second record. Raises ``WatchlistUrlError`` for any other host
-    or an unusable URL, before touching the workpad at all.
+    or an unusable URL, and ``excluded_board`` for a board on the shipped
+    excluded list (``excluded_boards``), before touching the workpad at all.
     """
 
     entry = watchlist_entry_from_url(url)
+    excluded = find_excluded(entry.provider, entry.board_token)
+    if excluded is not None:
+        raise WatchlistUrlError("excluded_board", f"{excluded.company} is not read: {excluded.reason} ({excluded.evidence})")
     return JournalWatchlistClient(home_root, target, gig_id).add_to_watchlist(entry)
 
 
@@ -319,6 +326,8 @@ class WatchlistSeedResult:
     # records the seed flagged ``staffing_suspect`` are kept in the catalog
     # but not seeded by default; counted here so the receipt says so.
     excluded_as_staffing_suspect: int = 0
+    # 0.1.11.12: boards on the shipped excluded list (``excluded_boards``) are in the catalog but never seeded.
+    excluded_as_excluded_board: int = 0
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -331,6 +340,7 @@ class WatchlistSeedResult:
             "excluded_by_country": self.excluded_by_country,
             "excluded_by_company": self.excluded_by_company,
             "excluded_as_staffing_suspect": self.excluded_as_staffing_suspect,
+            "excluded_as_excluded_board": self.excluded_as_excluded_board,
             "receipt_path": self.receipt_path,
         }
 
@@ -412,7 +422,7 @@ def _has_current_seed_receipt(
     )
 
 
-def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tuple[list[object], int, int, int]:
+def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tuple[list[object], int, int, int, int]:
     """Filter catalog records by ``prefs`` (``DiscoveryPrefs``-shaped).
 
     Rules, in order:
@@ -437,7 +447,10 @@ def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tup
       still added when the user names it (``watch_companies``) or adds its
       URL (``add_company_from_url``: that path never comes through here).
 
-    Returns ``(kept, excluded_by_country, excluded_by_company, excluded_as_staffing_suspect)``.
+    * 0.1.11.12: a board on the shipped excluded list (``excluded_boards``: the employer's terms or ``robots.txt``
+      say not to read it) is never seeded, even when ``watch_companies`` names it; ``sources status`` says so.
+
+    Returns ``(kept, excluded_by_country, excluded_by_company, excluded_as_staffing_suspect, excluded_as_excluded_board)``.
     """
 
     from .company_catalog import min_us_postings
@@ -449,7 +462,12 @@ def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tup
     by_country = 0
     by_company = 0
     by_staffing = 0
+    by_excluded = 0
     for record in records:
+        provider = getattr(record, "provider", None)
+        if isinstance(provider, ATSProvider) and find_excluded(provider, str(getattr(record, "board_token", ""))) is not None:
+            by_excluded += 1
+            continue
         keys = _record_keys(record)
         if keys & excludes:
             by_company += 1
@@ -463,7 +481,7 @@ def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tup
         if countries:
             hq = getattr(record, "hq_country", None)
             us_postings = getattr(record, "us_posting_count", None)
-            bar = min_us_postings(getattr(record, "provider", None))
+            bar = min_us_postings(provider)
             us_ok = "US" in countries and isinstance(us_postings, int) and us_postings >= bar
             # A US mark on a board that has the bar counts only with the postings behind it.
             in_country = isinstance(hq, str) and hq.upper() in countries and (us_ok or bar <= 1 or hq.upper() != "US")
@@ -471,7 +489,7 @@ def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tup
                 by_country += 1
                 continue
         kept.append(record)
-    return kept, by_country, by_company, by_staffing
+    return kept, by_country, by_company, by_staffing, by_excluded
 
 
 def seed_watchlist_from_catalog(
@@ -497,7 +515,7 @@ def seed_watchlist_from_catalog(
     records = tuple(getattr(active, "records", ()))
     revision = str(getattr(active, "revision", ""))
     digest = str(getattr(active, "digest", ""))
-    kept, by_country, by_company, by_staffing = catalog_records_for_prefs(records, prefs)
+    kept, by_country, by_company, by_staffing, by_excluded = catalog_records_for_prefs(records, prefs)
     observed_at = now or _now()
     resolved = _resolved(home_root, target, gig_id)
     selection_key = _seed_selection_key(prefs)
@@ -512,7 +530,7 @@ def seed_watchlist_from_catalog(
             resolved, revision=revision, digest=digest, selection_key=selection_key
         ):
             return WatchlistSeedResult(
-                revision, digest, len(records), len(kept), 0, len(kept), by_country, by_company, (), None, by_staffing,
+                revision, digest, len(records), len(kept), 0, len(kept), by_country, by_company, (), None, by_staffing, by_excluded,
             )
         # Case-insensitive on purpose: the record path is a filename, and a
         # case-insensitive filesystem (macOS) would make ``...:Abe.json`` and
@@ -537,7 +555,7 @@ def seed_watchlist_from_catalog(
             added_ids.append(entry.watchlist_id)
         if not artifacts:
             return WatchlistSeedResult(
-                revision, digest, len(records), len(kept), 0, already, by_country, by_company, (), None, by_staffing,
+                revision, digest, len(records), len(kept), 0, already, by_country, by_company, (), None, by_staffing, by_excluded,
             )
         payload = {"catalog_revision": revision, "catalog_digest": digest, "watchlist_ids": sorted(added_ids)}
         payload_sha = digest_imported_bytes(canonical_json_bytes(payload))
@@ -558,6 +576,7 @@ def seed_watchlist_from_catalog(
             "excluded_by_country": by_country,
             "excluded_by_company": by_company,
             "excluded_as_staffing_suspect": by_staffing,
+            "excluded_as_excluded_board": by_excluded,
             "artifact_refs": refs,
             "created_at": observed_at,
         }
@@ -583,7 +602,7 @@ def seed_watchlist_from_catalog(
         )
         return WatchlistSeedResult(
             revision, digest, len(records), len(kept), len(added_ids), already, by_country, by_company,
-            tuple(added_ids), receipt_path, by_staffing,
+            tuple(added_ids), receipt_path, by_staffing, by_excluded,
         )
 
     return run_with_journal_writer(

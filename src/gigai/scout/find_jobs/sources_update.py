@@ -79,6 +79,7 @@ from typing import Any
 import uuid
 
 from .ats_board_clients import ATSBoardClients, BoardCache
+from .ats_feeds import WORKDAY_MAX_LIST_PAGES
 from .company_index import (
     DEFAULT_STALE_AFTER_HOURS,
     INDEX_EMPTY,
@@ -95,6 +96,7 @@ from .company_index import (
     refresh_company,
 )
 from .contracts import FindJobsConfig, SourceToggles, WatchlistEntry
+from .excluded_boards import excluded_boards_json
 from .market_acquisition import (
     ATS_MIN_INTERVAL_ENV,
     CANCELLED_CODE,
@@ -860,6 +862,14 @@ class _Listener:
     def _robots_requests(self) -> int:
         return int(getattr(self.robots, "value", 0) or 0)
 
+    def _partial_boards(self) -> list[dict[str, object]]:
+        keys = list(self.backoff.partial_boards) if self.backoff is not None else []
+        found = []
+        for key in keys:
+            provider, _, token = key.partition(":")
+            found.append({"board": key, "company": self._companies.get((provider, token)) or token, "list_pages": WORKDAY_MAX_LIST_PAGES})
+        return found
+
     def snapshot(self) -> dict[str, object]:
         totals = self.totals
         return {
@@ -923,6 +933,10 @@ class _Listener:
             ),
             "rotation": self.rotation,
             "watchlist_seed": self.watchlist_seed,
+            # 0.1.11.12: the boards GigAI does not read (``excluded_boards``: terms or robots.txt), so a status reader
+            # can name them; and the boards whose list was cut at the Workday page cap this update (``partial_boards``).
+            "excluded": excluded_boards_json(),
+            "partial_boards": self._partial_boards(),
             # The tag store and the text index this update kept in step
             # (``None``: not asked to); a failure there is counted here.
             "stores": self._stores.to_json() if self._stores is not None else None,
@@ -1093,6 +1107,8 @@ class _BackoffClients:
         self.pauses: dict[str, int] = {}
         self.paused_seconds: dict[str, float] = {}
         self.skipped: dict[str, int] = {}
+        #: 0.1.11.12: ``provider:token`` of the boards whose list was cut at its page cap (``BoardFetchStats.partial``).
+        self.partial_boards: list[str] = []
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
@@ -1165,6 +1181,9 @@ class _BackoffClients:
         try:
             result = self._inner.fetch_board(client, provider, board_token, config, **kwargs)
             failure = None
+            if getattr(getattr(result, "stats", None), "partial", False):
+                with self._lock:
+                    self.partial_boards.append(f"{provider}:{board_token}")
             return result
         except Exception as exc:  # noqa: BLE001 - nothing is swallowed: the failure code is noted for the back-off, then re-raised
             if getattr(exc, "code", None) == ROBOTS_UNKNOWN_SKIP_CODE and self._robots_unknown(provider, board_token, exc):
@@ -1754,15 +1773,19 @@ def start_background_update(
 
 
 def read_status(home_root: Path, *, now: datetime | None = None) -> dict[str, object]:
-    """``{"running", "update", "index"}``: what ``GET /api/sources/update`` and the CLI report."""
+    """``{"running", "update", "index", "excluded"}``: what ``GET /api/sources/update`` and the CLI report."""
 
     index = CompanyIndex.for_home(Path(home_root))
     snapshot = index.read_update_summary()
+    update = settled_snapshot(snapshot, now=now)
     return {
         "schema_version": SOURCES_UPDATE_STATUS_SCHEMA,
         "running": snapshot_is_live(snapshot, now=now),
-        "update": settled_snapshot(snapshot, now=now),
+        "update": update,
         "index": index_summary(index, snapshot, now=now),
+        # 0.1.11.12: the boards GigAI does not read (``excluded_boards``), as the last update saw the list, or the
+        # shipped list before any update has run: ``sources status`` names them either way.
+        "excluded": update["excluded"] if isinstance(update, dict) and isinstance(update.get("excluded"), list) else excluded_boards_json(),
     }
 
 

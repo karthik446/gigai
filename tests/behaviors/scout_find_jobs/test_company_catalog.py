@@ -50,14 +50,17 @@ from tests.scenarios import InstalledGigAI
 # rev5 (operator decision 2026-10-09): the same 21034 records; a board of the six new systems carries ``hq_country``
 # ``US`` only with two or more US postings on record (4520 of them; the 1433 with exactly one keep their counts and
 # read ``None``). No hand flag was added: the repost check found no reposting agency among the boards it could read.
-_SHIPPED_REVISION = "s26-full-rev5-two-us-postings-2026-10-09"
-_SHIPPED_RECORDS = 21034
+# rev6 (0.1.11.12, orchestrator workers/0.1.11.12-rev6-derive.py): rev5 plus the 49 Workday boards the WD-R2R4 review
+# shipped (plan R1-R4; hq_country US, posting counts null, an h1b object from the DOL LCA count, none staffing_suspect).
+_SHIPPED_REVISION = "s26-full-rev6-workday-2026-10-28"
+_SHIPPED_RECORDS = 21083
 _SHIPPED_BY_PROVIDER = {
     "ashby": 3364, "greenhouse": 4649, "lever": 2405,
     "workable": 2843, "rippling": 1647, "gem": 801, "recruitee": 2287, "pinpoint": 565, "breezy": 2473,
+    "workday": 49,
 }
 _SHIPPED_STAFFING_SUSPECTS = 239
-_SHIPPED_H1B_OBJECTS = 1345
+_SHIPPED_H1B_OBJECTS = 1345 + 49
 
 
 def test_shipped_catalog_matches_its_pinned_digest_and_size_budget() -> None:
@@ -84,7 +87,7 @@ def test_shipped_catalog_loads_with_its_own_revision_and_digest() -> None:
     assert catalog.skipped == 0
     assert catalog.summary()["by_provider"] == _SHIPPED_BY_PROVIDER
     providers = {record.provider for record in catalog.records}
-    assert providers == set(ATSProvider)  # 0.1.11.8: every registry provider has boards in rev4 and rev5
+    assert providers == set(ATSProvider)  # 0.1.11.8: every registry provider has boards in rev4 and rev5; 0.1.11.12: Workday in rev6
     keys = [(record.provider, record.board_token.lower()) for record in catalog.records]
     assert len(keys) == len(set(keys)), "case-insensitive duplicate boards in the shipped catalog"
     assert all(record.board_token == record.board_token.strip() and " " not in record.board_token and "&" not in record.board_token for record in catalog.records)
@@ -279,7 +282,12 @@ def test_shipped_catalog_carries_h1b_aggregates_for_every_true_flag_with_an_obje
     for record in with_summary:
         assert record.h1b is True
         assert record.h1b_summary.approvals >= 0
-        assert record.h1b_summary.denials is not None and record.h1b_summary.denials >= 0  # schema.json requires denials
+        if record.provider is ATSProvider.WORKDAY:
+            # rev6: the Workday rows' object is the DOL LCA certified count (workers/0.1.11.12-rev6-derive.py); the
+            # LCA file's denied rows were never counted, so the object carries no ``denials`` (read as ``None``).
+            assert record.h1b_summary.denials is None
+        else:
+            assert record.h1b_summary.denials is not None and record.h1b_summary.denials >= 0  # schema.json requires denials
         assert all(isinstance(year, str) and year for year in record.h1b_summary.fiscal_years)
     assert len(catalog.h1b_by_board()) == len(with_summary)
 
@@ -348,16 +356,21 @@ def test_shipped_catalog_hq_country_is_us_on_every_record() -> None:
     every rev3 record for ``countries=["US"]`` (6462 of 10418 have US postings). The boards of the six new systems
     (0.1.11.8) carry ``hq_country`` ``US`` only when the feed listed at least TWO US postings (rev5: 4520 of 10616;
     rev4 asked for one, 5953), ``None`` otherwise: a board below the bar is in the catalog, with its counts, but not
-    admitted for a US setup."""
+    admitted for a US setup. rev6 (0.1.11.12): the 49 Workday boards are US by review (hq_country ``US``, posting
+    counts ``None``: no feed was listed), classified like Greenhouse (one US posting is enough once the update counts)."""
 
     from gigai.scout.find_jobs.company_catalog import UNCLASSIFIED_MIN_US_POSTINGS, min_us_postings
 
     catalog = load_company_catalog()
-    classified = {"greenhouse", "lever", "ashby"}
+    classified = {"greenhouse", "lever", "ashby", "workday"}
     assert {record.hq_country for record in catalog.records} == {"US", None}
-    assert sum(1 for record in catalog.records if record.hq_country == "US") == 10418 + 4520
+    assert sum(1 for record in catalog.records if record.hq_country == "US") == 10418 + 4520 + 49
     assert sum(1 for record in catalog.records if (record.us_posting_count or 0) > 0) == 6462 + 5953
     assert all(record.hq_country == "US" for record in catalog.records if record.provider.value in classified)
+    workday = [record for record in catalog.records if record.provider is ATSProvider.WORKDAY]
+    assert len(workday) == 49
+    assert all(record.posting_count is None and record.us_posting_count is None and not record.staffing_suspect for record in workday)
+    assert all(record.h1b and record.h1b_summary is not None and record.h1b_summary.approvals > 0 for record in workday)
     new = [record for record in catalog.records if record.provider.value not in classified]
     assert len(new) == 10616 and UNCLASSIFIED_MIN_US_POSTINGS == 2
     assert {min_us_postings(record.provider) for record in new} == {2}

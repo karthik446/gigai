@@ -12,6 +12,8 @@
 //   index    what the Jobs page needs: status ready | empty | stale,
 //            needs_update, message (ready to show), companies_indexed,
 //            last_checked_at
+//   excluded 0.1.11.12: the boards GigAI does not read (terms / robots),
+//            [{provider, token, company, reason, evidence, evidence_short}]
 import { formatCount } from "./runText.js";
 
 export const SOURCES_POLL_MS = 2500;
@@ -134,6 +136,25 @@ export function looksStuck(update, now = Date.now()) {
 export function storedLine(index) {
   const stored = count(index && index.companies_indexed);
   return stored ? `${formatCount(stored)} compan${stored === 1 ? "y" : "ies"} stored on this machine` : "";
+}
+
+// 0.1.11.12: the boards GigAI does not read (`status.excluded`, one row per
+// board or tenant: {provider, token, company, reason, evidence,
+// evidence_short}; reason is terms | robots), one line each, the same words
+// as `gigai scout sources status`:
+//   skipped: terms - LexisNexis Risk Solutions (https://... forbids any "robot, spider, ...")
+// [] when the server does not say (an older server) or the list is empty.
+export function excludedLines(status) {
+  const excluded = status && Array.isArray(status.excluded) ? status.excluded : [];
+  const lines = [];
+  for (const entry of excluded) {
+    if (!entry || typeof entry.reason !== "string" || typeof entry.company !== "string") {
+      continue;
+    }
+    const evidence = entry.evidence_short || entry.evidence;
+    lines.push(`skipped: ${entry.reason} - ${entry.company}${typeof evidence === "string" && evidence ? ` (${evidence})` : ""}`);
+  }
+  return lines;
 }
 
 // The Jobs page's message: the server's own `index.message` when the stored

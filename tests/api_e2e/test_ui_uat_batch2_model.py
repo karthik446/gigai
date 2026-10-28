@@ -68,6 +68,7 @@ import pytest
 from gigai.scout.find_jobs import sources_update
 from gigai.scout.find_jobs.api import static as static_module
 from gigai.scout.find_jobs.assess_contracts import ASSESS_ORIGINS, ORIGIN_JOB_PAGE, ORIGIN_QUICK_ASSESS
+from gigai.scout.find_jobs.excluded_boards import excluded_boards_json
 
 UI_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src"
 JOB_MODEL_JS = UI_SRC / "jobModel.js"
@@ -157,6 +158,7 @@ process.stdout.write(JSON.stringify({
   notices: input.statuses.map((status) => sources.indexNotice(status)),
   noticeAtsOff: sources.indexNotice(input.statuses[0], { atsEnabled: false }),
   stored: input.statuses.map((status) => sources.storedLine(status && status.index)),
+  excludedLines: input.statuses.map((status) => sources.excludedLines(status)),
   stuck: input.stuck.map((update) => sources.looksStuck(update, now)),
   startErrors: input.startErrors.map((error) => sources.startErrorText(error)),
   against: input.against.map((item) => assess.assessingAgainst(item)),
@@ -464,9 +466,20 @@ def _payload() -> dict:
             _update("running", boards={"total": 10, "done": 4, "checked": 99, "failed": 0, "skipped": 0}),
         ],
         "statuses": [
-            {"running": False, "update": None, "index": _index("empty")},
+            {"running": False, "update": None, "index": _index("empty"), "excluded": excluded_boards_json()},
             {"running": True, "update": _update("running"), "index": _index("stale")},
-            {"running": False, "update": _update("succeeded"), "index": _index("ready")},
+            {
+                "running": False,
+                "update": _update("succeeded"),
+                "index": _index("ready"),
+                # 0.1.11.12: a row with only the long evidence, one without any, and one a reader must skip.
+                "excluded": [
+                    {"provider": "workday", "token": "globex.wd1.*", "company": "Globex", "reason": "terms", "evidence": "https://globex.test/terms says no"},
+                    {"provider": "workday", "token": "initech.wd5.Jobs", "company": "Initech", "reason": "robots"},
+                    {"provider": "workday", "token": "broken.wd1.*", "reason": "terms"},
+                    "not a row",
+                ],
+            },
             {"running": False, "update": _update("partial"), "index": _index("stale", message="")},
             None,
             {"running": False, "update": None},
@@ -1007,6 +1020,21 @@ def test_jobs_shows_the_index_message_only_when_an_update_is_needed(out: dict) -
     assert out["noticeAtsOff"] is None  # company boards are off: nothing to update
     assert out["running"] == [False, True, False, False, False, False]
     assert out["stored"] == ["", "10,362 companies stored on this machine", "10,362 companies stored on this machine", "10,362 companies stored on this machine", "", ""]
+
+
+def test_settings_names_the_excluded_boards_with_the_cli_s_words(out: dict) -> None:
+    """0.1.11.12: ``excludedLines(status)`` is the UI's copy of ``gigai scout sources status``'s ``skipped:`` lines,
+    one per row of ``status.excluded`` (the shipped list on a fresh install; whatever the server sends otherwise);
+    a server from before the key, a malformed row, a row with only the long ``evidence``: no line, skipped, used."""
+
+    from gigai.scout.scout_cli import _sources_excluded_lines
+
+    statuses = _payload()["statuses"]
+    shipped, _running, hand_rows, _partial, missing, no_key = out["excludedLines"]
+    assert len(shipped) == 8 and shipped == _sources_excluded_lines(statuses[0])
+    assert "skipped: robots - Zoom Communications, Inc. (robots.txt on zoom.wd5.myworkdayjobs.com: Disallow: /Zoom/)" in shipped
+    assert hand_rows == ["skipped: terms - Globex (https://globex.test/terms says no)", "skipped: robots - Initech"] == _sources_excluded_lines(statuses[2])
+    assert missing == [] and no_key == []
 
 
 def test_a_running_update_that_stopped_moving_offers_to_start_over(out: dict) -> None:

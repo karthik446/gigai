@@ -97,13 +97,14 @@ COMPANY_CATALOG_RESOURCE = "data/companies.json.gz"
 #: re-classification keeps a Jev staffing verdict below confidence 70 as
 #: ``staffing_suspect`` instead of excluding it --
 #: ``research/S26-us-company-directory/full/coverage.md``). Replaced
-#: ``s26-sample-2026-09-24`` (the 285-record sample) on 2026-09-25. Since 0.1.11.8: rev5 (see "Shipped revisions").
-COMPANY_CATALOG_REVISION = "s26-full-rev5-two-us-postings-2026-10-09"
+#: ``s26-sample-2026-09-24`` (the 285-record sample) on 2026-09-25. Since 0.1.11.8: rev5; 0.1.11.12: rev6 (rev5 plus
+#: the 49 Workday boards the WD-R2R4 review shipped, orchestrator ``workers/0.1.11.12-rev6-derive.py``, no network).
+COMPANY_CATALOG_REVISION = "s26-full-rev6-workday-2026-10-28"
 
 #: Pinned ``digest_imported_bytes`` of the shipped ``companies.json.gz``. A
 #: mismatch means the resource was swapped without updating this module (or
 #: was corrupted in packaging); :func:`load_company_catalog` fails closed.
-COMPANY_CATALOG_SHA256 = "sha256:80d5fa694d88cb094d567351f83734f383f7f1652de7c4c8b18717ac999c0c9d"
+COMPANY_CATALOG_SHA256 = "sha256:6f72456caa2aa9a326e94420183c99d76a355aab341274d43e8104afef1fd4ed"
 
 #: Scope decision (SCOPE-ADD-2, "Catalog delivery for 0.1.9"): the compressed
 #: seed inside the wheel stays at or under 5 MB.
@@ -113,7 +114,10 @@ COMPANY_CATALOG_SIZE_BUDGET_BYTES = 5 * 1024 * 1024
 #: boards (Greenhouse, Lever, Ashby) were classified one by one, so one US posting is enough; a board of any other
 #: system has only its feed's counts behind it and needs two. The count is the seed run's snapshot: a board below the
 #: bar stays in the catalog with its counts and is admitted by the catalog revision whose seed run counts two.
-_CLASSIFIED_PROVIDERS = frozenset({ATSProvider.GREENHOUSE, ATSProvider.LEVER, ATSProvider.ASHBY})
+#: 0.1.11.12: a Workday board was reviewed one by one too (plan R1-R4: the tenant is the employer's, the site its main
+#: external one, and the employer files H-1B LCAs for software roles), and the POC counted no postings, so its counts
+#: are null and ``hq_country`` ``US`` alone admits it (the seeding filter admits a null count under a bar of one).
+_CLASSIFIED_PROVIDERS = frozenset({ATSProvider.GREENHOUSE, ATSProvider.LEVER, ATSProvider.ASHBY, ATSProvider.WORKDAY})
 UNCLASSIFIED_MIN_US_POSTINGS = 2
 
 

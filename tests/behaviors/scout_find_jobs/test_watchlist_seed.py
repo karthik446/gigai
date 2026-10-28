@@ -68,24 +68,24 @@ def _existing_entry() -> WatchlistEntry:
 
 
 def test_filter_no_countries_pref_keeps_everything_not_excluded() -> None:
-    kept, by_country, by_company, _by_staffing = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs())
+    kept, by_country, by_company, _by_staffing, _by_excluded = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs())
     assert [r.board_token for r in kept] == ["acme", "bright", "kong", "orbit", "nowhere"]
     assert (by_country, by_company) == (0, 0)
 
 
 def test_filter_countries_keeps_hq_matches_and_us_postings_for_us() -> None:
-    kept, by_country, by_company, _by_staffing = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs(countries=("US",)))
+    kept, by_country, by_company, _by_staffing, _by_excluded = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs(countries=("US",)))
     # "nowhere" has no hq_country but has US postings on record -> kept for US.
     assert [r.board_token for r in kept] == ["acme", "kong", "nowhere"]
     assert (by_country, by_company) == (2, 0)
-    kept_gb, by_country_gb, _, _ = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs(countries=("GB",)))
+    kept_gb, by_country_gb, _, _, _ = catalog_records_for_prefs(_RECORDS, DiscoveryPrefs(countries=("GB",)))
     assert [r.board_token for r in kept_gb] == ["bright"]
     assert by_country_gb == 4
 
 
 def test_filter_excludes_by_name_slug_or_domain_case_and_punctuation_insensitive() -> None:
     prefs = DiscoveryPrefs(countries=("US",), exclude_companies=("ACME", "Kong HQ"))
-    kept, by_country, by_company, _by_staffing = catalog_records_for_prefs(_RECORDS, prefs)
+    kept, by_country, by_company, _by_staffing, _by_excluded = catalog_records_for_prefs(_RECORDS, prefs)
     assert [r.board_token for r in kept] == ["nowhere"]
     assert by_company == 2
     assert by_country == 2
@@ -93,7 +93,7 @@ def test_filter_excludes_by_name_slug_or_domain_case_and_punctuation_insensitive
 
 def test_filter_watch_companies_bypass_the_country_filter_but_not_excludes() -> None:
     prefs = DiscoveryPrefs(countries=("US",), watch_companies=("Orbit", "bright"), exclude_companies=("orbit",))
-    kept, _by_country, by_company, _by_staffing = catalog_records_for_prefs(_RECORDS, prefs)
+    kept, _by_country, by_company, _by_staffing, _by_excluded = catalog_records_for_prefs(_RECORDS, prefs)
     assert "bright" in [r.board_token for r in kept]
     assert "orbit" not in [r.board_token for r in kept]
     assert by_company == 1
@@ -273,17 +273,17 @@ _SUSPECT = _record("Mthree Recruiting", ATSProvider.GREENHOUSE, "mthree", suspec
 
 def test_a_staffing_suspect_record_is_not_seeded_and_is_counted() -> None:
     records = (*_RECORDS, _SUSPECT)
-    kept, by_country, by_company, by_staffing = catalog_records_for_prefs(records, DiscoveryPrefs(countries=("US",)))
+    kept, by_country, by_company, by_staffing, _by_excluded = catalog_records_for_prefs(records, DiscoveryPrefs(countries=("US",)))
     assert [r.board_token for r in kept] == ["acme", "kong", "nowhere"]
     assert (by_country, by_company, by_staffing) == (2, 0, 1)
     # No country pref: still skipped -- the rule does not depend on the filter.
-    kept_all, _, _, by_staffing_all = catalog_records_for_prefs(records, DiscoveryPrefs())
+    kept_all, _, _, by_staffing_all, _ = catalog_records_for_prefs(records, DiscoveryPrefs())
     assert "mthree" not in [r.board_token for r in kept_all] and by_staffing_all == 1
     # An explicit exclude of the same company counts as the exclude, not the flag.
-    _, _, by_company_x, by_staffing_x = catalog_records_for_prefs(records, DiscoveryPrefs(exclude_companies=("mthree",)))
+    _, _, by_company_x, by_staffing_x, _ = catalog_records_for_prefs(records, DiscoveryPrefs(exclude_companies=("mthree",)))
     assert (by_company_x, by_staffing_x) == (1, 0)
     # A watched company is kept even when flagged: the user asked for it by name.
-    kept_w, _, _, by_staffing_w = catalog_records_for_prefs(records, DiscoveryPrefs(countries=("US",), watch_companies=("Mthree Recruiting",)))
+    kept_w, _, _, by_staffing_w, _ = catalog_records_for_prefs(records, DiscoveryPrefs(countries=("US",), watch_companies=("Mthree Recruiting",)))
     assert "mthree" in [r.board_token for r in kept_w] and by_staffing_w == 0
 
 
@@ -326,17 +326,18 @@ _NEW_SYSTEM_RECORDS = (_ONE_US, _TWO_US, _ONE_US_MARKED, _NO_US)
 
 def test_a_new_system_board_needs_two_us_postings_for_a_us_setup() -> None:
     records = (*_RECORDS, *_NEW_SYSTEM_RECORDS)
-    kept, by_country, by_company, by_staffing = catalog_records_for_prefs(records, DiscoveryPrefs(countries=("US",)))
+    kept, by_country, by_company, by_staffing, _by_excluded = catalog_records_for_prefs(records, DiscoveryPrefs(countries=("US",)))
     # Greenhouse "acme" (one US posting) and "nowhere" (no hq, three) are admitted as before; of the new-system
     # boards only the one with two. A stray ``hq_country`` US on a one-posting board does not admit it.
     assert [r.board_token for r in kept] == ["acme", "kong", "nowhere", "duo-works"]
     assert (by_country, by_company, by_staffing) == (5, 0, 0)
-    # Every system outside the three classified ones has the bar.
+    # Every system outside the classified ones (rev6: Workday joins them) has the bar.
     for provider in ATSProvider:
         one = _record("One", provider, "one", hq=None, us_postings=1)
         two = _record("Two", provider, "two", hq=None, us_postings=2)
         admitted = [r.board_token for r in catalog_records_for_prefs((one, two), DiscoveryPrefs(countries=("US",)))[0]]
-        expected = ["one", "two"] if provider in {ATSProvider.GREENHOUSE, ATSProvider.LEVER, ATSProvider.ASHBY} else ["two"]
+        classified = {ATSProvider.GREENHOUSE, ATSProvider.LEVER, ATSProvider.ASHBY, ATSProvider.WORKDAY}
+        expected = ["one", "two"] if provider in classified else ["two"]
         assert admitted == expected, provider
     # No country preference: no country filter at all, so nothing is held back (unchanged).
     assert len(catalog_records_for_prefs(records, DiscoveryPrefs())[0]) == len(records)
@@ -396,8 +397,10 @@ def test_the_shipped_catalog_seeds_none_of_its_staffing_suspects(tmp_path: Path)
     # (``hq_country`` US; rev4 asked for one and had 5,953), minus the 79 of those the S26 name rule flagged
     # staffing_suspect; the boards below the bar (1,433 with one US posting, 4,663 with none) are in the catalog but
     # not admitted for ``countries=["US"]``.
-    assert result.added == result.eligible == 10370 + 4520 - 79 == 14811
+    # rev6 (0.1.11.12): plus the 49 reviewed Workday boards (``hq_country`` US, counts null, none on the excluded list).
+    assert result.excluded_as_excluded_board == 0
+    assert result.added == result.eligible == 10370 + 4520 - 79 + 49 == 14860
     resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
     seeded = _seeded_ids(resolved.path)
-    assert len(seeded) == 14811 and suspects.isdisjoint(seeded)
+    assert len(seeded) == 14860 and suspects.isdisjoint(seeded)
     assert set(result.added_watchlist_ids) == seeded

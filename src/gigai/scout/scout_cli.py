@@ -2924,6 +2924,39 @@ def _sources_waiting_lines(update: dict[str, object]) -> list[str]:
     return lines
 
 
+def _sources_partial_lines(update: dict[str, object]) -> list[str]:
+    """One sentence per board whose list the last update cut at its page cap (0.1.11.12, ``partial_boards``):
+    ``partial: Acme stopped at 100 list pages``. A snapshot from before that key has no lines."""
+
+    boards = update.get("partial_boards")
+    lines: list[str] = []
+    for entry in boards if isinstance(boards, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        company = entry.get("company") or entry.get("board")
+        pages = entry.get("list_pages")
+        if isinstance(company, str) and isinstance(pages, int):
+            lines.append(f"partial: {company} stopped at {pages} list pages")
+    return lines
+
+
+def _sources_excluded_lines(status: dict[str, object]) -> list[str]:
+    """One line per board GigAI does not read (0.1.11.12, ``excluded``: the employer's terms or robots.txt say so):
+    ``skipped: terms - LexisNexis Risk Solutions (https://... forbids any "robot, spider, ...")``."""
+
+    excluded = status.get("excluded")
+    lines: list[str] = []
+    for entry in excluded if isinstance(excluded, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        reason, company = entry.get("reason"), entry.get("company")
+        evidence = entry.get("evidence_short") or entry.get("evidence")
+        if isinstance(reason, str) and isinstance(company, str):
+            lines.append(f"skipped: {reason} - {company}" + (f" ({evidence})" if isinstance(evidence, str) and evidence else ""))
+    return lines
+
+
+
 @sources_group.command("status")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
@@ -2945,11 +2978,15 @@ def sources_status_command(home_value: Path | None, as_json: bool) -> None:
             click.echo(_sources_progress_line(update))
         for line in _sources_waiting_lines(update):
             click.echo(line)
+        for line in _sources_partial_lines(update):
+            click.echo(line)
     else:
         click.echo("No sources update has run yet.")
     click.echo(f"Stored companies: {index['companies_indexed']} ({index['status']}).")
     if index["message"]:
         click.echo(str(index["message"]))
+    for line in _sources_excluded_lines(status):
+        click.echo(line)
 
 
 # --- 0.1.10.7 E: `gigai scout metrics` ------------------------------------

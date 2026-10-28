@@ -7,7 +7,10 @@ the CLI (``gigai scout watchlist add``) uses too:
 ``find_jobs.watchlist.add_company_from_url`` (which itself reuses
 ``contracts.parse_board_url`` / ``normalize_url`` -- no second host rule
 lives here). A URL on any other host is a typed 422
-``unsupported_board_host``; an unusable URL is 422 ``invalid_value``. The
+``unsupported_board_host``; an unusable URL is 422 ``invalid_value``; a
+board on the shipped excluded list (0.1.11.12, ``find_jobs.excluded_boards``)
+is 422 ``excluded_board`` with the company, reason and evidence in the
+message, and nothing is written. The
 add is idempotent (the journal's ``scout_watchlist:<provider>:<token>``
 receipt key): a repeat POST for the same board answers 200 with the
 ORIGINAL entry, a first-time add answers 201 -- ``created`` in the body says
@@ -207,7 +210,13 @@ class WatchlistRoutesMixin:
         # Was this board already active before the add? Decides 201 vs 200
         # below -- the add itself is idempotent either way.
         before = {item.watchlist_id for item in list_active(self._backend.home_root, resolved, resolved.gig_id)}
-        entry = add_company_from_url(url, self._backend.home_root, resolved, resolved.gig_id)
+        try:
+            entry = add_company_from_url(url, self._backend.home_root, resolved, resolved.gig_id)
+        except WatchlistUrlError as exc:
+            # ``excluded_board``: the one refusal the pure URL rule above cannot
+            # make (it needs the excluded list), raised before any write.
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.code, str(exc))
+            return
         created = entry.watchlist_id not in before
         self._write_json(
             HTTPStatus.CREATED if created else HTTPStatus.OK,

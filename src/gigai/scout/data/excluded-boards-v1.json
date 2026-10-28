@@ -1,0 +1,78 @@
+{
+  "schema_version": "scout-excluded-boards:1",
+  "source": "WD-R2R4 review 2026-10-28 (research/scout-coverage/discover/workday-excluded-rows.json; terms rows from workers/READ-workday-terms.md 2026-10-20)",
+  "boards": [
+    {
+      "provider": "workday",
+      "token": "relx.wd3.RiskSolutions",
+      "company": "LexisNexis Risk Solutions",
+      "reason": "terms",
+      "evidence": "https://risk.lexisnexis.com/corporate/terms forbids any \"robot, spider, other automatic software or device, or manual process to monitor or copy\" (workers/READ-workday-terms.md, 2026-10-20)",
+      "since": "2026-10-20",
+      "decided_by": "operator"
+    },
+    {
+      "provider": "workday",
+      "token": "cvshealth.wd1.*",
+      "company": "CVS Health (incl. Aetna, Caremark)",
+      "reason": "terms",
+      "evidence": "https://www.cvshealth.com/terms-of-use.html (updated 2026-07-23) bans robots, spiders, scraping, data mining and systematically downloading to build a database; Aetna and Caremark share the tenant (workers/READ-workday-terms.md, 2026-10-20)",
+      "since": "2026-10-20",
+      "decided_by": "operator"
+    },
+    {
+      "provider": "workday",
+      "token": "amgen.wd1.*",
+      "company": "Amgen Inc.",
+      "reason": "terms",
+      "evidence": "https://www.amgen.com/terms-of-use (effective 2024-02-20) forbids \"any robot, spider, site search/retrieval application or other automated device, process or means to access, retrieve, scrape\" (workers/READ-workday-terms.md, 2026-10-20)",
+      "since": "2026-10-20",
+      "decided_by": "operator"
+    },
+    {
+      "provider": "workday",
+      "token": "mastercard.wd1.*",
+      "company": "Mastercard International Incorporated",
+      "reason": "terms",
+      "evidence": "https://www.mastercard.com/us/en/terms-of-use.html: \"You may not use automated systems (e.g., robots, spiders, etc.) to access the Site.\" (workers/READ-workday-terms.md, 2026-10-20)",
+      "since": "2026-10-20",
+      "decided_by": "operator"
+    },
+    {
+      "provider": "workday",
+      "token": "zoom.wd5.Zoom",
+      "company": "Zoom Communications, Inc.",
+      "reason": "robots",
+      "evidence": "robots.txt on zoom.wd5.myworkdayjobs.com: Disallow: /Zoom/ (the public job path; spike 2026-10-20, research/scout-coverage/excluded-employers.md)",
+      "since": "2026-10-20",
+      "decided_by": "operator"
+    },
+    {
+      "provider": "workday",
+      "token": "equifax.wd5.*",
+      "company": "Equifax Inc.",
+      "reason": "robots",
+      "evidence": "robots.txt on equifax.wd5.myworkdayjobs.com: Disallow: /External/, Disallow: /UR_External/; the only listed site is Campus (POC 2026-10-21, workday-tenants.jsonl; plan R3)",
+      "since": "2026-10-28",
+      "decided_by": "WD-R2R4 review (plan R3)"
+    },
+    {
+      "provider": "workday",
+      "token": "equinix.wd1.*",
+      "company": "Equinix, Inc.",
+      "reason": "robots",
+      "evidence": "robots.txt on equinix.wd1.myworkdayjobs.com: Disallow: /External/, /Applications_By_Invitations/, /Exclusive_Applications_by_Invite/; the 45 listed sites are recruiter-agency portals (POC 2026-10-21, workday-tenants.jsonl; plan R3)",
+      "since": "2026-10-28",
+      "decided_by": "WD-R2R4 review (plan R3)"
+    },
+    {
+      "provider": "workday",
+      "token": "asml.wd3.*",
+      "company": "ASML US, LP",
+      "reason": "robots",
+      "evidence": "robots.txt on asml.wd3.myworkdayjobs.com: Disallow: /ASMLEXT1/ (the <Company>EXT external site) and /ASMLPrivate1/; the only listed site is ASMLBERLIN (non-US) (POC 2026-10-21, workday-tenants.jsonl; plan R3)",
+      "since": "2026-10-28",
+      "decided_by": "WD-R2R4 review (plan R3)"
+    }
+  ]
+}

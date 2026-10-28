@@ -240,6 +240,18 @@ def test_api_watchlist_add_rejects_bad_bodies_with_422(running_server, body: obj
     assert list_active(home, target) == ()
 
 
+def test_api_watchlist_add_refuses_an_excluded_board_with_422(running_server) -> None:
+    # 0.1.11.12: a board on the shipped excluded list passes the pure URL rule (it is a real Workday host) and is
+    # refused by ``add_company_from_url`` itself, before any write -- the API answers the same typed 422 shape.
+    client, home, target = running_server
+    response = client.post("/api/watchlist", json={"url": "https://zoom.wd5.myworkdayjobs.com/Zoom"})
+    assert response.status_code == 422, response.text
+    error = response.json()["error"]
+    assert error["code"] == "excluded_board"
+    assert error["message"].startswith("Zoom Communications, Inc. is not read: robots (")
+    assert list_active(home, target) == ()
+
+
 def test_api_watchlist_add_is_csrf_guarded(running_server) -> None:
     client, home, target = running_server
     evil = client.post("/api/watchlist", json={"url": KONG_JOB}, headers={"Origin": "https://evil.example"})

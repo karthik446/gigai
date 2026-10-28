@@ -14,6 +14,7 @@ workpad is left clean.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 import threading
@@ -29,6 +30,7 @@ from gigai.scout.find_jobs import sources_update
 from gigai.scout.find_jobs.ats_board_clients import BoardFetchResult, BoardFetchStats
 from gigai.scout.find_jobs.company_index import CompanyIndex, board_list_url, index_stamp
 from gigai.scout.find_jobs.contracts import ATSProvider, content_hash
+from gigai.scout.find_jobs.excluded_boards import excluded_boards_json
 from gigai.scout.find_jobs.present_api import ScoutFindJobsBackend, serve
 from gigai.scout.find_jobs.sources_update import (
     SOURCES_UPDATE_STATUS_SCHEMA,
@@ -425,6 +427,57 @@ def test_workday_provider_runs_one_worker(tmp_path: Path) -> None:
     assert len(ats.threads["lever"]) == 4
 
 
+class _PartialATS:
+    """A Workday board whose list hit the page cap (``stats.partial``); the other board was read whole."""
+
+    def fetch_board(self, client, provider, board_token, config, *, cache=None):
+        body = json.dumps({"total": 1, "jobPostings": [{"title": "Software Engineer", "externalPath": "/job/Remote/Software-Engineer_R-1"}]}).encode()
+        cache.store(provider, board_list_url(provider, board_token), body=body, etag=None, last_modified=None, marker=None)
+        return BoardFetchResult((), BoardFetchStats(requests=1, cache="miss", listed=1, partial=board_token.startswith("acme.")))
+
+
+def test_a_board_cut_at_its_page_cap_is_named_partial_in_the_snapshot_and_the_status(tmp_path: Path) -> None:
+    """0.1.11.12: ``partial_boards`` names each board whose list stopped at the Workday page cap; the update itself
+    still succeeds (the board is stored as far as it was read) and ``sources status`` says so in one sentence."""
+
+    watchlist = [replace(_board(ATSProvider.WORKDAY, "acme.wd5.AcmeCareers"), company="Acme Corp"), _board(ATSProvider.WORKDAY, "globex.wd1.Jobs")]
+    result = update_sources(watchlist, cache=board_cache_for_home(tmp_path), index=CompanyIndex.for_home(tmp_path), client=None, ats=_PartialATS(), config=_config(), limits=_limits())
+    assert result.status == STATUS_SUCCEEDED
+    assert result.to_json()["partial_boards"] == [{"board": "workday:acme.wd5.AcmeCareers", "company": "Acme Corp", "list_pages": 100}]
+
+    status = read_status(tmp_path)
+    assert status["update"]["partial_boards"] == result.to_json()["partial_boards"]
+    assert status["excluded"] == excluded_boards_json()  # the snapshot carries the list the update ran with
+    shown = CliRunner().invoke(cli, ["scout", "sources", "status", "--home", str(tmp_path)])
+    assert shown.exit_code == 0, shown.output
+    lines = shown.output.splitlines()
+    assert "partial: Acme Corp stopped at 100 list pages" in lines
+    assert lines.count("partial: Acme Corp stopped at 100 list pages") == 1 and not any("globex" in line for line in lines)
+    assert "skipped: robots - Zoom Communications, Inc. (robots.txt on zoom.wd5.myworkdayjobs.com: Disallow: /Zoom/)" in lines
+    assert sum(1 for line in lines if line.startswith("skipped: terms - ")) == 4
+    assert sum(1 for line in lines if line.startswith("skipped: robots - ")) == 4
+
+
+def test_status_names_the_excluded_boards_before_any_update_and_keeps_an_old_snapshot_readable(tmp_path: Path) -> None:
+    """The ``skipped:`` lines come from the shipped list when no update has run; a snapshot from before 0.1.11.12
+    (no ``excluded``, no ``partial_boards``) still reads, with the shipped list and no ``partial:`` line."""
+
+    before = CliRunner().invoke(cli, ["scout", "sources", "status", "--home", str(tmp_path)])
+    assert before.exit_code == 0, before.output
+    assert sum(1 for line in before.output.splitlines() if line.startswith("skipped: ")) == 8
+
+    stamp = index_stamp()
+    CompanyIndex.for_home(tmp_path).write_update_summary(
+        {"update_id": "sources_update_old", "status": "succeeded", "started_at": stamp, "updated_at": stamp, "finished_at": stamp, "summary": "0 companies with new postings: 0 new, 0 changed, 0 removed"}
+    )
+    status = read_status(tmp_path)
+    assert "excluded" not in status["update"] and status["excluded"] == excluded_boards_json()
+    after = CliRunner().invoke(cli, ["scout", "sources", "status", "--home", str(tmp_path)])
+    assert after.exit_code == 0, after.output
+    assert sum(1 for line in after.output.splitlines() if line.startswith("skipped: ")) == 8
+    assert not any(line.startswith("partial: ") for line in after.output.splitlines())
+
+
 # --- one update at a time, and what a reader sees ---------------------------------
 
 
@@ -474,7 +527,10 @@ def test_status_says_when_a_search_needs_update_sources(tmp_path: Path) -> None:
             "last_checked_at": None,
             "stale_after_hours": 24.0,
         },
+        # 0.1.11.12: the shipped excluded list, named before any update has run.
+        "excluded": excluded_boards_json(),
     }
+    assert len(empty["excluded"]) == 8
 
     result = _update(tmp_path, _Boards())
     ready = read_status(tmp_path)
