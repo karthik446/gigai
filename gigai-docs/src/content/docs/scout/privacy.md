@@ -93,7 +93,7 @@ or assessment. Scout runs `codex` with its shell tool and memories turned off, a
 | Ranking | One short line per posting + a compact digest of your resume (titles, skills, years), batch by batch | Your model target |
 | Assessment | The posting text and your resume (name and contact lines removed), per assessed posting | Your model target |
 | Tailoring (switched off in 0.1.11) | The posting text and your resume (name and contact lines removed) | Your model target |
-| Update sources | Plain public requests, no key or login (your IP is visible) | Greenhouse, Lever, Ashby |
+| Update sources | Plain public requests, no key or login (your IP is visible) | The hosts of the ten hiring systems Scout reads (Greenhouse, Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint, Breezy and the employers' `myworkdayjobs.com` hosts) |
 | Exa search (off by default) | Your target roles, a start date, a country code, your Exa key | Exa |
 
 Ranking scores are cached on disk under `<home>/cache/scout/rank/scores/`
@@ -137,8 +137,9 @@ the table above lists for its step.
 
 Scout makes these other requests:
 
-- Job boards (Greenhouse, Lever, Ashby) get plain public requests without a
-  key or login and see your IP address; nothing else about you is sent.
+- Job boards on the ten hiring systems Scout reads (Greenhouse, Lever, Ashby, Workable,
+  Rippling, Gem, Recruitee, Pinpoint, Breezy and Workday's `myworkdayjobs.com` hosts) get plain
+  public requests without a key or login and see your IP address; nothing else about you is sent.
 - Exa, only if enabled in your sources, receives the search query (your
   target roles), a start date, a country code and your Exa key.
 - The setup interview itself makes no network request; it saves your answers

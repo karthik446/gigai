@@ -22,6 +22,56 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.11.12
+
+#### Added
+
+- **Workday boards.** Scout reads 49 Workday boards of large US employers (Adobe, Intel, Nvidia, Salesforce, Visa and
+  others), on 41 tenants, as the tenth hiring system. A board is read one tenant at a time, at one request a second
+  within each host's `robots.txt`: the list pages first, then one detail request per posting whose title matches your
+  profiles, at most 200 detail requests per board in one update; the rest are read in a later update, so the first
+  update after the upgrade can take more than one pass. A posting's date is the posting's own once its detail is
+  read; until then a posting Workday lists as "30+ days ago" shows as undated.
+- **Add a Workday board by URL.** **Add company** and `gigai scout watchlist add` take
+  `https://<tenant>.wd<N>.myworkdayjobs.com/<site>` (a locale segment such as `/en-US/` is accepted); a
+  `*.myworkday.com` address is refused, as it is never a public board. A pasted Workday job URL is assessed like any
+  other, and a job page's "Open on the job board" link works for Workday postings.
+- **Boards GigAI does not read.** Eight Workday employers are left out because their terms of use forbid automated
+  reading (LexisNexis Risk Solutions; CVS Health, including Aetna and Caremark; Amgen; Mastercard) or their
+  `robots.txt` disallows the public job path (Zoom, Equifax, Equinix, ASML US). `gigai scout sources status` prints
+  one `skipped: <reason> - <company> (<evidence>)` line per board, before any update has run; adding such a board by
+  URL, in the UI or with the CLI, is refused with the company, the reason and the evidence.
+- **Large Workday boards read as far as 100 list pages.** A board with more than 2,000 postings is stored as far as
+  read, and `gigai scout sources status` prints `partial: <company> stopped at 100 list pages` for it.
+
+#### Changed
+
+- **A requirement counts as met only with a cited resume line.** Scout checks every met must-have row of an assessment: a
+  met row that cites no line of your resume reads as unclear, and a met row that rests only on one of your answers
+  reads as **answered** ("you said yes; the resume shows no line for it"). A tool or skill needs a line that names it
+  within the posting's years window; "N+ years" is summed from your roles' dates; a degree is judged against an
+  education entry.
+- **Fit is capped by the must-have rows.** The shown fit is at most 49 when a must-have is not met, and at most 69
+  when a must-have is unclear or answered, or an askable one is not met. Every stored fit is counted again once
+  after the upgrade.
+- **A posting whose only requirement list is "Preferred" asks instead of blocking.** Its rows are read as askable, so
+  a gap there leads to a question, not to "not a match". A posting's stored requirement list is read again on its
+  next assessment.
+- **Sponsorship decided case by case has its own label.** A posting that says sponsorship is "considered on a
+  case-by-case basis" is recorded as `case_by_case`, neither a yes nor a no; like the other sponsorship labels it
+  never filters or gates. The Jobs list marks such a posting with the label `case_by_case`.
+- **Work mode is also read from the posting text.** A posting labelled remote or unknown whose text ties a count of
+  days to the office ("three days a week in our office") is read as hybrid. In an assessment, a posting that only
+  lists offices in several countries no longer has its country requirement met by the list: it is met when the
+  posting says the role may be done from a country you search, else it is one question.
+- **A posting from a job aggregator is assessed with its employer unknown.** A posting whose "company" is an
+  aggregator site (Jobgether) is marked `employer_unknown`, and the assessment is told the posting came through the
+  aggregator rather than that the aggregator is the employer. Nothing filters on it.
+- **The network notice counts ten hiring systems** ("Greenhouse, Lever, Ashby and seven more hiring systems").
+- **The H-1B figure beside a Workday posting** is the employer's certified H-1B LCA count for software occupations,
+  FY2026 through Q3, from the public US Department of Labor data, not a USCIS approvals count, and it has no denials
+  number.
+
 ### 0.1.11.11
 
 - **Repeated assessments can reuse Claude's prompt cache.** CLI helpers now run in a fixed, isolated
@@ -173,7 +223,7 @@ others.
 - **Assess any job Search lists, by its link.** `gigai scout jobs assess <job URL>` now assesses a posting that is
   in no profile's list (a job `gigai scout jobs search` finds whose title none of your profiles search): it is
   assessed as your default profile, or `--profile`, and the question says so before any model call. The link can be
-  the job page's own address on any of the nine systems. The command exits with code 1 when every link you named
+  the job page's own address on any of the systems Scout reads. The command exits with code 1 when every link you named
   was not found or could not be assessed.
 
 ### 0.1.11.7

@@ -73,7 +73,7 @@ your roles, location and work mode. Then:
 
 1. **Update sources** (in Settings): fills the company store from the public
    job boards. Before the very first one Scout shows this notice once:
-   **Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 15,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): about 16,000 requests on the first update, and it keeps checking 8 times a day. An employer can see that traffic.
+   **Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 15,000 public job boards (Greenhouse, Lever, Ashby and seven more hiring systems): about 16,000 requests on the first update, and it keeps checking 8 times a day. An employer can see that traffic.
    You can turn the background checks off under Settings > Background updates. The first update over the whole catalog runs in passes of up to
    20 minutes each (the default time budget) and continues where it stopped;
    later updates are a single short pass.
@@ -108,7 +108,8 @@ first session.
 Under each title the Jobs list shows two chips:
 
 - **Fit**, for an assessed job: "Fit 92% · 19/22" is the fit and how many of the posting's
-  requirements are met (19 of 22). Fit counts the must-have requirements twice. The chip is
+  requirements are met (19 of 22). Fit counts the must-have requirements twice, and is capped
+  at 49 when a must-have is not met (69 when one is unclear or rests on an answer). The chip is
   green only on a job that is a match (Matched, or Resume ready); on a job that needs your
   answers, has a gap or is not a match it is grey, whatever the number.
 - **Rank**: "Rank 92", or "Not ranked yet". Rank is a first guess from the posting and your

@@ -68,6 +68,13 @@ Shipped revisions
   records are rev3's, unchanged. A US setup seeds 14,811 boards (rev4: 16,221). 583,359 B gzip. Built from
   ``research/expand-reach/discovery/rev5/companies.json`` (orchestrator ``workers/0.1.11.8-rev5-derive.py`` over
   rev4, no network).
+* ``s26-full-rev6-workday-2026-10-28`` -- rev5's 21,034 records unchanged plus 49 Workday boards (0.1.11.12, the
+  tenth system): 41 tenants of large US employers, ``board_token`` ``<tenant>.wd<N>.<site>``, ``hq_country`` ``US``
+  with ``posting_count`` / ``us_posting_count`` null (a Workday list is not counted at build time; the bar for them is
+  one US posting), every one with an ``h1b`` summary whose ``approvals`` is the employer's certified H-1B LCA count
+  for software occupations, FY2026 through Q3 (DOL), and ``denials`` null. 585,419 B gzip. Built from
+  ``research/expand-reach/discovery/rev6/companies.json``
+  (orchestrator ``workers/0.1.11.12-rev6-derive.py`` over rev5, no network).
 """
 
 from __future__ import annotations

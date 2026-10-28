@@ -6,9 +6,10 @@ description: The first Gig. Find jobs, assess them against your resume, get the 
 **Scout** implements `find-jobs`, a job-search workflow. It ships with GigAI and
 gets no special runtime treatment: it is one Gig among others GigAI can host.
 
-- **Acquire**: pull public postings from the Greenhouse/Lever/Ashby
-  applicant-tracking boards through an auto-managed watchlist, plus Exa
-  search if you turn it on (it is off for a new setup).
+- **Acquire**: pull public postings from the applicant-tracking boards of the
+  ten hiring systems Scout reads (Greenhouse, Lever, Ashby, Workable, Rippling,
+  Gem, Recruitee, Pinpoint, Breezy and Workday) through an auto-managed
+  watchlist, plus Exa search if you turn it on (it is off for a new setup).
 - **Rank**: every posting that passes your filters (titles, titles to
   avoid, location, the publication window, work mode) is ranked by the model
   target you already use, and results stream in as batches finish. The order

@@ -157,7 +157,11 @@ posting. The list is matched again right after you change either setting.
 Whether a posting sponsors visas is never a filter. A posting that says it
 does not sponsor stays in the list with a "No sponsorship" label, also when
 your settings say you need a visa. One that says it offers no new sponsorship
-but takes H-1B transfers is labelled "H-1B transfer only".
+but takes H-1B transfers is labelled "H-1B transfer only". One that says
+sponsorship is decided case by case ("considered on a case-by-case basis") is
+recorded as `case_by_case` (neither a yes nor a no) in the posting's
+`sponsorship` field (`GET /api/postings`); nothing gates on it, and the Jobs
+list marks such a posting with the label `case_by_case`.
 
 ## Keywords
 
@@ -194,8 +198,8 @@ it.
 ## Where the data comes from
 
 Company and title data comes from the public job boards of each company,
-read with plain public requests. Nine hiring systems are read: Greenhouse,
-Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint and Breezy. Each
+read with plain public requests. Ten hiring systems are read: Greenhouse,
+Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint, Breezy and Workday. Each
 request names GigAI in its `User-Agent` with the project address, and before
 the first request of the day to a board's host Scout reads that host's
 `robots.txt`; a board whose host disallows the feed is skipped and counted
@@ -210,7 +214,34 @@ carries no posting date, so its postings read as undated. A Rippling board
 lists titles and locations only: the date and description of the postings
 whose titles match your profiles are fetched at the update, one small request
 each, like Greenhouse descriptions. A Breezy board lists titles, locations
-and dates; a posting's description is fetched when it is assessed. The starter
+and dates; a posting's description is fetched when it is assessed. A Workday
+board (`https://<tenant>.wd<N>.myworkdayjobs.com/<site>`; the catalog ships
+49 of them, large US employers) is read one tenant at a time, at one request
+a second within each host's `robots.txt`: the list pages first, then one
+detail request per posting whose title matches your profiles, at most 200
+detail requests per board in one update (the rest are read in a later
+update). A listed
+posting's date is the posting's own once its detail is read; until then a
+posting Workday lists as "30+ days ago" shows as undated. A list is read up
+to 100 pages (2,000 postings); a board with more is stored as far as read and
+`gigai scout sources status` prints `partial: <company> stopped at 100 list
+pages`. Because of the detail cap, the first update after the upgrade can
+take more than one pass. You can add a Workday board
+yourself by pasting its URL in that shape (a locale segment such as `/en-US/`
+is accepted); a `*.myworkday.com` address is the employee side, never a board,
+and is refused. The H-1B figure beside a Workday posting's sponsorship chip
+is the employer's certified H-1B LCA count for software occupations, FY2026
+through Q3, from the public US Department of Labor
+data, not a USCIS approvals count, and it carries no denials number.
+
+Eight Workday employers are not read, because their terms of use forbid
+automated reading (LexisNexis Risk Solutions; CVS Health, including Aetna and
+Caremark; Amgen; Mastercard) or their `robots.txt` disallows the public job
+path (Zoom, Equifax, Equinix, ASML US). `gigai scout sources status` prints
+one line per board, `skipped: <reason> - <company> (<evidence>)`, before any
+update has run; adding such a board by URL, in the UI or with the CLI, is
+refused with the company, the reason and the evidence (`excluded_board`; a
+422 from the API). The starter
 snapshot redistributes only the metadata listed above, never an employer's
 description text. A company that wants its board left out of the snapshot can
 ask by opening an issue on the

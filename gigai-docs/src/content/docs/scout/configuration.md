@@ -32,7 +32,9 @@ filter: **Remote** keeps remote postings (and any whose mode can't be told); **H
 area (an on-site role elsewhere, or with no area set, stays out); **Onsite** with an area keeps the same set; **Any** keeps
 everything the other filters allow. A posting's mode comes from the job
 board's own field when it has one, else it is read from the location text
-and labelled as derived. A posting whose location says nothing usable (for
+and labelled as derived. A posting labelled remote or unknown whose text ties
+a count of days to the office ("three days a week in our office") is read as
+hybrid. A posting whose location says nothing usable (for
 example just "United States") is kept and labelled rather than dropped.
 Without a `work_mode`, the answer saved in setup is used, else Any.
 
@@ -52,7 +54,8 @@ country outside your list ("Europe", "Remote (Germany)", "London / Remote") is
 not listed; one that says only "Remote" or "Anywhere" is read as the US.
 `visa_sponsorship_required` says you need a visa. It is a label and
 never a filter: a posting that says it does not sponsor is kept and marked
-"No sponsorship" (or "H-1B transfer only" when it takes transfers), in a run, in the Jobs list,
+"No sponsorship" (or "H-1B transfer only" when it takes transfers; `case_by_case`
+when it decides sponsorship case by case), in a run, in the Jobs list,
 in ranking and in an assessment.
 Acquire also caps results to at
 most 2 postings per company for diversity, and results appear as cards on

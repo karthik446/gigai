@@ -48,7 +48,9 @@ One of three, from an assessment:
 How it is made: one model call per posting. Your model gets the posting text, your resume with
 the name and contact lines removed, your answers, and the few stories that fit the posting. It
 fills a table of the posting's requirements, each one met, not met or unclear, with the line of
-your resume or the answer it relied on. The verdict is read from that table.
+your resume or the answer it relied on. Scout then checks every met must-have row: a row that cites
+no resume line reads as unclear, and a row that rests only on one of your answers reads as
+**answered** (you said yes; the resume shows no line for it). The verdict is read from that table.
 
 A model can misread a posting. The table shows what it relied on for each requirement, so you
 can check it. An assessment made before your settings, your answers or Scout's prompt changed
@@ -59,7 +61,9 @@ until you ask.
 
 On the Jobs page each job has two chips under its title. **Fit** ("Fit 92% · 19/22") is the
 share of requirements met, with the must-haves counted twice, then met of total: 19 of the 22
-rows of the assessment's table are marked met. **Rank** ("Rank 92") is the rank above, or
+rows of the assessment's table are marked met. The share is capped by the must-have rows: at
+most 49 when a must-have is not met, at most 69 when a must-have is unclear or answered, or an
+askable one is not met. **Rank** ("Rank 92") is the rank above, or
 "Not ranked yet". An assessed job's page shows both in the box at the top right.
 
 The Fit chip is green only for a matched job; on any other job it is grey, so a high fit
