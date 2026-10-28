@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from gigai.scout import assessment_core, postings
+from gigai.scout import assessment_core, fit, postings
 from gigai.scout import requirements_list as rl
 from gigai.scout.master_store import import_master
 from gigai.scout.resume_gate import HOLD_QUESTION, SUGGEST, gate
@@ -224,3 +224,89 @@ def test_a_first_assessment_stores_an_only_preferred_list_askable(only_preferred
     listed = rl.read_list(only_preferred.home_root, only_preferred.target, stored.posting_sha256)
     assert listed is not None and [row.requirement for row in listed.rows] == list(PREFERRED)
     assert [(row.requirement_class, row.class_basis) for row in listed.rows] == [("askable", f"only list: Preferred Qualifications: {item}") for item in PREFERRED]
+
+
+# --- 0.1.11.12 F2c: the same rule on the FIRST assessment's own matrix, before anything reads it -------------------------
+
+
+def _first(text: str | None, rows: list[dict[str, object]]) -> dict[str, object]:
+    """``rows`` as ``assess_once`` reads a first assessment's answer (no list yet; the posting's digest and text)."""
+
+    answer = {"verdict": "matched_above_threshold", "matrix": [dict(row) for row in rows], "questions": [], "suggestions": [], "not_a_match_reason": None}
+    boundary = assessment_core.Boundary(retry=False, posting_sha256=POSTING, posting_text=text)
+    return assessment_core._normalize_and_strip(answer, boundary=boundary)[0]
+
+
+def _unclear(rows: list[dict[str, object]], *places: int) -> list[dict[str, object]]:
+    return [dict(row, status="unclear") if place in places else row for place, row in enumerate(rows)]
+
+
+def test_the_matrix_guard_is_the_stored_lists_rule_and_skips_the_rows_about_the_candidate() -> None:
+    text, matrix = _only("Preferred Qualifications")
+    changes = rl.only_list_changes(matrix, text)
+    assert changes == tuple((place, f"only list: Preferred Qualifications: {item}") for place, item in enumerate(PREFERRED))  # not elig-location
+    found, _ids = _extract(matrix, posting_text=text)
+    assert [row.class_basis for row in found.rows] == [basis for _place, basis in changes]
+    assert rl.only_list_changes(matrix, None) == () and rl.only_list_changes(*reversed(_only("Bonus points"))) == ()
+
+
+def test_a_first_assessment_re_classes_an_only_preferred_matrix_and_asks_its_unclear_row() -> None:
+    text, matrix = _only("Preferred Qualifications")
+    payload = _first(text, _unclear(matrix[:5], 2))
+    assert [(row["class"], row["class_basis"]) for row in payload["matrix"]] == [("askable", f"only list: Preferred Qualifications: {item}") for item in PREFERRED]
+    asked = assessment_core.row_question(rl.assign_ids(POSTING, PREFERRED)[2], PREFERRED[2])
+    assert payload["structured_questions"] == [asked] and payload["questions"] == [asked["question"]]
+    assert payload["verdict"] == "pending_user_answers"
+    assert gate(payload["matrix"], payload["structured_questions"], payload["verdict"]).decision == HOLD_QUESTION
+
+
+def test_with_every_re_classed_row_unclear_the_four_question_cap_still_holds() -> None:
+    text, matrix = _only("Preferred Qualifications")
+    payload = _first(text, _unclear(matrix[:5], 0, 1, 2, 3, 4))
+    ids = rl.assign_ids(POSTING, PREFERRED)
+    assert payload["structured_questions"] == [assessment_core.row_question(ids[place], PREFERRED[place]) for place in range(4)]
+    assert payload["verdict"] == "pending_user_answers"
+
+
+def _bonus_only() -> tuple[str, list[dict[str, object]]]:
+    text, matrix = _only("Bonus points")
+    return text, _unclear(matrix[:5], 2)
+
+
+def _required_and_preferred() -> tuple[str, list[dict[str, object]]]:
+    text = _posting(("Required Qualifications", PREFERRED[:2]), ("Preferred Qualifications", PREFERRED[2:]))
+    rows = [_row(item, "askable", "Required Qualifications") for item in PREFERRED[:2]] + [_row(item, "nice_to_have", "Preferred Qualifications") for item in PREFERRED[2:]]
+    return text, _unclear(rows, 3)
+
+
+def _one_hard_row() -> tuple[str, list[dict[str, object]]]:
+    text, matrix = _only("Preferred Qualifications")
+    return text, _unclear([dict(matrix[0], **{"class": "hard"}), *matrix[1:5]], 2)
+
+
+@pytest.mark.parametrize("case", [_bonus_only, _required_and_preferred, _one_hard_row], ids=["bonus-only", "required-list", "one-hard-row"])
+def test_a_first_assessment_the_rule_does_not_cover_is_unchanged(case) -> None:
+    text, rows = case()
+    assert rl.only_list_changes(rows, text) == ()
+    payload = _first(text, rows)
+    assert json.dumps(payload, sort_keys=True) == json.dumps(_first(None, rows), sort_keys=True)  # what it was without the posting's text
+    assert [(row["class"], row["class_basis"]) for row in payload["matrix"]] == [(row["class"], row["class_basis"]) for row in rows]
+    assert not payload.get("structured_questions") and payload["verdict"] == "matched_above_threshold"
+
+
+def test_a_first_assessment_of_an_only_preferred_posting_asks_its_unclear_row_and_is_held(only_preferred: PostingsFixture) -> None:
+    ids = _ids(only_preferred)
+    rows = [{"requirement": item, "class": "nice_to_have", "status": "unclear" if place == 2 else "met", "resume_evidence": [] if place == 2 else [PYTHON_LINE],
+             "sources": [] if place == 2 else [ids[PYTHON_LINE]], "class_basis": f"Preferred Qualifications: {item}"} for place, item in enumerate(PREFERRED)]
+    chosen = {"summary": None, "section_order": ["experience", "projects"], "lines": [ids[OWN_LINE], ids[PYTHON_LINE]]}
+    answer = {"verdict": "matched_above_threshold", "matrix": rows, "questions": [], "suggestions": [], "pick": chosen, "not_a_match_reason": None}
+    stored, _prompt = _assess(only_preferred, json.dumps(answer))
+    assert len(only_preferred.base.model.assess_prompts) == 1  # the re-classed row's question is code's: no retry is spent on it
+    assert [(row.to_json()["class"], row.class_basis) for row in stored.result.matrix] == [("askable", f"only list: Preferred Qualifications: {item}") for item in PREFERRED]
+    unclear = stored.result.matrix[2]
+    assert [(item.question_id, item.requirement) for item in stored.result.structured_questions] == [(assessment_core.row_question_id(unclear.id), PREFERRED[2])]
+    assert stored.result.verdict.value == "pending_user_answers" and stored.resume_gate is not None and stored.resume_gate.decision == HOLD_QUESTION
+    shown = fit.shown_fit(stored.result.matrix)
+    assert shown is not None and shown <= fit.OPEN_CAP == 69
+    listed = rl.read_list(only_preferred.home_root, only_preferred.target, stored.posting_sha256)
+    assert listed is not None and [(row.id, row.requirement_class) for row in listed.rows] == [(row.id, "askable") for row in stored.result.matrix]

@@ -64,7 +64,11 @@ The list stays as the model classed it when it is genuinely optional:
   eligible") is not a heading.
 
 A lone "No stated requirements" row is left as it is; without the posting
-text nothing is re-classed.
+text nothing is re-classed.  0.1.11.12 F2c: the same rule reads the first
+assessment's own matrix (:func:`only_list_changes`, called by
+``assessment_core`` before anything reads the rows), so its questions,
+verdict, gate and fit see the rows the list stores; ``elig-`` rows are about
+the candidate, not the posting's list, and are neither read nor changed.
 
 Pure except ``read_list`` / ``store_first`` (one small file each).  No model call.
 """
@@ -308,23 +312,34 @@ def _only_list_basis(class_basis: str) -> str:
     return basis[:MAX_CLASS_BASIS_CHARS].rstrip()
 
 
-def only_list_rows(rows: Sequence[ListedRequirement], posting_text: str | None) -> tuple[ListedRequirement, ...]:
-    """``rows`` with an only list of "Preferred" rows listed ``askable`` (the module text, ONLY LIST). Pure.
+def only_list_changes(matrix: Sequence[object], posting_text: str | None) -> tuple[tuple[int, str], ...]:
+    """``(place, class_basis)`` of each row of ``matrix`` an only list of "Preferred" rows lists ``askable`` (the module text, ONLY LIST). Pure.
 
-    Fires only when there is at least one row, every row is ``nice_to_have``,
-    none is "No stated requirements" or has an optional ``class_basis``, and
+    ``matrix``: JSON rows or typed rows. ``elig-`` rows are skipped. Fires only
+    when at least one row is left, every one is ``nice_to_have``, none is "No
+    stated requirements" or has an optional ``class_basis``, and
     ``posting_text`` is given and has no optional-list heading line
-    (:func:`is_optional_heading`). Each re-classed row's ``class_basis`` is
-    "only list: " (not doubled) and the wording it had, cut to 200 characters.
+    (:func:`is_optional_heading`); ``()`` otherwise. Each new ``class_basis``
+    is "only list: " (not doubled) and the wording it had, cut to 200 characters.
     """
 
+    places = [place for place, row in enumerate(matrix) if not is_eligibility_id(_row_value(row, "id"))]
+    bases = [str(_row_value(matrix[place], "class_basis") or "") for place in places]
     if (
-        posting_text is None or not rows or any(row.requirement_class != "nice_to_have" for row in rows)
-        or any(fold(row.requirement).rstrip(".") == _NO_STATED_REQUIREMENTS or _optional_basis(row.class_basis) for row in rows)
+        posting_text is None or not places or any(_row_value(matrix[place], "class") != "nice_to_have" for place in places)
+        or any(fold(str(_row_value(matrix[place], "requirement") or "")).rstrip(".") == _NO_STATED_REQUIREMENTS for place in places)
+        or any(_optional_basis(basis) for basis in bases)
         or any(is_optional_heading(line) for line in posting_text.splitlines())
     ):
-        return tuple(rows)
-    return tuple(replace(row, requirement_class="askable", class_basis=_only_list_basis(row.class_basis)) for row in rows)
+        return ()
+    return tuple((place, _only_list_basis(basis)) for place, basis in zip(places, bases, strict=True))
+
+
+def only_list_rows(rows: Sequence[ListedRequirement], posting_text: str | None) -> tuple[ListedRequirement, ...]:
+    """``rows`` with an only list of "Preferred" rows listed ``askable`` (:func:`only_list_changes`). Pure."""
+
+    changed = dict(only_list_changes(rows, posting_text))
+    return tuple(replace(row, requirement_class="askable", class_basis=changed[place]) if place in changed else row for place, row in enumerate(rows))
 
 
 def extracted(
@@ -535,6 +550,7 @@ __all__ = [
     "fold",
     "is_eligibility_id",
     "is_optional_heading",
+    "only_list_changes",
     "only_list_rows",
     "read_list",
     "requirements_dir",

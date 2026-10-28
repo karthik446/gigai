@@ -9,6 +9,7 @@ says; it is not evidence of quality and no report may cite it as such.
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -96,3 +97,35 @@ def test_coverage_reads_met_must_have_rows_off_the_answers_own_sources() -> None
     ]
     found = real.coverage(rows, frozenset({"a-2", "c-1"}))
     assert found["cited_rows"] == 3 and found["lost"] == ["Go"] and found["strongest_shown"] == 0
+
+
+def test_the_replay_re_classes_an_only_preferred_matrix_as_a_first_assessment_does(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 0.1.11.12 F2c: the replay reads the posting the run read and applies the first assessment's class guard, before the strict check.
+    from gigai.scout import requirements_list as rl
+    from gigai.scout.assessment_core import row_question_id
+
+    monkeypatch.setattr("gigai.scout.assess_strict.strict_rows", lambda *_args, **_kwargs: [])  # the class guard alone
+    items = ("5+ years building production backend systems", "Experience with Python and Go", "Kubernetes in production",
+             "Distributed data processing (Spark or Ray)", "Prior work at an ML infrastructure company")
+    text = "Senior Software Engineer\n\nPreferred Qualifications\n" + "".join(f"- {item}\n" for item in items) + "\nCompensation\nThe base salary range is $180,000 - $250,000.\n"
+    data = tmp_path / "data"
+    (data / "postings").mkdir(parents=True)
+    (data / "master.md").write_text(pe.master_of("medium").markdown, encoding="utf-8")
+    (data / "postings" / "01-onlypref.md").write_text(f"title: Senior Software Engineer\ncompany: Example\nlocation: Remote\nurl: https://example.com/1\n\n{text}", encoding="utf-8")
+    ids = rl.assign_ids("sha256:" + "4" * 64, items)
+    rows = [{"id": ids[place], "requirement": item, "class": "nice_to_have", "class_basis": f"Preferred Qualifications: {item}",
+             "status": "unclear" if place == 2 else "met", "resume_evidence": [], "sources": []} for place, item in enumerate(items)]
+    stored = {"result": {"verdict": "matched_above_threshold", "matrix": rows, "questions": [], "structured_questions": []}, "resume_gate": {"decision": "suggest", "reasons": []}}
+    source = data / "results" / "before"
+    for slug in ("01-onlypref", "02-unposted"):  # the second has no posting file: nothing is re-classed, and the summary says why
+        (source / slug / "claude_cli").mkdir(parents=True)
+        (source / slug / "claude_cli" / "assessment.json").write_text(json.dumps(stored), encoding="utf-8")
+    summary = real.replay_postcheck(data, source, tmp_path / "after", today=date(2026, 10, 28))
+    first, second = summary["cases"]
+    assert [(item["step"], item["row"], item["before"], item["after"]) for item in first["changes"]] == [("class_guard", ids[place], "nice_to_have", "askable") for place in range(5)]
+    assert first["verdict"] == {"before": "matched_above_threshold", "after": "pending_user_answers"} and first["gate"] == {"before": "suggest", "after": "hold_question"}
+    replayed = json.loads((tmp_path / "after" / "01-onlypref" / "claude_cli" / "assessment.json").read_text(encoding="utf-8"))
+    assert [(row["class"], row["class_basis"]) for row in replayed["result"]["matrix"]] == [("askable", f"only list: Preferred Qualifications: {item}") for item in items]
+    assert [item["question_id"] for item in replayed["result"]["structured_questions"]] == [row_question_id(ids[2])]
+    assert first["posting"] == "01-onlypref.md" and replayed["postcheck"]["posting"] == "01-onlypref.md"
+    assert second["posting"] is None and second["changes"] == [] and (second["verdict"]["after"], second["gate"]["after"]) == ("matched_above_threshold", "suggest")

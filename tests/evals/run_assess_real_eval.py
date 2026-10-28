@@ -85,6 +85,17 @@ MANDATORY = ("hard", "askable")
 # --- the data directory --------------------------------------------------------------------------------
 
 
+def read_posting(path: Path) -> dict[str, str]:
+    """One ``postings/<slug>.md``: its header and the text a run gives the assessment as the posting. Raises ``ValueError`` on a header without title, company or url."""
+
+    head, _, body = path.read_text(encoding="utf-8").partition("\n\n")
+    meta = dict(line.split(": ", 1) for line in head.splitlines() if ": " in line)
+    for key in ("title", "company", "url"):
+        if key not in meta:
+            raise ValueError(f"{path.name}: the header has no {key}:")
+    return {"slug": path.stem, "title": meta["title"].strip(), "company": meta["company"].strip(), "location": meta.get("location", "").strip(), "url": meta["url"].strip(), "text": body.strip() + "\n"}
+
+
 def load_data(data_dir: Path) -> dict[str, Any]:
     """The data directory as plain data. Raises ``ValueError`` naming the missing file."""
 
@@ -93,14 +104,7 @@ def load_data(data_dir: Path) -> dict[str, Any]:
     missing = [name for name in need if not (data_dir / name).is_file()]
     if missing or not (data_dir / "postings").is_dir():
         raise ValueError(f"{data_dir} is not a data directory: missing {', '.join([*missing, *(() if (data_dir / 'postings').is_dir() else ('postings/',))])}")
-    postings = []
-    for path in sorted((data_dir / "postings").glob("*.md")):
-        head, _, body = path.read_text(encoding="utf-8").partition("\n\n")
-        meta = dict(line.split(": ", 1) for line in head.splitlines() if ": " in line)
-        for key in ("title", "company", "url"):
-            if key not in meta:
-                raise ValueError(f"{path.name}: the header has no {key}:")
-        postings.append({"slug": path.stem, "title": meta["title"].strip(), "company": meta["company"].strip(), "location": meta.get("location", "").strip(), "url": meta["url"].strip(), "text": body.strip() + "\n"})
+    postings = [read_posting(path) for path in sorted((data_dir / "postings").glob("*.md"))]
     if not postings:
         raise ValueError(f"{data_dir / 'postings'} holds no posting")
     ten = {}
@@ -537,6 +541,9 @@ def replay_postcheck(data_dir: Path, source: Path, out: Path, *, today: date | N
     No model call. Each case folder is copied whole (the scorer reads its selection files too), its ``assessment.json``
     rewritten with the checked rows, the row questions the check adds (capped as the product caps them), the verdict
     (``settled_verdict``) and the gate (``resume_gate.gate``) read again, and a ``postcheck`` block naming every change.
+    0.1.11.12 F2c: first, as a first assessment does, an only list of "Preferred" rows is re-classed ``askable``
+    (``requirements_list.only_list_changes``, step ``class_guard``) against ``<data-dir>/postings/<slug>.md``, the text
+    the run gave the model; a case with no such file is left unread by it, and its ``posting`` is ``null``.
     """
 
     import shutil
@@ -545,7 +552,7 @@ def replay_postcheck(data_dir: Path, source: Path, out: Path, *, today: date | N
     from gigai.scout.assess_strict import strict_rows
     from gigai.scout.assessment_core import row_question
     from gigai.scout.requirement_weights import cap_mandatory_questions, settled_verdict
-    from gigai.scout.requirements_list import fold
+    from gigai.scout.requirements_list import fold, only_list_changes
     from gigai.scout.resume_gate import gate
 
     master_path = Path(data_dir) / "master.md"
@@ -572,8 +579,20 @@ def replay_postcheck(data_dir: Path, source: Path, out: Path, *, today: date | N
         questions = list(result.get("structured_questions") or [])
         plain = list(result.get("questions") or [])
         verdict_before, gate_before = result.get("verdict"), (payload.get("resume_gate") or {}).get("decision")
-        changes = strict_rows(rows, master)
+        posting_path = Path(data_dir) / "postings" / f"{slug}.md"
+        posting = posting_path.name if posting_path.is_file() else None
         asked = {fold(str(item.get("requirement") or "")) for item in questions if isinstance(item, dict)}
+        listed: list[dict[str, Any]] = []
+        for place, basis in only_list_changes(rows, read_posting(posting_path)["text"] if posting else None):
+            row = rows[place]
+            listed.append({"row": row.get("id"), "requirement": str(row.get("requirement") or ""), "before": row.get("class"), "after": "askable", "step": "class_guard", "note": basis})
+            row["class"], row["class_basis"] = "askable", basis
+            if row.get("status") == "unclear" and row.get("id") and fold(listed[-1]["requirement"]) not in asked:
+                item = row_question(str(row["id"]), listed[-1]["requirement"])
+                questions.append(item)
+                plain.append(str(item["question"]))
+                asked.add(fold(listed[-1]["requirement"]))
+        changes = strict_rows(rows, master)
         for change in changes:
             if change.after == "unclear" and change.row_id and fold(change.requirement) not in asked:
                 item = row_question(change.row_id, change.requirement)
@@ -584,15 +603,17 @@ def replay_postcheck(data_dir: Path, source: Path, out: Path, *, today: date | N
             questions, over = cap_mandatory_questions(rows, questions)
             dropped = {str(item.get("question")) for item in over}
             plain = [text for text in plain if text not in dropped]
+        else:
+            questions, plain = [], []  # the product stores no question on a not_a_match answer
         result["structured_questions"], result["questions"] = questions, plain
         if verdict_before is not None:
             result["verdict"] = settled_verdict(verdict_before, rows, questions)
         payload["resume_gate"] = gate(rows, questions, result.get("verdict")).record().to_json()
-        listed = [{"row": c.row_id, "requirement": c.requirement, "before": c.before, "after": c.after, "step": c.step, "note": c.note} for c in changes]
-        payload["postcheck"] = {"schema_version": POSTCHECK_SCHEMA, "source": str(path), "today": today.isoformat(), "changes": listed}
+        listed += [{"row": c.row_id, "requirement": c.requirement, "before": c.before, "after": c.after, "step": c.step, "note": c.note} for c in changes]
+        payload["postcheck"] = {"schema_version": POSTCHECK_SCHEMA, "source": str(path), "posting": posting, "today": today.isoformat(), "changes": listed}
         (folder / "assessment.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         cases.append({
-            "slug": slug, "cli": cli, "ok": True, "changes": listed,
+            "slug": slug, "cli": cli, "ok": True, "posting": posting, "changes": listed,
             "verdict": {"before": verdict_before, "after": result.get("verdict")}, "gate": {"before": gate_before, "after": payload["resume_gate"]["decision"]},
         })
     summary = {"schema_version": POSTCHECK_SCHEMA, "source": str(source), "master": str(master_path), "today": today.isoformat(), "cases": cases}
@@ -620,6 +641,8 @@ def postcheck_report(summary: Mapping[str, Any]) -> str:
             moved.append(f"- {case['slug'][:2]} {case['cli']}: verdict {case['verdict']['before']} -> {case['verdict']['after']}; gate {case['gate']['before']} -> {case['gate']['after']}")
     lines += ["", "## Verdicts and gates that moved", "", *(moved or ["- none"]), "", "## By step", ""]
     lines += [f"- {key}: {count}" for key, count in sorted(by_step.items())] or ["- no row touched"]
+    unread = [f"- {case['slug'][:2]} {case['cli']}" for case in summary["cases"] if case.get("ok") and case.get("posting") is None]
+    lines += ["", "## No posting file (class guard not applied)", "", *(unread or ["- none"])]
     return "\n".join(lines) + "\n"
 
 

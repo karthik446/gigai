@@ -71,7 +71,7 @@ from .find_jobs.filters import _CITY_COUNTRIES, _US_CITY_ALIASES, _US_STATE_NAME
 from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
 from .requirement_weights import bound_rows, cap_list_item_questions, cap_mandatory_questions, settled_verdict
-from .requirements_list import ListedRequirement, check_listed, extracted, fold
+from .requirements_list import ListedRequirement, check_listed, extracted, fold, only_list_changes
 from .stated_check import MasterFacts, read_master, settle_stated
 from .suggestion_check import MasterLine, check_suggestions, clean_citations, parse_master_lines, truthful_notes, with_verbatim_evidence, without_unknown_places
 from .resume_gate import (
@@ -1824,6 +1824,25 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         gone = sorted(plain_at.pop(id(item)) for item in answered)
         plain_questions = [text for index, text in enumerate(plain_questions) if index not in gone]
         plain_at = {key: at - sum(1 for index in gone if index < at) for key, at in plain_at.items()}
+
+    # 0.1.11.12 F2c: a first assessment's only list of "Preferred" rows is the posting's requirements (``requirements_list``,
+    # ONLY LIST): its rows are listed ``askable`` here, before the strict check, the caps, ``_unasked``, the verdict and the
+    # gate read them, so they read what the stored list says. A re-classed unclear row gets its own question, as a row the
+    # strict check lowers does (no retry is spent on it); the caps below still apply. A later assessment has its classes
+    # from the list (``check_listed``), so this reads first assessments only.
+    if is_v9 and not boundary.listed:
+        asked_rows = {fold(str(item.get("requirement") or "")) for item in structured_questions if isinstance(item, dict)}
+        for place, basis in only_list_changes(normalized_matrix, boundary.posting_text):
+            row = normalized_matrix[place]
+            row["class"], row["class_basis"] = "askable", basis
+            requirement, row_id = str(row.get("requirement") or ""), id_of_row.get(id(row))
+            if row.get("status") != "unclear" or row_id is None or fold(requirement) in asked_rows:
+                continue
+            asked = row_question(row_id, requirement)
+            structured_questions.append(asked)
+            plain_at[id(asked)] = len(plain_questions)
+            plain_questions.append(str(asked["question"]))
+            asked_rows.add(fold(requirement))
 
     # 0.1.11.12 F1: the strict-met post-check (``assess_strict``), after the stated check so nothing re-promotes a row it
     # lowered, before the caps so a lowered must-have row's own question competes for a place and ``_unasked`` finds it.
