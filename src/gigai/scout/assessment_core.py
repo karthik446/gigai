@@ -855,6 +855,10 @@ _SPONSORSHIP_SYNONYMS = {
     "h1b transfer only": "transfer_only",
     "h-1b transfers only": "transfer_only",
     "h1b transfers only": "transfer_only",
+    # 0.1.11.12: sponsorship decided case by case. Neither a yes nor a no.
+    "case_by_case": "case_by_case",
+    "case by case": "case_by_case",
+    "case-by-case": "case_by_case",
     "unknown": "unknown",
     "unclear": "unknown",
     "n/a": "unknown",
@@ -954,7 +958,7 @@ def _normalize_assessment_payload(decoded: Mapping[str, object]) -> dict[str, ob
       between verdict and the matrix/questions is enforced downstream, in ``parse``
       (``proposals.parse_assessment_proposal``), not here.
     - unknown top-level keys are dropped so the frozen contract's closed-object check still applies cleanly
-    - ``sponsorship`` synonyms map to offered/not_offered/transfer_only/unknown; absent stays absent
+    - ``sponsorship`` synonyms map to offered/not_offered/transfer_only/case_by_case/unknown; absent stays absent
     - 0110-10-03 (``requirement_weights``): the matrix is put must-haves first and
       bounded (``bound_rows``): rows past the bound are counted in
       ``rows_not_shown``, never an error and never dropped in silence; and a
@@ -1425,9 +1429,10 @@ def _without_authorization(decoded: Mapping[str, object]) -> Mapping[str, object
     which the job list already shows), not a requirement: no hold, no question, no not_a_match, no row in the score.
     Whatever the model returns about them is removed here, so a prompt-only rule cannot leak; a ``not_a_match`` that
     rested on such a row alone is read from the remaining rows (matched, or pending when a must-have question is
-    open). The label becomes ``not_offered`` when a removed row says the employer does not sponsor, and
-    ``transfer_only`` (0.1.11.10) when it says so AND takes H-1B transfers, which is not a flat no. An answer in
-    the v8 shape is returned untouched. Pure.
+    open). The label becomes ``not_offered`` when a removed row says the employer does not sponsor,
+    ``transfer_only`` (0.1.11.10) when it says so AND takes H-1B transfers, which is not a flat no, and
+    ``case_by_case`` (0.1.11.12) when it says sponsorship is decided case by case. An answer in the v8 shape is
+    returned untouched. Pure.
     """
 
     matrix = decoded.get("matrix")
@@ -1443,9 +1448,10 @@ def _without_authorization(decoded: Mapping[str, object]) -> Mapping[str, object
     if isinstance(questions, list):
         out["questions"] = [item for item in questions if not (isinstance(item, Mapping) and is_authorization_question(item))]
     if "sponsorship" not in out:
-        said = " ".join(f"{row.get('requirement') or ''} {row.get('class_basis') or ''}" for row in dropped)
-        if sponsorship_from_text(said) == SponsorshipStatus.TRANSFER_ONLY:
-            out["sponsorship"] = SponsorshipStatus.TRANSFER_ONLY.value
+        said = ". ".join(f"{row.get('requirement') or ''} {row.get('class_basis') or ''}" for row in dropped)
+        read = sponsorship_from_text(said)
+        if read in (SponsorshipStatus.TRANSFER_ONLY, SponsorshipStatus.CASE_BY_CASE):
+            out["sponsorship"] = read.value
         elif says_no_sponsorship(dropped):
             out["sponsorship"] = SponsorshipStatus.NOT_OFFERED.value
     said = _normalize_verdict(decoded.get("verdict"))
@@ -1461,18 +1467,21 @@ def _without_authorization(decoded: Mapping[str, object]) -> Mapping[str, object
 
 
 def _transfer_label(decoded: Mapping[str, object], boundary: Boundary) -> Mapping[str, object]:
-    """``decoded`` with a flat ``not_offered`` read as ``transfer_only`` when the posting's own text takes H-1B transfers (0.1.11.10).
+    """``decoded`` with a flat ``not_offered`` read as ``transfer_only`` or ``case_by_case`` when the posting's own text says so.
 
     The label only: no row, no question and no verdict is touched (rule 5). A model that answers the flat no for
-    "cannot provide new visa sponsorship ... open to facilitating H-1B visa transfers" is corrected by the same
-    rule the acquire-time label uses (``filters.sponsorship_from_text``); every other answer is left as it came. Pure.
+    "cannot provide new visa sponsorship ... open to facilitating H-1B visa transfers" (0.1.11.10, ``transfer_only``)
+    or for "visa sponsorship is considered on a case-by-case basis" (0.1.11.12, ``case_by_case``) is corrected by the
+    same rule the acquire-time label uses (``filters.sponsorship_from_text``, whose explicit no comes before both);
+    every other answer is left as it came. Pure.
     """
 
     if not boundary.posting_text or _normalize_sponsorship(decoded.get("sponsorship")) != SponsorshipStatus.NOT_OFFERED.value:
         return decoded
-    if sponsorship_from_text(boundary.posting_text) != SponsorshipStatus.TRANSFER_ONLY:
+    read = sponsorship_from_text(boundary.posting_text)
+    if read not in (SponsorshipStatus.TRANSFER_ONLY, SponsorshipStatus.CASE_BY_CASE):
         return decoded
-    return {**decoded, "sponsorship": SponsorshipStatus.TRANSFER_ONLY.value}
+    return {**decoded, "sponsorship": read.value}
 
 
 def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | None = None) -> tuple[dict[str, object], tuple[str, ...], int]:

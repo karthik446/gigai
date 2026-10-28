@@ -222,13 +222,20 @@ class SponsorshipStatus(StrEnum):
     ``transfer_only`` (0.1.11.10): the posting says it gives no NEW
     sponsorship and takes H-1B transfers ("cannot provide new visa
     sponsorship ... open to facilitating H-1B visa transfers").  It is not a
-    flat no, and it is a label like the other three: nothing gates on it.
-    Stored values written before it stay as they are.
+    flat no.
+
+    ``case_by_case`` (0.1.11.12): the posting says sponsorship is decided
+    case by case or individually ("visa sponsorship is considered on a
+    case-by-case basis").  It is neither a yes nor a no.
+
+    Both are labels like the other values: nothing gates on them.  Stored
+    values written before them stay as they are.
     """
 
     OFFERED = "offered"
     NOT_OFFERED = "not_offered"
     TRANSFER_ONLY = "transfer_only"
+    CASE_BY_CASE = "case_by_case"
     UNKNOWN = "unknown"
 
 

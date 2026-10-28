@@ -78,7 +78,7 @@ def test_a_transfer_alone_changes_nothing_that_was_read_before(text: str, expect
 
 
 def test_the_value_is_additive_and_every_stored_value_still_parses() -> None:
-    assert [status.value for status in SponsorshipStatus] == ["offered", "not_offered", "transfer_only", "unknown"]
+    assert [status.value for status in SponsorshipStatus] == ["offered", "not_offered", "transfer_only", "case_by_case", "unknown"]
     row = {"requirement": "Go in production", "resume_evidence": ["Built Go services"], "status": "met", "class": "hard"}
     for stored in ("offered", "not_offered", "unknown", "transfer_only"):
         body = AssessmentBody.from_json({"matrix": [row], "suggestions": [], "questions": [], "verdict": MATCHED, "sponsorship": stored})
@@ -134,15 +134,15 @@ def _assess(answer: dict[str, object], visa_text: str, *, visa_required: bool = 
 
 def test_the_prompt_names_the_value_and_keeps_rule_5() -> None:
     text = " ".join(assessment_core.load_assess_instructions().split())
-    assert '"sponsorship": "offered|not_offered|transfer_only|unknown"' in text
+    assert '"sponsorship": "offered|not_offered|transfer_only|case_by_case|unknown"' in text
     assert '"transfer_only" when it says it gives no NEW sponsorship but takes H-1B or visa transfers' in text
     assert 'that is not a flat no, so never "not_offered"' in text
     # Rule 5 itself is unchanged: a label, never a gate.
     assert "5. Sponsorship and work authorization NEVER gate." in text
     assert "add NO row for it, ask NO question about it" in text
-    assert '"transfer_only" adds no row, no question and no hold either' in text
+    assert '"transfer_only" and "case_by_case" add no row, no question and no hold either' in text
     prompt = render_assess_prompt(_job(TRANSFER_SENTENCE), build_assess_context(resume_text="- Built Go services", visa_sponsorship_required=True))
-    assert "offered|not_offered|transfer_only|unknown" in prompt
+    assert "offered|not_offered|transfer_only|case_by_case|unknown" in prompt
 
 
 @pytest.mark.parametrize("said", ["transfer_only", "Transfer only", "H-1B transfer only", "h1b transfers only", "transfers_only"])

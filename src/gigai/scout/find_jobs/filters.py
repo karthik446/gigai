@@ -410,6 +410,70 @@ def _takes_transfers(lowered: str) -> bool:
     return False
 
 
+# 0.1.11.12: sponsorship decided "case by case" is its own label (``case_by_case``). ``_CASE_BY_CASE``: the phrase
+# family (any of "-", U+2010, U+2011 or space between the words); it counts only in a sentence that names sponsorship
+# (``_SPONSORSHIP_WORD``: "sponsorship", a work visa, H-1B or immigration; not the verb "sponsor" alone, not
+# "company-sponsored", not a travel/visitor/business/tourist visa), and only when NO sentence of the posting refuses
+# sponsoring (``_REFUSES_SPONSORING``: "we do not sponsor visas, except case by case" and "we don't sponsor H-1B visas.
+# ... visa support for spouses is decided case by case" keep the read they had, so a model's flat no is never
+# overwritten). A sentence ends at ".", "!" or "?" before a space, or at a line break; a period after a single letter
+# ("U.S.") does not end it; a short heading line ("Visa sponsorship" or "Visa sponsorship:") is read with the line
+# after it.
+_CASE_BY_CASE = re.compile(
+    r"\bcase[\s\-\u2010\u2011]+by[\s\-\u2010\u2011]+case\b"
+    r"|\b(?:evaluated|assessed|reviewed|considered|decided|determined)\s+individually\b"
+    r"|\bon\s+an\s+individual\s+basis\b"
+)
+_SPONSORSHIP_WORD = re.compile(
+    r"(?<![\w-])sponsorship\b|(?<!travel )(?<!visitor )(?<!business )(?<!tourist )\bvisas?\b|\bh-?1b\b|\bimmigration\b"
+)
+_REFUSES_SPONSORING = re.compile(
+    r"(?:\bnot|n't|\bcannot|\bunable\s+to)\s+(?:\w+\s+){0,2}?sponsor|\bno\s+(?:visa\s+|h-?1b\s+|work\s+)?sponsor"
+)
+_SENTENCE_END = re.compile(r"(?<!\b[a-z])[.!?](?=\s|$)|\n")
+_HEADING_MAX_WORDS = 4
+
+
+def _with_headings_joined(lowered: str) -> str:
+    """``lowered`` with each short sponsorship heading line joined to the next non-blank line. Pure.
+
+    A heading: at most ``_HEADING_MAX_WORDS`` words, no ".", "!" or "?" at its end, a sponsorship word in it.
+    """
+
+    lines: list[str] = []
+    heading = ""
+    for line in lowered.split("\n"):
+        stripped = line.strip()
+        if heading and not stripped:
+            continue
+        text = f"{heading} {stripped}" if heading else line
+        is_heading = (
+            bool(stripped)
+            and len(stripped.split()) <= _HEADING_MAX_WORDS
+            and not stripped.endswith((".", "!", "?"))
+            and _SPONSORSHIP_WORD.search(stripped) is not None
+        )
+        if is_heading:
+            heading = text
+            continue
+        lines.append(text)
+        heading = ""
+    if heading:
+        lines.append(heading)
+    return "\n".join(lines)
+
+
+def _decided_case_by_case(lowered: str) -> bool:
+    """Whether a sentence of ``lowered`` says sponsorship is decided case by case and no sentence refuses it. Pure."""
+
+    if _REFUSES_SPONSORING.search(lowered):
+        return False
+    for sentence in _SENTENCE_END.split(_with_headings_joined(lowered)):
+        if _CASE_BY_CASE.search(sentence) and _SPONSORSHIP_WORD.search(sentence):
+            return True
+    return False
+
+
 _OFFERED_PHRASES: tuple[str, ...] = (
     "visa sponsorship available",
     "visa sponsorship is available",
@@ -749,6 +813,15 @@ def sponsorship_from_text(text: str | None) -> SponsorshipStatus:
     H-1B visa transfers"), or that says "H-1B transfers only", is
     ``transfer_only``: no new sponsorship, which is not a flat no. A transfer
     the posting also refuses stays ``not_offered``.
+
+    0.1.11.12: a posting that says sponsorship is decided case by case
+    ("visa sponsorship is considered on a case-by-case basis", "evaluated
+    individually", "on an individual basis") is ``case_by_case``. It is
+    read after the transfer-only read and the explicit no (so "unable to
+    sponsor ... except case by case" stays ``not_offered`` and "cannot
+    provide new sponsorship, open to H-1B transfers" stays
+    ``transfer_only``) and before "offered" ("sponsorship is available on
+    a case-by-case basis" is not a plain yes).
     """
 
     if not text:
@@ -759,6 +832,8 @@ def sponsorship_from_text(text: str | None) -> SponsorshipStatus:
         return SponsorshipStatus.TRANSFER_ONLY
     if refused:
         return SponsorshipStatus.NOT_OFFERED
+    if _decided_case_by_case(lowered):
+        return SponsorshipStatus.CASE_BY_CASE
     if any(phrase in lowered for phrase in _OFFERED_PHRASES):
         return SponsorshipStatus.OFFERED
     return SponsorshipStatus.UNKNOWN

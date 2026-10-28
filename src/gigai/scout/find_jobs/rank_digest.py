@@ -16,7 +16,8 @@ text::
 - ``flags=`` are labels and constraint hints read from the WHOLE text:
   ``no_sponsor`` (a sponsorship/visa mention with a negation within 160
   characters and no positive "we sponsor"; ``transfer_only`` instead when
-  the posting takes H-1B transfers), ``citizen_or_gc``, ``clearance`` and ``onsite``.
+  the posting takes H-1B transfers, ``case_by_case`` instead when it says
+  sponsorship is decided case by case), ``citizen_or_gc``, ``clearance`` and ``onsite``.
   Sponsorship, transfer and work-authorization flags are labels only, never
   score penalties or blockers. Other flags need the candidate context to
   establish a genuine blocker; blockers demote and never hide.
@@ -155,15 +156,17 @@ class CandidatePrefs:
 
 
 def constraint_flags(text: str) -> list[str]:
-    """``no_sponsor`` (or ``transfer_only``) / ``citizen_or_gc`` / ``clearance`` / ``onsite``, in that order.
+    """``no_sponsor`` (or ``transfer_only`` / ``case_by_case``) / ``citizen_or_gc`` / ``clearance`` / ``onsite``, in that order.
 
     0.1.11.10: text that rules out NEW sponsorship but takes H-1B or visa transfers is ``transfer_only``
-    (the rule layer's own read, ``filters.sponsorship_from_text``), never ``no_sponsor``; both are labels only.
+    (the rule layer's own read, ``filters.sponsorship_from_text``), never ``no_sponsor``; 0.1.11.12: text that says
+    sponsorship is decided case by case is ``case_by_case`` the same way. All three are labels only.
     """
 
     out: list[str] = []
-    if sponsorship_from_text(text) is SponsorshipStatus.TRANSFER_ONLY:
-        out.append("transfer_only")
+    read = sponsorship_from_text(text)
+    if read in (SponsorshipStatus.TRANSFER_ONLY, SponsorshipStatus.CASE_BY_CASE):
+        out.append(read.value)
     else:
         for match in _SPONSOR.finditer(text):
             window = text[max(0, match.start() - _SPONSOR_WINDOW): match.end() + _SPONSOR_WINDOW]

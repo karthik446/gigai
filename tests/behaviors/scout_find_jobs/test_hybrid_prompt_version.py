@@ -70,12 +70,13 @@ PROMPT_SHA256_V9 = {
 }
 #: sha256 of the prompt each work mode renders for ``_JOB`` / ``_ctx`` now (assess-prompt-v10; 0.1.11.12 F1 wording: rule 1
 #: reads "met" from CLEAR lines only (a role within 8 years, a project), a level word on a named tool is part of the
-#: requirement, and a met row cites a clear line; re-captured from the renderer).
+#: requirement, and a met row cites a clear line; 0.1.11.12 F5a: rule 5 and the output schema name ``case_by_case``;
+#: re-captured from the renderer).
 PROMPT_SHA256 = {
-    "": "f878fb8ff5ee8f1c3df39a71454a07321ef8f953e5f8c3c8660dab04b994a2c1",
-    "remote": "97d4e2d9bc6639eca66ea0869810e38e714b42906c714f10679272630bf1bb65",
-    "onsite": "b143949abc48e21f53b4ea9f617966df069719f8e110accbdb718dabab6c6558",
-    "hybrid": "1533a5df9a9d64c4cbe5b6dd6db2561bcb4746461cf0d498ee5fb7400e9bfd8f",
+    "": "eae9886ea376f78293d6bbaeb41ea8b83517719cd3bdbd480fbce3db5aa32f43",
+    "remote": "be80dbdb912e67b77aaadcc792e3559efb30f4e579cf273a1600c6321990fbdf",
+    "onsite": "99ad39821382468b7e88895a98d9fa16a2bd5d9131dcd310b57239ea94b41551",
+    "hybrid": "fe447396aa52dc9ce052e6c8b9504932d8a15326dd37b03a28e908214df1ddad",
 }
 #: The same under assess-prompt-v7: the fenced prompt, before the requirement weights (0110-10-03).
 PROMPT_SHA256_V7 = {
