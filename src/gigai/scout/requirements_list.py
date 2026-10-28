@@ -46,6 +46,26 @@ retry, then ``model_output_invalid``.  Each row's ``requirement``,
 except that a row the candidate's own facts disclaim may come back ``hard``
 where the list says ``askable`` (``class_from: "disclaimer"``).
 
+ONLY LIST (0.1.11.12 F2b, ``req-rules:2``).  A posting whose ONLY list is
+headed "Preferred", "Desired", "Desirable", "Nice to have" or "Ideal" states
+its requirements there: when every row of a first assessment's list is
+``nice_to_have`` (none ``hard``, ``askable`` or ``list_item``), the rows are
+listed ``askable`` with a ``class_basis`` that begins "only list: " (once).
+The list stays as the model classed it when it is genuinely optional:
+
+* a row's own ``class_basis`` (the heading the model copied) begins with an
+  optional word: "Bonus", "Bonus points", "Plus", "Pluses", "Extra credit",
+  "Brownie points", or "It's / It is / Would be a (big) bonus / plus"; or the
+  basis says "a plus" / "a bonus" ("Go is a plus", "would be a big bonus"); or
+* a line of the posting text is, in full, one of those headings, optionally
+  with "if you ..." ("Bonus points", "Pluses:", "Bonus points if you know
+  Rust:"), after leading/trailing marks and HTML tags are stripped.  A pay or
+  benefits line ("Bonus: 10% annual target", "Plus 401(k) match", "Bonus
+  eligible") is not a heading.
+
+A lone "No stated requirements" row is left as it is; without the posting
+text nothing is re-classed.
+
 Pure except ``read_list`` / ``store_first`` (one small file each).  No model call.
 """
 
@@ -53,10 +73,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 from typing import Iterator
 
@@ -75,10 +96,26 @@ from .find_jobs.discovery.storage import atomic_write, project_id
 
 SCHEMA_VERSION = "scout-posting-requirements:1"
 #: Names what counts as a requirement row. Bumped on purpose, with the prompt; an older list is moved aside.
-RULES_VERSION = "req-rules:1"
+#: ``req-rules:2`` (0.1.11.12 F2b): an only list of "Preferred" rows is listed ``askable`` (the module text, ONLY LIST).
+RULES_VERSION = "req-rules:2"
 ID_PREFIX = "req-"
 ID_HEX_CHARS = 6
 _CLASSES = ("hard", "askable", "list_item", "nice_to_have")
+#: The words a re-classed only list's ``class_basis`` begins with (the module text, ONLY LIST).
+ONLY_LIST = "only list: "
+_NO_STATED_REQUIREMENTS = "no stated requirements"
+_ONLY_LIST_PREFIX = re.compile(r"^\s*only\s+list\s*:\s*", re.IGNORECASE)
+_OPTIONAL_WORDS = (
+    r"(?:(?:it'?s|it\s+is|would\s+be)\s+an?\s+(?:big\s+)?)?(?:bonus(?:\s+points)?|pluses|plus|extra\s+credit|brownie\s+points)"
+)
+#: A posting line that is, in full, the heading of a genuinely optional list (the module text, ONLY LIST).
+_OPTIONAL_HEADING = re.compile(rf"{_OPTIONAL_WORDS}(?:\s+if\s+you\b[^:]*)?", re.IGNORECASE)
+#: A row's class_basis that begins with an optional word ("Bonus points: Python").
+_OPTIONAL_BASIS = re.compile(rf"{_OPTIONAL_WORDS}\b", re.IGNORECASE)
+#: Optional wording anywhere in a row's class_basis ("Go is a plus", "would be a big bonus").
+_OPTIONAL_PHRASE = re.compile(r"\ban?\s+(?:big\s+|huge\s+|nice\s+|definite\s+)?(?:plus|bonus)\b", re.IGNORECASE)
+_TAG = re.compile(r"<[^>]*>")
+_EDGE_MARKS = re.compile(r"^[\W_]+|[\W_]+$")
 
 
 class RequirementsListError(ValueError):
@@ -244,15 +281,63 @@ def _row_value(row: object, name: str) -> object:
     return getattr(value, "value", value)
 
 
+def _bare(text: str) -> str:
+    return _EDGE_MARKS.sub("", _TAG.sub(" ", text)).strip()
+
+
+def is_optional_heading(line: str) -> bool:
+    """Whether one line of a posting is, in full, the heading of a genuinely optional list ("Bonus points", "Pluses:"). Pure.
+
+    Leading and trailing marks (bullets, emphasis, emoji, ":") and HTML tags
+    are stripped first; a line with more after the heading ("Bonus: 10%
+    annual target", "Plus equity and benefits") is not a heading.
+    """
+
+    return _OPTIONAL_HEADING.fullmatch(_bare(line)) is not None
+
+
+def _optional_basis(class_basis: str) -> bool:
+    basis = _bare(_ONLY_LIST_PREFIX.sub("", _bare(class_basis), count=1))
+    return _OPTIONAL_BASIS.match(basis) is not None or _OPTIONAL_PHRASE.search(basis) is not None
+
+
+def _only_list_basis(class_basis: str) -> str:
+    basis = class_basis.strip()
+    if _ONLY_LIST_PREFIX.match(basis) is None:
+        basis = ONLY_LIST + basis
+    return basis[:MAX_CLASS_BASIS_CHARS].rstrip()
+
+
+def only_list_rows(rows: Sequence[ListedRequirement], posting_text: str | None) -> tuple[ListedRequirement, ...]:
+    """``rows`` with an only list of "Preferred" rows listed ``askable`` (the module text, ONLY LIST). Pure.
+
+    Fires only when there is at least one row, every row is ``nice_to_have``,
+    none is "No stated requirements" or has an optional ``class_basis``, and
+    ``posting_text`` is given and has no optional-list heading line
+    (:func:`is_optional_heading`). Each re-classed row's ``class_basis`` is
+    "only list: " (not doubled) and the wording it had, cut to 200 characters.
+    """
+
+    if (
+        posting_text is None or not rows or any(row.requirement_class != "nice_to_have" for row in rows)
+        or any(fold(row.requirement).rstrip(".") == _NO_STATED_REQUIREMENTS or _optional_basis(row.class_basis) for row in rows)
+        or any(is_optional_heading(line) for line in posting_text.splitlines())
+    ):
+        return tuple(rows)
+    return tuple(replace(row, requirement_class="askable", class_basis=_only_list_basis(row.class_basis)) for row in rows)
+
+
 def extracted(
     posting_sha256: str, matrix: Sequence[object], *, extracted_at: str, prompt_version: str | None = None, model: str | None = None,
-    profile_id: str | None = None,
+    profile_id: str | None = None, posting_text: str | None = None,
 ) -> tuple[PostingRequirements, tuple[str, ...]]:
     """``(the list a first assessment's matrix makes, the id of every row of the matrix in its order)``. Pure.
 
     A row that carries one of the ``elig-`` ids keeps it and is not in the
     list; every other row gets its content-derived id.  A row with no class
-    is listed ``hard``, as every reader has always read it.
+    is listed ``hard``, as every reader has always read it.  ``posting_text``:
+    the posting's text, which an only list of "Preferred" rows is read against
+    (:func:`only_list_rows`); without it no row is re-classed.
     """
 
     listed = [row for row in matrix if not is_eligibility_id(_row_value(row, "id"))]
@@ -271,7 +356,9 @@ def extracted(
             row_id, str(_row_value(row, "requirement") or ""), klass if klass in _CLASSES else "hard",  # type: ignore[arg-type]
             str(_row_value(row, "class_basis") or ""), tuple(_row_value(row, "alternatives") or ()),  # type: ignore[arg-type]
         ))
-    found = PostingRequirements(posting_sha256, RULES_VERSION, extracted_at, ExtractedBy(prompt_version, model, profile_id), tuple(rows))
+    found = PostingRequirements(
+        posting_sha256, RULES_VERSION, extracted_at, ExtractedBy(prompt_version, model, profile_id), only_list_rows(rows, posting_text),
+    )
     return found, tuple(row_ids)
 
 
@@ -434,6 +521,7 @@ def comparable(first: RequirementsRef | None, second: RequirementsRef | None) ->
 
 __all__ = [
     "ID_PREFIX",
+    "ONLY_LIST",
     "RULES_VERSION",
     "SCHEMA_VERSION",
     "ExtractedBy",
@@ -446,6 +534,8 @@ __all__ = [
     "extracted",
     "fold",
     "is_eligibility_id",
+    "is_optional_heading",
+    "only_list_rows",
     "read_list",
     "requirements_dir",
     "requirements_path",

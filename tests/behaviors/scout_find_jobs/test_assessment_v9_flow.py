@@ -244,7 +244,7 @@ def test_a_v9_answer_gets_its_ids_its_gate_the_requirement_list_a_selection_and_
     assert all(row.sources == () for row in stored.result.matrix) and stored.result.pick is None
     # 2. The list, and which list the rows are.
     assert stored.requirements_ref is not None and stored.requirements_ref.to_json() == {
-        "posting_sha256": stored.posting_sha256, "rules_version": "req-rules:1", "digest": listed.digest, "rows": 4, "list": "stored",
+        "posting_sha256": stored.posting_sha256, "rules_version": "req-rules:2", "digest": listed.digest, "rows": 4, "list": "stored",
     }
     assert listed.extracted_by.profile_id == fx.default_profile_id and listed.extracted_by.model == "fixture-model"
     reread = AssessResponse.from_json(parse_json_bytes(_assessment_path(fx).read_bytes()))
@@ -271,7 +271,7 @@ def test_a_v9_answer_gets_its_ids_its_gate_the_requirement_list_a_selection_and_
     assert selection is not None and (selection["picked_by"], selection["fallback"], selection["draft"], selection["model_pick"]) == ("code", "no_pick", False, None)
     assert selection["made_from"] == {"result_digest": suggestions.result_digest(stored), "master_revision_id": _master(fx).revision.revision_id}
     assert selection["resume"]["stored_path"] == str(_resume_path(fx)) and selection["resume"]["origin"] == "pick"
-    assert record.basis["requirements"] == {"rules_version": "req-rules:1", "digest": listed.digest, "list": "stored"}
+    assert record.basis["requirements"] == {"rules_version": "req-rules:2", "digest": listed.digest, "list": "stored"}
     assert record.basis["assessment"]["result_digest"] == suggestions.result_digest(stored) and record.proposed is None
     assert [(item.id, item.kind, item.source, item.status) for item in record.suggestions] == [("sg-1", "reword", "assessment", "open"), ("sg-2", "gap", "assessment", "open")]
     assert record.printed() and set(record.printed()) <= set(_master(fx).master.items)

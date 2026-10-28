@@ -1227,7 +1227,7 @@ def run_quick_assessment(
 
             extracted_list, row_ids = extracted(
                 posting_digest, body.matrix, extracted_at=assessed_at, prompt_version=assess_prompt_version(candidate_work_mode),
-                model=_model_id(getattr(binding.port, "resolved_model", None)), profile_id=resume.profile_id,
+                model=_model_id(getattr(binding.port, "resolved_model", None)), profile_id=resume.profile_id, posting_text=job.text,
             )
         body = _v9_body(body, attempt.extras, row_ids)
         resume_gate = gate(body.matrix, body.structured_questions, body.verdict).record()

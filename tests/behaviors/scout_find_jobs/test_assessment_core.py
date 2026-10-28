@@ -146,8 +146,8 @@ GOLDEN_PROMPT = (
     '- HARD: required years of experience; a level the posting states as a requirement (see rule 3); an explicit clearance; an explicitly excluded domain, including a required area of work that the candidate\'s own facts explicitly disclaim ("has not worked on X", rule 1): the disclaimer makes it an excluded domain, so that row is HARD and its "unmet" status forces "not_a_match"; and a location/residency or in-office statement the posting itself makes (see rule 4).\n'
     '- ASKABLE: a named tool, cloud platform, language, framework, database, domain or specific technology the posting requires in a line or clause of its own (a line that names one or two tools included), each tool of a list the posting words as required, required experience such as mentoring engineers or having worked in a named kind of company, and any degree, enrolment or student-status requirement (see rule 1). Lacking it is never disqualifying by itself (tools are learnable, and the candidate may have unlisted experience), so an ASKABLE row is "met", "unclear" (ask about it) or "unmet" (the candidate\'s facts rule it out, or state a lower level than the posting requires; this does NOT force not_a_match).\n'
     '- LIST_ITEM: one tool of a list of three or more that the posting words as examples or breadth, or lists with no requirement wording at all (shape (c) of "A list of tools" above), and nothing else. The posting asks for the set or shows the kind of thing it means, so no single item weighs what a requirement of its own does. A LIST_ITEM row is "met", "unclear" (ask about it, like an ASKABLE row) or "unmet"; it never forces "not_a_match" and never holds the verdict at "pending_user_answers", however many are open (rule 7).\n'
-    '- NICE_TO_HAVE: anything the posting phrases as "bonus", "plus", "preferred", "desirable", "highly desirable", "nice to have", or lists under such a heading. Exception: when the posting\'s MAIN skills list is headed "Desirable", "Preferred" or the like AND a separate "Bonus", "Nice to have" or "Plus" list exists, the main list is the posting\'s requirements (its rows are HARD or ASKABLE by the classes above, never NICE_TO_HAVE); only the separate list is NICE_TO_HAVE. A "preferred" option inside a required bullet ("Spark preferred; Ray/Dask or similar", "GitHub preferred") does not make the bullet nice_to_have: the bullet stays required and the preferred tool is just one way to meet it. NICE_TO_HAVE rows never change the verdict and never produce a question.\n'
-    '- On a FIRST assessment (no REQUIREMENT LIST in this prompt) every row says why it has its class; with a list, leave "class_basis" out. "class_basis" is the posting\'s OWN wording that makes it this class, copied from the posting, at most 200 characters: the heading it stands under together with its first words ("Requirements: 8+ years building backend systems"), or the phrase that decides it ("You must have production experience with all of", "such as Kafka, Elasticsearch, ClickHouse and Cassandra", "Nice to have:", "Go is a plus"). For a tool of a bare list, which has no such phrase, say so and copy the list: "listed with no requirement wording: Kafka, Elasticsearch, ClickHouse". Apart from those five fixed words it is never your own explanation and never anything about the candidate.\n'
+    '- NICE_TO_HAVE: anything the posting phrases as "bonus", "plus", "preferred", "desirable", "highly desirable", "nice to have", or lists under such a heading. Exception: when the posting\'s MAIN skills list is headed "Desirable", "Preferred" or the like AND a separate "Bonus", "Nice to have" or "Plus" list exists, the main list is the posting\'s requirements (its rows are HARD or ASKABLE by the classes above, never NICE_TO_HAVE); only the separate list is NICE_TO_HAVE. The same holds when the posting\'s ONLY list is headed "Preferred", "Desired", "Desirable", "Nice to have", "Ideal" or the like and no "Required", "Minimum", "Must" or "Basic" list exists: it is the posting\'s requirements, and each row\'s class_basis begins "only list: "; an only list headed "Bonus", "Bonus points", "Pluses" or "Extra credit" stays NICE_TO_HAVE. A "preferred" option inside a required bullet ("Spark preferred; Ray/Dask or similar", "GitHub preferred") does not make the bullet nice_to_have: the bullet stays required and the preferred tool is just one way to meet it. NICE_TO_HAVE rows never change the verdict and never produce a question.\n'
+    '- On a FIRST assessment (no REQUIREMENT LIST in this prompt) every row says why it has its class; with a list, leave "class_basis" out. "class_basis" is the posting\'s OWN wording that makes it this class, copied from the posting, at most 200 characters: the heading it stands under together with its first words ("Requirements: 8+ years building backend systems"), or the phrase that decides it ("You must have production experience with all of", "such as Kafka, Elasticsearch, ClickHouse and Cassandra", "Nice to have:", "Go is a plus"). For a tool of a bare list, which has no such phrase, say so and copy the list: "listed with no requirement wording: Kafka, Elasticsearch, ClickHouse". Apart from those fixed words (and the prefix "only list: ") it is never your own explanation and never anything about the candidate.\n'
     '\n'
     'RULES:\n'
     "1. Status is decided from the candidate's facts (resume text plus CANDIDATE CONSTRAINTS plus PRIOR ANSWERS), never from your overall impression:\n"
@@ -237,15 +237,18 @@ GOLDEN_RETRY_PROMPT = (
 
 # sha256 of the golden prompts (the strings above are the source of truth;
 # the digests guard the transcription). Re-captured for assess-prompt-v10, again for 0.1.11.12 F5a (``case_by_case``) and
-# again for 0.1.11.12 F5b (rule 4: an office list in several countries alone does not meet the country requirement).
-GOLDEN_SHA256 = "ba4c35189b257373c7dd2c16973788aaca862e414ef4a29c1093ce0974b19c22"
-GOLDEN_RETRY_SHA256 = "9181a4419bf3589596a398aa87699e186070fd6bcf8e8c43f1de621b2f51c296"
+# again for 0.1.11.12 F5b (rule 4: an office list in several countries alone does not meet the country requirement) and
+# again for 0.1.11.12 F2b (NICE_TO_HAVE: an only "Preferred" list is the posting's requirements; the class_basis line allows
+# the prefix "only list: ").
+GOLDEN_SHA256 = "01ea95cd99a324cc7ae5e748ab80f4b5a16470a5457230b1fa0e7797631f9bb3"
+GOLDEN_RETRY_SHA256 = "6d60e137fc791e4bb9e12967649cbc34d6c88e10fcb5821920bf05aa54f827c2"
 # 25,000-byte posting text and resume plus a 400-char validation error:
 # the three ``_MAX_PROMPT_*`` bounds (12_000 / 24_000 / 300) produce this exact prompt.
 # 0.1.11.10 INTENTIONAL CHANGE: the resume bound is 24,000 (it was 12,000; the inputs here were 13,000 bytes), so the
 # prompt cuts nothing off the assess view of a master of ordinary size (``assess_master.ASSESS_EVIDENCE_CAP``).
-GOLDEN_BOUNDED_SHA256 = "8322d99e2c7b58b273b8c0433b46aec3027210add877b51e55be52e66821dfda"
-GOLDEN_BOUNDED_LEN = 69_936
+# 0.1.11.12 F2b: re-captured (EXECUTED) for the NICE_TO_HAVE only-list sentence and the class_basis "only list: " prefix.
+GOLDEN_BOUNDED_SHA256 = "a23bf59ef0d85ff4685cbbda5d3be4b717786498dc0e1f81664ed6ca49525b0d"
+GOLDEN_BOUNDED_LEN = 70_325
 
 # Digest of the shipped ``assess.md`` bytes; bump ONLY when the template changes on purpose.
 # assess-prompt-v2 (v0.1.9) INTENTIONAL CHANGE: bumped for the rewritten body (see above).
@@ -290,7 +293,11 @@ GOLDEN_BOUNDED_LEN = 69_936
 # meets the country requirement only when it says the role may be done from an eligible country (or from anywhere), and
 # a LOCATION line such as "Remote - US" says it; an office list alone is "unclear" with one question. Goldens re-captured
 # from the renderer (EXECUTED).
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:ceaea9a91bb944fc966873c4a8f41472d5c3fcc8c77cf2e13a980037f927e20f"
+# 0.1.11.12 F2b (still assess-prompt-v10, unreleased): NICE_TO_HAVE says a posting's ONLY list headed "Preferred",
+# "Desired", "Desirable", "Nice to have" or "Ideal" (no "Required"/"Minimum"/"Must"/"Basic" list) is its requirements,
+# class_basis "only list: ..."; an only "Bonus"/"Pluses"/"Extra credit" list stays NICE_TO_HAVE (req-rules:2); the
+# class_basis line reads 'Apart from those fixed words (and the prefix "only list: ")'.
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:c5ad813f882581a904072b1aed314a1ff09837c4998d23ca844740208d1327da"
 SHIPPED_PROMPT_VERSION = "assess-prompt-v10"
 
 

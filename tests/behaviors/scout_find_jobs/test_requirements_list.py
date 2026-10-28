@@ -93,7 +93,7 @@ def test_a_first_assessments_matrix_becomes_the_list_and_the_rows_about_the_cand
     assert found.rows[1].alternatives == ("Cassandra", "MongoDB") and found.rows[1].class_basis == "Requirements: Cassandra or MongoDB"
     assert [row.requirement_class for row in found.rows] == ["hard", "askable", "list_item"]
     stored = found.to_json()
-    assert stored["schema_version"] == "scout-posting-requirements:1" and stored["rules_version"] == rl.RULES_VERSION == "req-rules:1"
+    assert stored["schema_version"] == "scout-posting-requirements:1" and stored["rules_version"] == rl.RULES_VERSION == "req-rules:2"
     assert stored["extracted_by"] == {"prompt_version": "assess-prompt-v9", "model": "fixture-model", "profile_id": "profile_1"}
     assert stored["digest"] == found.digest == rl.rows_digest(found.rows) and stored["posting_sha256"] == POSTING
     assert rl.PostingRequirements.from_json(parse_json_bytes(json.dumps(stored).encode())) == found
@@ -125,7 +125,7 @@ def test_the_list_is_stored_once_and_never_changes(home: Path) -> None:
     ref = rl.settle_first(home, home, mine)
     path = rl.requirements_path(home, home, POSTING)
     assert path.parent == home / "scout" / "project_test" / "requirements" and path.is_file()
-    assert ref.to_json() == {"posting_sha256": POSTING, "rules_version": "req-rules:1", "digest": mine.digest, "rows": 3, "list": "stored"}
+    assert ref.to_json() == {"posting_sha256": POSTING, "rules_version": "req-rules:2", "digest": mine.digest, "rows": 3, "list": "stored"}
     written = path.read_bytes()
     assert rl.read_list(home, home, POSTING) == mine and rl.read_list(home, home, OTHER_POSTING) is None
     # A second first assessment that extracted OTHER rows keeps its own; the file is byte for byte what it was.
@@ -168,12 +168,12 @@ def test_a_list_of_an_older_rules_version_is_moved_aside_and_kept(home: Path, mo
     rl.settle_first(home, home, old)
     path = rl.requirements_path(home, home, POSTING)
     before = path.read_bytes()
-    monkeypatch.setattr(rl, "RULES_VERSION", "req-rules:2")
+    monkeypatch.setattr(rl, "RULES_VERSION", "req-rules:3")
     assert rl.read_list(home, home, POSTING) is None  # extracted under other rules: not the list of these
     new, _ids = _extract([*MATRIX, _row("Terraform")])
-    assert new.rules_version == "req-rules:2" and rl.settle_first(home, home, new).kind == "stored"
+    assert new.rules_version == "req-rules:3" and rl.settle_first(home, home, new).kind == "stored"
     assert rl.read_list(home, home, POSTING) == new
-    aside = path.with_name(f"{path.stem}.req-rules-1.json")
+    aside = path.with_name(f"{path.stem}.req-rules-2.json")
     assert aside.read_bytes() == before  # never deleted
     # A row whose words did not change keeps its id under the new rules.
     assert set(old.ids()) <= set(new.ids())

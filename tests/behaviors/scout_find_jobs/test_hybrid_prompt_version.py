@@ -72,12 +72,14 @@ PROMPT_SHA256_V9 = {
 #: reads "met" from CLEAR lines only (a role within 8 years, a project), a level word on a named tool is part of the
 #: requirement, and a met row cites a clear line; 0.1.11.12 F5a: rule 5 and the output schema name ``case_by_case``;
 #: 0.1.11.12 F5b: rule 4 reads an office list in several countries alone as "unclear", and a LOCATION line such as
-#: "Remote - US" as the statement that the role may be done from that country; re-captured from the renderer).
+#: "Remote - US" as the statement that the role may be done from that country; 0.1.11.12 F2b: NICE_TO_HAVE reads an
+#: only "Preferred"/"Desired"/"Nice to have" list as the posting's requirements and class_basis allows the prefix
+#: "only list: "; re-captured from the renderer).
 PROMPT_SHA256 = {
-    "": "ad06d1a2c64b746b1b12cd733353bba4d97d8fe352bdf544874c243385a96009",
-    "remote": "af39919ec1b38f91dd000e33bdff3068788357ff593ff0d9416f9b43b81c1893",
-    "onsite": "ca7900d03e249caedc58a357600d0e5f95e340603c68f495e0b9a914fe61d9b7",
-    "hybrid": "1554dadab484ef2a838c10ac83eb3b8850d9a200d49ba69fa082f443099e7af9",
+    "": "b9feb8c1864db5b9d33390c2a7a44b8719abd339e140c70906fcb39f21630cd9",
+    "remote": "61cf67b2266d49796c3257d4d00380ed8d891efb358cacaf1a9cfe61794e97d9",
+    "onsite": "fb46cff4586b0674941441661e96b4fefbbe0305a09dad2af077f74e7cf725a6",
+    "hybrid": "75476f9d11fca51320b0436b33d96c45752967ac584cae67c6cf47738a42a7a0",
 }
 #: The same under assess-prompt-v7: the fenced prompt, before the requirement weights (0110-10-03).
 PROMPT_SHA256_V7 = {
