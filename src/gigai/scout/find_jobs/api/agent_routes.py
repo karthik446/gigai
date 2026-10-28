@@ -125,10 +125,10 @@ def _index_join(home_root: Path, target: Path, identity: str, *, profile_id: str
         try:
             current = basis.current(row.profile_id)  # type: ignore[attr-defined]
             if current is not None:
-                # The board's own field when the mode is not what the location text alone says.
+                # The board's own field when the mode is not what the location text and the posting body alone say.
                 stated = text.work_mode  # type: ignore[attr-defined]
-                board = WorkMode(stated) if derive_work_mode(text.location, None).mode != stated and stated in {mode.value for mode in WorkMode} else None  # type: ignore[attr-defined]
-                shaped = type("_Posting", (), {"location": text.location, "work_mode": board})()  # type: ignore[attr-defined]
+                board = WorkMode(stated) if derive_work_mode(text.location, None, text.text).mode != stated and stated in {mode.value for mode in WorkMode} else None  # type: ignore[attr-defined]
+                shaped = type("_Posting", (), {"location": text.location, "work_mode": board, "text": text.text})()  # type: ignore[attr-defined]
                 wanted = type("_Wanted", (), {"effective_work_mode": WorkModePreference(current.work_mode or "any"), "location": current.location})()
                 fit = work_mode_fit(shaped, wanted).to_json()  # type: ignore[arg-type]
         except Exception:  # noqa: BLE001 - display-only: no fit beats a failed read

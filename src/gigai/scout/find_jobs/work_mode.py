@@ -18,6 +18,22 @@ A posting's work mode, in this order:
 3. else ``unknown`` (empty text, a bare country or region, a bare state):
    kept under every mode and labelled, never guessed.
 
+0.1.11.12 F5b: the posting's own body can correct a remote or unknown
+label. When the board field or the location reads ``remote`` or
+``unknown`` and one sentence of the body ties a count of attendance days
+to the office, on-site, in-person or hybrid work ("three days a week in
+our office", "2 days per week on-site", "in the office 3 days", "twice a
+week in the office", "in the office Tuesdays and Thursdays"), the mode is
+``hybrid`` with source ``posting_text``. A false hybrid drops a remote
+role from a remote-only search unseen, so the read leans to "not said":
+a bare "hybrid" with no day count, "hybrid cloud" / "hybrid search", a
+home office, 6 or 7 days, a count more than a few words from the office
+word, and a sentence about customers, travel, offsites, onboarding,
+optional visits or a negation are not office days; a body that says
+"fully remote", "100% remote" or "no office requirement" (not "not fully
+remote") is never read as hybrid; a body that says nothing leaves the
+label. An on-site or plain-city label is not changed by the body.
+
 0110-8-10: a city that shares a state's name is a city. A state NAME that is
 followed by a state ("New York, NY", "New York, New York, USA", "Washington,
 District of Columbia", "Delaware, OH") is the city in that state, so the
@@ -70,6 +86,7 @@ UNKNOWN = "unknown"
 SOURCE_BOARD = "board"
 SOURCE_DERIVED = "derived"
 SOURCE_NONE = "none"
+SOURCE_POSTING_TEXT = "posting_text"
 
 # Most open first: a posting that states several modes offers the first.
 _OPENNESS = (REMOTE, HYBRID, ONSITE)
@@ -90,6 +107,38 @@ _ONSITE_RE = re.compile(r"\bon-?\s?site\b|\bin[- ]office\b|\boffice\b|\bin[- ]pe
 _NOISE = " \t()[]-–—,.:*"
 # "Washington, DC" is a city, not the state of Washington plus a district.
 _WASHINGTON_DC_RE = re.compile(r"\bwashington,?\s*d\.?\s?c\b")
+
+# 0.1.11.12 F5b: office days in the posting body (see the module docstring). Read per sentence of the folded body, with
+# a few non-attendance phrases removed first: an ATTENDANCE word (office, on-site, in-office, in-person, hybrid that is
+# not a product) and a COUNT (1-5 days, once/twice/N times a week, a weekday) at most ``_NEAR_WORDS`` words apart, in a
+# sentence with no customer/travel/optional marker and no negation.
+_NOT_ATTENDANCE_PHRASE_RE = re.compile(
+    r"\b(?:home|back|front|box|post)\s+offices?\b|\boffices?\s+(?:hours|suites?|supplies|space|stipends?|equipment|setup)\b"
+    r"|\bnot\s+(?:a\s+)?(?:fully|completely|entirely|totally|100\s?%)?\s*-?\s*remote\b"
+)
+_ATTENDANCE_RE = re.compile(
+    r"\boffices?\b|\bon-?\s?site\b|\bin-?\s?office\b|\bin-?\s?person\b"
+    r"|\bhybrid\b(?![\s-]*(?:cloud|search|retrieval|infrastructure|architecture|apps?\b|deployments?|environments?|engines?|storage|vehicles?|ml\b|ai\b|offices?\b|work\b|teams?\b))"
+)
+_NUM = r"(?:[1-5]|one|two|three|four|five)"
+_COUNT_RE = re.compile(
+    rf"\b{_NUM}(?:\s*(?:-|to|or)\s*{_NUM})?(?:\s+(?:in-?\s?office|office|on-?\s?site|in-?\s?person))?\s*-?\s*days?\b"
+    r"(?!\s*(?:a|per|each|every|/|of\s+the|of\s+each|of\s+every)\s*(?:month|quarter|year)|\s+(?:monthly|quarterly|annually|yearly))"
+    rf"|\b(?:once|twice|{_NUM}\s+times)\s+(?:a|per|each|every)\s+week\b"
+    r"|\b(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|mon|tues?|wed|thu(?:rs?)?|fri)\b"
+)
+_NOT_ATTENDANCE_SENTENCE_RE = re.compile(
+    r"\b(?:customers?|clients?|onboarding|offsites?|off-sites?|retreats?|kick-?offs?|summits?|conferences?|travel\w*"
+    r"|optional(?:ly)?|if\s+you\s+(?:want|wish|like|prefer|choose)|for\s+those|welcome\s+to|(?:is|are)\s+open|free\s+to)\b"
+    r"|\b(?:not|no|never)\b|n't\b"
+)
+_NEAR_WORDS = 5
+_FULLY_REMOTE_RE = re.compile(
+    r"(?<!not )\b(?:fully|completely|entirely|totally|100\s?%)\s*-?\s*remote\b|\bno\s+(?:in-?\s?)?office\s+requirement"
+    r"|\bno\s+requirement\s+to\s+(?:come|go|be)\s+(?:in|into)\s+(?:the|an|our)\s+office"
+)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
+_WORD_RE = re.compile(r"\w+")
 
 # The small metro alias table: (label, states, folded city names). A hit is
 # only a match when the posting names none of other states (Aurora, IL is
@@ -148,7 +197,7 @@ def in_person_modes(preference: WorkModePreference | str) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class PostingWorkMode:
-    """A posting's work mode and where it came from (``board``/``derived``/``none``)."""
+    """A posting's work mode and where it came from (``board``/``derived``/``posting_text``/``none``)."""
 
     mode: str
     source: str
@@ -248,8 +297,42 @@ def _names_a_city(part: str) -> bool:
     return False
 
 
-def derive_work_mode(location: str | None, board: WorkMode | None = None) -> PostingWorkMode:
-    """The posting's work mode: the board's field, else its location text, else unknown."""
+def _says_office_days(text: str) -> bool:
+    """Whether a posting body says the work has office, on-site or in-person days (the F5b rule above). Pure."""
+
+    folded = _fold(text)
+    if _FULLY_REMOTE_RE.search(folded):
+        return False
+    for raw in _SENTENCE_SPLIT.split(folded):
+        sentence = _NOT_ATTENDANCE_PHRASE_RE.sub(" ", raw)
+        if _NOT_ATTENDANCE_SENTENCE_RE.search(sentence):
+            continue
+        places = [match.span() for match in _ATTENDANCE_RE.finditer(sentence)]
+        counts = [match.span() for match in _COUNT_RE.finditer(sentence)]
+        if any(_words_apart(sentence, place, count) <= _NEAR_WORDS for place in places for count in counts):
+            return True
+    return False
+
+
+def _words_apart(sentence: str, first: tuple[int, int], second: tuple[int, int]) -> int:
+    """How many words lie between two spans of ``sentence`` (0 when they touch or overlap)."""
+
+    left, right = sorted((first, second))
+    return len(_WORD_RE.findall(sentence[left[1]:right[0]])) if right[0] > left[1] else 0
+
+
+def derive_work_mode(location: str | None, board: WorkMode | None = None, text: str | None = None) -> PostingWorkMode:
+    """The posting's work mode: the board's field, else its location text, else unknown; a remote or unknown one is hybrid when ``text`` says office days."""
+
+    label = _label_work_mode(location, board)
+    if text and label.mode in (REMOTE, UNKNOWN) and _says_office_days(text):
+        return PostingWorkMode(HYBRID, SOURCE_POSTING_TEXT)
+    return label
+
+
+def _label_work_mode(location: str | None, board: WorkMode | None) -> PostingWorkMode:
+    """The work mode the board's field or the location text states, else unknown."""
+
 
     if board is not None:
         return PostingWorkMode(board.value, SOURCE_BOARD)
@@ -330,7 +413,7 @@ def work_mode_fit(posting: PostingRow, config: FindJobsConfig) -> WorkModeFit:
     """Does ``posting`` pass ``config``'s work mode + area? (the N37 semantics above)."""
 
     preference = config.effective_work_mode
-    derived = derive_work_mode(posting.location, posting.work_mode)
+    derived = derive_work_mode(posting.location, posting.work_mode, getattr(posting, "text", None))
     area = parse_area(config.location) if preference in (WorkModePreference.HYBRID, WorkModePreference.ONSITE) else None
     checks_area = area is not None and derived.mode in (HYBRID, ONSITE, IN_PERSON)
     matched = in_area(posting.location, area) if checks_area and area is not None else None

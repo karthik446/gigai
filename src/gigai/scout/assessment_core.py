@@ -67,7 +67,7 @@ from .find_jobs.contracts import (
     SponsorshipStatus,
     is_row_id,
 )
-from .find_jobs.filters import sponsorship_from_text
+from .find_jobs.filters import _CITY_COUNTRIES, _US_CITY_ALIASES, _US_STATE_NAMES, location_countries, sponsorship_from_text
 from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
 from .requirement_weights import bound_rows, cap_list_item_questions, cap_mandatory_questions, settled_verdict
@@ -655,6 +655,7 @@ def assess_once(
 
     boundary = Boundary(
         source_ids=offered_sources(ctx), listed=ctx.requirements, posting_sha256=posting_sha256(job.title, job.posting_text), posting_text=job.posting_text,
+        posting_location=job.location,
         countries=tuple(item.strip().upper() for item in ctx.countries if item and item.strip()),
         location=ctx.location.strip(), work_mode=ctx.work_mode, visa_required=ctx.visa_sponsorship_required,
         lines=parse_master_lines(ctx.resume_text) if ctx.resume_ids else {},
@@ -1091,6 +1092,8 @@ class Boundary:
     posting_sha256: str | None = None
     #: 0.1.11 C4: the posting's text (what a location the header names may be contradicted by), ``None`` outside ``assess_once``.
     posting_text: str | None = None
+    #: 0.1.11.12 F5b: the job's LOCATION header ("Remote - US" can say where rule 4's role may be done from), "" outside ``assess_once``.
+    posting_location: str = ""
     #: 0.1.11 C4b: the candidate's eligible countries (upper-case codes; empty: none stated), from the setup.
     countries: tuple[str, ...] = ()
     #: 0.1.11 GUARDFIX (orchestrator #88): the rest of the setup an ``elig-`` row's evidence is written from
@@ -1362,20 +1365,164 @@ def says_eligible_pay_office_or_entity(posting_text: str, countries: tuple[str, 
     return False
 
 
-def _location_unclear(decoded: Mapping[str, object], boundary: Boundary) -> Mapping[str, object]:
-    """``decoded`` of a v9 answer with an ``unmet`` or ``unclear`` ``elig-location`` row read as ``met`` when the posting says it can be done from anywhere. Pure.
+# --- 0.1.11.12 F5b (gigai-18i): rule 4 for a posting that names offices in several countries ----------------------------
+#
+# A posting that lists offices, hubs or an HQ in two or more countries ("offices in Toronto, London and Paris") and says
+# nowhere that this role may be done from one of the candidate's eligible countries (or from anywhere) does not meet the
+# country requirement: a model ``met`` on the ``elig-location`` row is read as ``unclear`` and its ``code_note`` names
+# every place and says why. The row then holds for ONE question: the model's own on the row when it asked one, else the
+# row's own (``row_question``), the one the unasked-row rule asks of every unclear must-have row (added here so that
+# rule does not force a retry). What says the role may be done from an eligible country: "anywhere"; a sentence whose
+# clause ("may be done remotely from", "open to candidates in", "remote in", "Remote (") names the country within a
+# few words, with no denial between the clause and the country; or the job's LOCATION header when it names only
+# eligible countries ("New York, NY") or remote work and an eligible country ("Remote - US"). Such a statement only
+# keeps a ``met`` row from being lowered; it never lifts an ``unmet`` / ``unclear`` row (the lift above is unchanged,
+# and on a several-country office list with no such statement it does not apply). A candidate with no country list
+# (or "ANY") is untouched. Places are read from country names (``_COUNTRY_NAMES``, the word "US"), the hub-city tables
+# ``filters`` reads bare cities with, US state names and a short US hub-city list; never from other two-letter codes
+# ("CA" is a state too). A false ``unclear`` costs one question; a false ``met`` keeps the model's own reading.
 
-    The row's questions (the model's) are dropped; a ``not_a_match`` that rested on the row alone is read again from
-    the remaining rows (``pending_user_answers`` when a must-have question is still open, else matched), and the
-    model's reason for it is dropped. Anything else is returned untouched.
+_SENTENCES = re.compile(r"(?<=[.!?])\s+|\n+")
+_OFFICE_LIST = re.compile(r"\boffices?\b|\bhubs?\b|headquarter\w*|\bHQ\b", re.IGNORECASE)
+_MAY_BE_DONE_FROM = re.compile(
+    r"\b(?:may|can|could)\s+(?:also\s+)?be\s+(?:done|performed|held|worked|based|located|filled)\s+(?:fully\s+)?(?:remotely\s+)?(?:from|in|within)\b"
+    r"|\bopen\s+to\s+(?:candidates|applicants|people|engineers|talent)\s+(?:based\s+|located\s+|living\s+|residing\s+)?(?:in|from|across|within)\b"
+    r"|\bremote(?:ly)?\s+(?:from|in|within|across)\b|\bremote\s*[(:–—]|\bremote\s+-\s",
+    re.IGNORECASE,
+)
+_CLAUSE_DENIES = re.compile(r"\b(?:not|cannot|can't|unable|except|excluding)\b|n't\b", re.IGNORECASE)
+_DENIED_BEFORE = re.compile(r"\b(?:not|never)\s+(?:\w+\s+)?$", re.IGNORECASE)
+_CLAUSE_REACH = 5
+_WORDS = re.compile(r"\w+")
+#: US hub cities a posting names an office in (``filters`` reads only New York City / NYC as a US city).
+_US_HUB_CITIES = (
+    "new york", "san francisco", "seattle", "austin", "boston", "chicago", "los angeles", "denver", "atlanta", "miami",
+    "washington, d.c.", "washington dc", "san diego", "san jose", "palo alto", "mountain view", "pittsburgh",
+    "philadelphia", "portland", "salt lake city", "dallas", "houston", "raleigh", "minneapolis", "detroit",
+)
+_COUNTRY, _STATE, _CITY = "country", "state", "city"
+_PLACE_NAMES: tuple[tuple[re.Pattern[str], str, str], ...] = (
+    *((re.compile(rf"(?<![\w.]){re.escape(name)}(?![\w])", re.IGNORECASE), code, _COUNTRY) for code, names in _COUNTRY_NAMES.items() for name in names),
+    (re.compile(r"(?<![\w.])US(?![\w])"), "US", _COUNTRY),
+    *((re.compile(rf"(?<![\w]){re.escape(city)}(?![\w])", re.IGNORECASE), code, _CITY) for city, code in {**_CITY_COUNTRIES, **_US_CITY_ALIASES}.items()),
+    *((re.compile(rf"(?<![\w]){re.escape(city)}(?![\w])", re.IGNORECASE), "US", _CITY) for city in _US_HUB_CITIES),
+    # "Georgia" is a country too.
+    *((re.compile(rf"(?<![\w]){re.escape(state)}(?![\w])", re.IGNORECASE), "US", _STATE) for state in sorted(_US_STATE_NAMES - {"georgia"})),
+)
+#: Country codes written with "the" in a note ("the United States").
+_WITH_THE = frozenset({"US", "GB", "NL"})
+
+
+def _place_matches(sentence: str) -> list[tuple[int, int, str, str]]:
+    """``(start, end, code, kind)`` for each place ``sentence`` names, in order; of overlapping names the longest. Pure."""
+
+    found = sorted((match.start(), -len(match.group(0)), code, kind) for pattern, code, kind in _PLACE_NAMES for match in pattern.finditer(sentence))
+    out: list[tuple[int, int, str, str]] = []
+    for start, negative_length, code, kind in found:
+        if out and start < out[-1][1]:
+            continue
+        out.append((start, start - negative_length, code, kind))
+    return out
+
+
+def says_may_be_done_from(posting_text: str, countries: tuple[str, ...]) -> bool:
+    """Whether one sentence of the posting says this role may be done from an eligible country. Pure.
+
+    "may be done (remotely) from the United States", "can be performed from the US", "open to candidates based in
+    Canada", "remote in the US", "Remote (US)": the clause, then the country within ``_CLAUSE_REACH`` words, with no
+    denial before the clause ("not open to") or between it and the country ("can be done from anywhere except the
+    US"). A denial after the country ("..., but we do not offer relocation") does not undo it. With no eligible
+    country stated it is never true.
+    """
+
+    codes = {code for code in countries if code and code != "ANY"}
+    if not codes:
+        return False
+    for sentence in _SENTENCES.split(posting_text):
+        places = _place_matches(sentence)
+        for clause in _MAY_BE_DONE_FROM.finditer(sentence):
+            if _DENIED_BEFORE.search(sentence[: clause.start()]):
+                continue
+            for start, _end, code, _kind in places:
+                if start < clause.end():
+                    continue
+                if len(_WORDS.findall(sentence[clause.end() : start])) > _CLAUSE_REACH or _CLAUSE_DENIES.search(sentence[clause.start() : start]):
+                    break
+                if code in codes:
+                    return True
+    return False
+
+
+def header_says_eligible(location: str, countries: tuple[str, ...]) -> bool:
+    """Whether the job's LOCATION header names only eligible countries, or remote work and an eligible country. Pure."""
+
+    codes = {code for code in countries if code and code != "ANY"}
+    found = location_countries(location) if location and codes else set()
+    return bool(found) and (found <= codes or (_REMOTE.search(location) is not None and bool(found & codes)))
+
+
+def office_places(posting_text: str) -> list[tuple[str, str]]:
+    """``(place as written, country code)`` for each place the posting names in an office/hub/HQ sentence, in order. Pure.
+
+    A city followed by its state or country ("Toronto, Canada", "Austin, Texas") is one place.
+    """
+
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for sentence in _SENTENCES.split(posting_text):
+        if not _OFFICE_LIST.search(sentence):
+            continue
+        merged: list[tuple[int, int, str, str]] = []
+        for start, end, code, kind in _place_matches(sentence):
+            if merged and merged[-1][2] == code and re.fullmatch(r",\s*", sentence[merged[-1][1] : start]) and (merged[-1][3], kind) in ((_CITY, _STATE), (_CITY, _COUNTRY), (_STATE, _COUNTRY)):
+                merged[-1] = (merged[-1][0], end, code, kind)
+            else:
+                merged.append((start, end, code, kind))
+        for start, end, code, _kind in merged:
+            written = sentence[start:end]
+            if fold(written) not in seen:
+                seen.add(fold(written))
+                out.append((written, code))
+    return out
+
+
+def _office_list_note(places: list[tuple[str, str]], codes: tuple[str, ...]) -> str:
+    def name(code: str) -> str:
+        written = _COUNTRY_NAMES[code][0].title() if code in _COUNTRY_NAMES else code
+        return f"the {written}" if code in _WITH_THE else written
+
+    return (
+        f"Location (rule 4): the posting names offices in {len({code for _written, code in places})} countries "
+        f"({'; '.join(written for written, _code in places)}) and does not say this role may be done from "
+        f"{' or '.join(name(code) for code in codes)}; an office list alone does not meet it."
+    )
+
+
+def _location_unclear(decoded: Mapping[str, object], boundary: Boundary) -> tuple[Mapping[str, object], str | None]:
+    """``(decoded, code_note)``: a v9 answer's ``elig-location`` row read from the posting text (rule 4, both blocks above). Pure.
+
+    Lowered: a ``met`` row on a several-country office list that nothing says may be done from an eligible country (the
+    text or the LOCATION header) is read as ``unclear`` with one question, and the note says why (``None`` otherwise).
+    Lifted (unchanged before F5b, and never on such a list): an ``unmet`` or ``unclear`` row is read as ``met`` when the
+    posting says it can be done from anywhere or shows an eligible pay band, office or entity beside remote work; the
+    row's questions (the model's) are dropped; a ``not_a_match`` that rested on the row alone is read again from the
+    remaining rows (``pending_user_answers`` when a must-have question is still open, else matched), and the model's
+    reason for it is dropped. Anything else is returned untouched.
     """
 
     matrix = decoded.get("matrix")
     if not boundary.posting_text or not isinstance(matrix, list) or not all(isinstance(row, Mapping) for row in matrix) or not uses_v9_rules(matrix):
-        return decoded
+        return decoded, None
+    text = boundary.posting_text
+    codes = tuple(code for code in boundary.countries if code) if "ANY" not in boundary.countries else ()
+    worldwide = says_worldwide(text)
+    said_where = worldwide or says_may_be_done_from(text, codes) or header_says_eligible(boundary.posting_location, codes)
+    places = office_places(text) if codes and not said_where else []
+    if len({code for _written, code in places}) >= 2:
+        return _office_list_unclear(decoded, matrix, places, codes)
     rows = [row for row in matrix if row.get("id") == LOCATION_ROW_ID and row.get("status") in ("unmet", "unclear")]
-    if not rows or not (says_worldwide(boundary.posting_text) or says_eligible_pay_office_or_entity(boundary.posting_text, boundary.countries)):
-        return decoded
+    if not rows or not (worldwide or says_eligible_pay_office_or_entity(text, boundary.countries)):
+        return decoded, None
     out = dict(decoded)
     out["matrix"] = [{**row, "status": "met"} if any(row is hit for hit in rows) else row for row in matrix]
     named = {fold(str(row.get("requirement") or "")) for row in rows} | {LOCATION_ROW_ID, row_question_id(LOCATION_ROW_ID)}
@@ -1391,7 +1538,31 @@ def _location_unclear(decoded: Mapping[str, object], boundary: Boundary) -> Mapp
         out["verdict"] = "matched_above_threshold"
         if said == "not_a_match":
             out["not_a_match_reason"] = None
-    return out
+    return out, None
+
+
+def _office_list_unclear(
+    decoded: Mapping[str, object], matrix: list[Mapping[str, object]], places: list[tuple[str, str]], codes: tuple[str, ...]
+) -> tuple[Mapping[str, object], str | None]:
+    """``decoded`` with a ``met`` ``elig-location`` row read as ``unclear`` on a several-country office list, and why."""
+
+    hits = [row for row in matrix if row.get("id") == LOCATION_ROW_ID and row.get("status") == "met"]
+    if not hits:
+        return decoded, None
+    out = dict(decoded)
+    out["matrix"] = [{**row, "status": "unclear"} if any(row is hit for hit in hits) else row for row in matrix]
+    raw = decoded.get("questions")
+    questions = list(raw) if isinstance(raw, list) else []
+    for row in hits:
+        requirement = str(row.get("requirement") or "").strip()
+        named = {fold(requirement), LOCATION_ROW_ID, row_question_id(LOCATION_ROW_ID)}
+        asked = any(isinstance(item, Mapping) and (fold(str(item.get("requirement") or "")) in named or str(item.get("question_id") or "") in named) for item in questions)
+        if requirement and not asked:
+            questions.append(row_question(LOCATION_ROW_ID, requirement))
+    out["questions"] = questions
+    if _normalize_verdict(decoded.get("verdict")) == "matched_above_threshold":
+        out["verdict"] = "pending_user_answers"
+    return out, _office_list_note(places, codes)
 
 
 def setup_evidence(row_id: str, boundary: Boundary) -> str | None:
@@ -1535,7 +1706,7 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     boundary = boundary if boundary is not None else Boundary()
     decoded = _without_authorization(decoded)
     decoded = _transfer_label(decoded, boundary)
-    decoded = _location_unclear(decoded, boundary)
+    decoded, location_note = _location_unclear(decoded, boundary)
     unknown_sources: list[tuple[str, str]] = []
     matrix = decoded.get("matrix")
     normalized_matrix: list[object] = []
@@ -1560,6 +1731,8 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
             written = setup_evidence(str(normalized_row.get("id") or ""), boundary)
             if written is not None:
                 normalized_row["resume_evidence"] = [written]  # the model's own sentence is discarded
+            if location_note is not None and normalized_row.get("id") == LOCATION_ROW_ID:
+                normalized_row["code_note"] = location_note
             normalized_matrix.append(normalized_row)
     else:
         normalized_matrix = matrix

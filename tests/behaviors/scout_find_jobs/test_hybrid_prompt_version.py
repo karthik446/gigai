@@ -71,12 +71,13 @@ PROMPT_SHA256_V9 = {
 #: sha256 of the prompt each work mode renders for ``_JOB`` / ``_ctx`` now (assess-prompt-v10; 0.1.11.12 F1 wording: rule 1
 #: reads "met" from CLEAR lines only (a role within 8 years, a project), a level word on a named tool is part of the
 #: requirement, and a met row cites a clear line; 0.1.11.12 F5a: rule 5 and the output schema name ``case_by_case``;
-#: re-captured from the renderer).
+#: 0.1.11.12 F5b: rule 4 reads an office list in several countries alone as "unclear", and a LOCATION line such as
+#: "Remote - US" as the statement that the role may be done from that country; re-captured from the renderer).
 PROMPT_SHA256 = {
-    "": "eae9886ea376f78293d6bbaeb41ea8b83517719cd3bdbd480fbce3db5aa32f43",
-    "remote": "be80dbdb912e67b77aaadcc792e3559efb30f4e579cf273a1600c6321990fbdf",
-    "onsite": "99ad39821382468b7e88895a98d9fa16a2bd5d9131dcd310b57239ea94b41551",
-    "hybrid": "fe447396aa52dc9ce052e6c8b9504932d8a15326dd37b03a28e908214df1ddad",
+    "": "ad06d1a2c64b746b1b12cd733353bba4d97d8fe352bdf544874c243385a96009",
+    "remote": "af39919ec1b38f91dd000e33bdff3068788357ff593ff0d9416f9b43b81c1893",
+    "onsite": "ca7900d03e249caedc58a357600d0e5f95e340603c68f495e0b9a914fe61d9b7",
+    "hybrid": "1554dadab484ef2a838c10ac83eb3b8850d9a200d49ba69fa082f443099e7af9",
 }
 #: The same under assess-prompt-v7: the fenced prompt, before the requirement weights (0110-10-03).
 PROMPT_SHA256_V7 = {

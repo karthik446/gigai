@@ -373,7 +373,9 @@ class RunView:
         }
         # uat-bug-028: why the posting passed the run's work mode + area
         # (the card's line). Beside the posting, never in it: a mode read
-        # from the location text is `source: "derived"`, not a board field.
+        # from the location text is `source: "derived"`, one read from the
+        # posting body's office days `source: "posting_text"` (F5b), neither
+        # a board field.
         if self.config is not None:
             value["work_mode_fit"] = work_mode_fit(row.posting, self.config).to_json()
         return value

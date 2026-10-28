@@ -1692,7 +1692,7 @@ def posting_texts(home_root: Path, rows: Iterable[PostingRecord]) -> dict[str, P
                 mode = derive_work_mode(posting.location, None)  # type: ignore[attr-defined]
                 read[job] = PostingText(posting.title, entry.company, posting.location, posting.url, None, mode.mode, None, board, posting_id, entry.company, stamp(posting.updated_at))  # type: ignore[attr-defined]
                 continue
-            mode = derive_work_mode(row.location, row.work_mode)
+            mode = derive_work_mode(row.location, row.work_mode, row.text)
             read[job] = PostingText(row.title, row.company, row.location, row.url, row.text, mode.mode, _salary(row.pay), board, posting_id, entry.company, stamp(posting.updated_at))  # type: ignore[attr-defined]
         found.update({job: text for job, text in read.items() if text is not None})
         _keep_texts(key, files, read)
