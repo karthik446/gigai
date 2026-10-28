@@ -355,7 +355,9 @@ GATE_DECISIONS: tuple[str, ...] = (GATE_SUGGEST, GATE_HOLD_QUESTION, GATE_HOLD_U
 GATE_REASON_HARD_UNMET = "hard_unmet"
 GATE_REASON_QUESTION_OPEN = "question_open"
 GATE_REASON_ASKABLE_UNMET = "askable_unmet"
-GATE_REASONS: tuple[str, ...] = (GATE_REASON_HARD_UNMET, GATE_REASON_QUESTION_OPEN, GATE_REASON_ASKABLE_UNMET)
+#: 0.1.11.12 F2a: a must-have row ``answered`` (the user said yes, no resume line shows it): held like an open question.
+GATE_REASON_ANSWERED = "answered"
+GATE_REASONS: tuple[str, ...] = (GATE_REASON_HARD_UNMET, GATE_REASON_QUESTION_OPEN, GATE_REASON_ASKABLE_UNMET, GATE_REASON_ANSWERED)
 
 
 def _master_id(value: object, name: str) -> str:
@@ -1122,6 +1124,7 @@ __all__ = [
     "GATE_HOLD_UNMET",
     "GATE_NOT_A_MATCH",
     "GATE_REASONS",
+    "GATE_REASON_ANSWERED",
     "GATE_REASON_ASKABLE_UNMET",
     "GATE_REASON_HARD_UNMET",
     "GATE_REASON_QUESTION_OPEN",

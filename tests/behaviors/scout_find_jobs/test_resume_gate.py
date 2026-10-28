@@ -112,6 +112,31 @@ def test_row_4_alternatives_one_supported_counts_as_supported() -> None:
     assert resume_gate.uses_v9_rules(rows)
 
 
+@pytest.mark.parametrize("klass", ["hard", "askable", None])
+def test_row_2_answered_a_must_have_the_user_said_yes_to_and_no_resume_line_shows_holds_the_resume(klass: str | None) -> None:
+    """0.1.11.12 F2a (operator decision 2026-10-22): an ``answered`` must-have holds like an open must-have question."""
+
+    rows = [_row("8+ years", "hard", "met"), _row("Kafka", klass, "answered", id="req-aaaaaa", sources=["A tooling:kafka"]), _row("Helm", "list_item", "unclear")]
+    found = gate(rows, [_question("Helm")], MATCHED)
+    assert found.decision == HOLD_QUESTION and not found.suggests
+    assert [(reason.code, reason.requirement_id, reason.requirement) for reason in found.reasons] == [("answered", "req-aaaaaa", "Kafka")]
+    assert found.record() == GateRecord(HOLD_QUESTION, (GateReason("answered", "req-aaaaaa"),))
+    assert resume_gate.ANSWERED_LINE == "You said yes; add a line to your resume"
+    assert resume_gate.unasked_rows(rows, []) == []  # the answer is on file: nothing is asked again
+    # With an open must-have question beside it, the question comes first, then the answered row.
+    both = [*rows, _row("Go", "askable", "unclear", id="req-bbbbbb")]
+    assert [(reason.code, reason.requirement_id) for reason in gate(both, [_question("Go")], PENDING).reasons] == [("question_open", "req-bbbbbb"), ("answered", "req-aaaaaa")]
+    # A hard gap still decides first.
+    assert gate([*rows, _row("Clearance", "hard", "unmet", id="req-cccccc")], [], MATCHED).decision == NOT_A_MATCH
+
+
+@pytest.mark.parametrize("klass", ["list_item", "nice_to_have"])
+def test_an_answered_optional_row_never_holds(klass: str) -> None:
+    rows = [_row("8+ years", "hard", "met"), _row("Kafka", klass, "answered", id="req-aaaaaa")]
+    assert gate(rows, [], MATCHED).decision == SUGGEST
+
+
+
 # --- every matrix made before 0.1.11 is read by the rules it was made under --------------------------------------
 
 

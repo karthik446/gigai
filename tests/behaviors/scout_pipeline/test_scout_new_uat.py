@@ -288,7 +288,8 @@ def test_04_the_grid_orders_current_then_stale_then_not_assessed_and_says_n_of_m
         assert by_name["one_of_one"]["score_text"] == "thin posting, not enough requirements to score · 1 of 1 requirements · rank 40"  # 0.1.11.2: fewer than 4 rows
         assert by_name["matched"]["score_text"] == "thin posting, not enough requirements to score · 2 of 2 requirements · rank 60"
         assert by_name["answers"]["score_text"] == "Needs your answers · fit 50% · 1 of 2 requirements · rank 90"
-        assert by_name["no"]["score_text"] == "Not a match · fit 50% · 1 of 2 requirements · rank 99"
+        # 0.1.11.12 F2a: its hard row is unmet, so the raw 50% is shown capped at 49%.
+        assert by_name["no"]["score_text"] == "Not a match · fit 49% · 1 of 2 requirements · rank 99"
         assert by_name["old"]["score_text"] == "thin posting, not enough requirements to score (old assessment: older prompt) · 3 of 3 requirements · rank 95"
         assert by_name["ranked"]["score_text"] == "rank 97 · not assessed"
         assert by_name["unranked"]["score_text"] == "not ranked yet · not assessed"

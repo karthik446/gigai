@@ -462,6 +462,33 @@ def test_fit_100_with_a_buried_hard_row_is_a_fit_violation_and_fit_69_is_not(lin
     assert gold.score_result(strict_key(lines), met_result(), lines)["fit_violation"] is False  # every key row clear: nothing to cap
 
 
+def test_the_fit_scored_is_the_shown_one_so_an_open_must_have_caps_it_below_the_violation(lines: list[dict[str, Any]]) -> None:
+    """0.1.11.12 F2a: the scorer reads the number the Jobs page shows (``fit.shown_fit``), the raw percent capped."""
+
+    key = strict_key(lines, years="buried")
+    out = gold.score_result(key, met_result(unclear=("req-k8s",)), lines)  # 9 of 11 met: raw 82, one must-have open
+    assert (out["fit"], out["fit_violation"]) == (69, False) and out["key_below_met_rows"] == [{"line": 4, "item": None, "tier": "buried"}]
+
+
+def test_a_correct_unmet_read_of_a_key_missing_askable_row_is_capped_below_the_violation(lines: list[dict[str, Any]]) -> None:
+    """F2a fix round (coordinator ruling): an unmet askable row caps the shown fit at 69, so the right read is no violation."""
+
+    key = strict_key(lines, k8s="missing")
+    result = met_result()
+    for row in result["result"]["matrix"]:
+        if row["id"] == "req-k8s":
+            row.update(status="unmet", sources=[])  # the product says the gap the key holds: 9 of 11, raw 82
+    out = gold.score_result(key, result, lines)
+    assert (out["fit"], out["fit_violation"]) == (69, False)
+    assert out["key_below_met_rows"] == [{"line": 5, "item": "Kubernetes", "tier": "missing"}]
+
+
+def test_the_scored_rows_keep_their_id_so_the_sponsorship_label_is_told_apart_as_the_product_does(lines: list[dict[str, Any]]) -> None:
+    label = {"id": "elig-sponsorship", "requirement": "Work eligibility", "class": "hard", "status": "unmet"}  # named by its id only
+    out = gold.score_result(strict_key(lines), met_result(add=(label,)), lines)
+    assert out["fit"] == 85  # 11 of 13, uncapped: a v9 matrix's sponsorship row is a label (without its id: 49)
+
+
 def test_an_elig_row_without_a_tier_is_not_counted_and_a_v2_key_has_no_agreement(lines: list[dict[str, Any]]) -> None:
     key = strict_key(lines)
     key["musts"].append({"line": 0, "item": None, "class": "hard", "status": "met", "settled_by": []})
@@ -541,7 +568,7 @@ def test_the_fit_is_the_products_own_number_so_a_changed_fit_rule_changes_the_vi
         seen.append([f"{row.requirement_class.value}:{row.status.value}" for row in rows])
         return 49
 
-    monkeypatch.setattr(gold, "fit_percent", capped)
+    monkeypatch.setattr(gold, "shown_fit", capped)
     out = gold.score_result(key, met_result(), lines)
     assert (out["fit"], out["fit_violation"]) == (49, False) and out["key_below_met_rows"] == [{"line": 4, "item": None, "tier": "buried"}]
     assert seen == [["hard:met", "askable:met", "askable:met", "askable:met", "askable:met", "nice_to_have:met"]]  # the product's typed rows, from the stored matrix

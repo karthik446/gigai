@@ -15,7 +15,9 @@ no class is an old one and reads ``hard``):
                     ``unmet``
 ``hold_question``   a question waits on a mandatory row (or on no row of the    Needs your answers
                     matrix: nothing says it is minor); or, v9 rows only, a
-                    mandatory row is ``unclear`` with no question on it
+                    mandatory row is ``unclear`` with no question on it; or
+                    a mandatory row is ``answered`` (0.1.11.12: the user said
+                    yes and no resume line shows it, :data:`ANSWERED_LINE`)
 ``hold_unmet``      v9 rows only (OD1): an ``askable`` row is ``unmet`` and     Has a gap
                     nothing above holds. The model's verdict stays stored as
                     it came; no resume is made until the user asks for a draft
@@ -70,6 +72,7 @@ from .find_jobs.assess_contracts import (
     GATE_HOLD_QUESTION,
     GATE_HOLD_UNMET,
     GATE_NOT_A_MATCH,
+    GATE_REASON_ANSWERED,
     GATE_REASON_ASKABLE_UNMET,
     GATE_REASON_HARD_UNMET,
     GATE_REASON_QUESTION_OPEN,
@@ -86,6 +89,9 @@ HOLD_UNMET = GATE_HOLD_UNMET
 NOT_A_MATCH = GATE_NOT_A_MATCH
 #: The decisions under which no resume is made unless the user asks for a draft.
 HOLDS: frozenset[str] = frozenset({HOLD_QUESTION, HOLD_UNMET, NOT_A_MATCH})
+#: 0.1.11.12 F2a: what a hold on an ``answered`` row (reason code ``answered``) asks of the user; the words F1 gives the
+#: status (``contracts.MatrixStatus.ANSWERED``).
+ANSWERED_LINE = "You said yes; add a line to your resume"
 
 _V9_ROW_FIELDS = ("id", "class_basis", "alternatives", "sources")
 
@@ -283,7 +289,9 @@ def gate(matrix: Iterable[object], structured_questions: object, verdict: object
         return ResumeGate(NOT_A_MATCH, tuple(_row(GATE_REASON_HARD_UNMET, row) for row in hard_unmet))
     questions = structured_questions if isinstance(structured_questions, (list, tuple)) else ()
     unasked = unasked_rows(rows, questions)  # v9 rows only: an unresolved must-have holds, asked about or not
-    if holding_questions(rows, questions) or unasked:
+    # 0.1.11.12 F2a: a must-have the user said yes to that no resume line shows holds like an open question; nothing is asked.
+    answered = [row for row in rows if _field(row, "status") == "answered" and is_mandatory(row) and not is_authorization_row(row)]
+    if holding_questions(rows, questions) or unasked or answered:
         by_text = {_key(_field(row, "requirement")): row for row in reversed(rows)}
         asked: list[GateRow] = []
         seen: set[int] = set()
@@ -295,6 +303,7 @@ def gate(matrix: Iterable[object], structured_questions: object, verdict: object
                 seen.add(id(row))
                 asked.append(_row(GATE_REASON_QUESTION_OPEN, row))
         asked.extend(_row(GATE_REASON_QUESTION_OPEN, row) for row in unasked)
+        asked.extend(_row(GATE_REASON_ANSWERED, row) for row in answered)
         return ResumeGate(HOLD_QUESTION, tuple(asked))
     if uses_v9_rules(rows):
         gaps = [row for row in rows if _field(row, "status") == "unmet" and row_class(row) == ASKABLE]
@@ -325,6 +334,7 @@ def decision_of(item: object) -> str | None:
 
 
 __all__ = [
+    "ANSWERED_LINE",
     "HOLDS",
     "HOLD_QUESTION",
     "HOLD_UNMET",

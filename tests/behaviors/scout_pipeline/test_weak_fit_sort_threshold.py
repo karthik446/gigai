@@ -129,6 +129,19 @@ def test_the_fit_number_counts_a_must_have_twice_and_the_rules_need_known_number
         assert fit.fit_setting(tmp_path, None, path=path).to_json() == {**fit.DEFAULT_SETTING.to_json(), "source": "settings_unreadable"}
 
 
+def test_a_row_stores_and_serves_the_capped_fit_an_open_must_have_allows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.12 F2a: 9 of 10 must-haves met and one askable row open is fit 69 on the row, not the raw 90."""
+
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    fx.seed("aero", [lever_job("aero", 31)], seen_at=days_ago(1))
+    job = job_url("aero", 31)
+    rows = [(f"Hard topic {n}", "hard", "met") for n in range(1, 10)] + [("Askable topic 1", "askable", "unclear")]
+    assess_one(fx, job, matrix_answer(rows, questions=1))
+    (row,) = _rows(_search(fx))
+    assert (row["job_identity"], row["state"], row["fit"]) == (job, "needs_answers", 69)
+    assert "fit 69%" in str(row["score_text"])
+
+
 def test_a_stored_posting_table_from_before_gains_the_fit_column_in_place_and_keeps_its_rows(tmp_path: Path) -> None:
     """The upgrade: no schema version bump, so a build without the column still opens the same file."""
 
@@ -305,7 +318,8 @@ def test_rows_come_by_fit_then_rank_then_newest_inside_a_group_and_each_says_its
     assess_one(fx, jobs["not_assessed"], matrix_answer([("Hard A", "hard", "met"), ("Hard B", "hard", "met"), ("Hard C", "hard", "met"), ("Askable A", "askable", "unclear")], questions=1))
     again = _rows(_search(fx))
     assert [names[str(row["job_identity"])] for row in again] == [*expected[:4], "not_assessed", "nice_met"]  # the thin "nice_met" stays last
-    assert (again[-2]["state"], again[-2]["fit"]) == ("needs_answers", 75)
+    # 0.1.11.12 F2a: 3 of 3 must-haves met and one askable open is 75% raw, shown capped at 69.
+    assert (again[-2]["state"], again[-2]["fit"]) == ("needs_answers", 69)
 
     # The SQL order ("the 10 that still need attention") is the same key.
     scout_new.mark_all_seen(fx.home_root, fx.target, now=NOW)
@@ -315,7 +329,7 @@ def test_rows_come_by_fit_then_rank_then_newest_inside_a_group_and_each_says_its
 
     # The terminal table of ``scout new`` says the fit number in its score column.
     text = CliRunner().invoke(cli, fx.cli("--peek", "--no-assess"))
-    assert text.exit_code == 0 and "fit 67%" in text.output and "fit 75%" in text.output, text.output
+    assert text.exit_code == 0 and "fit 67%" in text.output and "fit 69%" in text.output, text.output
 
 
 # --- (3) the assess threshold ---------------------------------------------------------------

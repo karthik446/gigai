@@ -101,8 +101,9 @@ more things are scored, all absent (empty, None) for a key without tiers:
 - a wrong citation on such a row (``scored: true``) fails ``fully_correct``; the
   key lines are ``settled_by`` and ``evidence_ids`` together.
 - ``fit``: the product's own number for the stored matrix
-  (``gigai.scout.fit.fit_percent``, what the Jobs page shows; computed, never
-  stored); ``fit_violation`` when the key holds a buried or missing hard/askable
+  (``gigai.scout.fit.shown_fit``, what the Jobs page shows: the raw percent
+  capped by the must-have rows, 0.1.11.12 F2a; computed, never stored);
+  ``fit_violation`` when the key holds a buried or missing hard/askable
   row (``key_below_met_rows``) and the fit is at least :data:`FIT_CAP`.  A row
   the key leaves open either way or reads as a soft ask is a close call, not a
   hold: it never caps the fit (the same rows row agreement leaves out).
@@ -127,7 +128,7 @@ import sys
 from typing import Any
 
 from gigai.scout.find_jobs.contracts import MatrixStatus, RequirementClass, RequirementMatrixRow
-from gigai.scout.fit import fit_percent
+from gigai.scout.fit import shown_fit
 
 KEY_SCHEMA = "gigai-gold-key:1"
 SCORE_SCHEMA = "gigai-gold-score:1"
@@ -233,9 +234,11 @@ def strict_row(key_row: Mapping[str, Any]) -> bool:
 
 
 def fit_of(rows: Sequence[Mapping[str, Any]]) -> int | None:
-    """The fit number of a result's matrix by the product's own rule (``fit_percent``, what the Jobs page shows), on rows typed as the product types them.
+    """The fit number of a result's matrix by the product's own rule (``shown_fit``, what the Jobs page shows), on rows typed as the product types them.
 
-    A status or class outside the product's vocabulary is what ``fit_percent`` makes of it: not met, a must-have's weight.
+    A status or class outside the product's vocabulary is what ``shown_fit`` makes of it: not met, a must-have's weight,
+    and (read as ``unclear``) the 69 cap of an open must-have. A row's ``id`` and ``class_basis`` are kept, so the
+    sponsorship label is told apart (and a v9 matrix read as one) as the product does.
     """
 
     typed = []
@@ -249,8 +252,12 @@ def fit_of(rows: Sequence[Mapping[str, Any]]) -> int | None:
             klass = None if kind is None else RequirementClass(kind)
         except ValueError:
             klass = None
-        typed.append(RequirementMatrixRow(str(row.get("requirement") or ""), tuple(str(item) for item in row.get("resume_evidence") or ()), status, klass))
-    return fit_percent(typed)
+        row_id, basis = row.get("id"), row.get("class_basis")
+        typed.append(RequirementMatrixRow(
+            str(row.get("requirement") or ""), tuple(str(item) for item in row.get("resume_evidence") or ()), status, klass,
+            id=row_id if isinstance(row_id, str) else None, class_basis=basis if isinstance(basis, str) else None,
+        ))
+    return shown_fit(typed)
 
 
 def map_row(row: Mapping[str, Any], lines: Sequence[Mapping[str, Any]], required: frozenset[int]) -> int | None:

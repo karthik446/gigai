@@ -9,6 +9,23 @@ counts only) has the plain share (:func:`plain_percent`). A posting nothing
 assessed has no fit number: its rank score is a different scale and is never
 shown as one.
 
+THE FIT CAP (:func:`fit_cap`, :func:`shown_fit`, 0.1.11.12 F2a). The number a
+reader sees is the fit number with a ceiling set by the must-have rows: at
+most :data:`UNMET_CAP` when a ``hard`` row (or a row with no class: an old
+one, read as hard) is ``unmet``; at most :data:`OPEN_CAP` when an ``askable``
+row is ``unmet`` (coordinator ruling, F2a fix round: a definite gap never
+shows above an open row) or a ``hard`` or ``askable`` row is ``unclear`` or
+``answered``; the lower cap wins. Optional rows (``list_item``,
+``nice_to_have``) never cap, nor does the sponsorship label of a v9 matrix
+(the gate drops it there; an old matrix's gate reads it as a row, so the cap
+does too). A ceiling, never a floor: a fit number already below the cap stays
+as it is. :func:`fit_cap`
+names the row behind the cap and says why; the read model stores the shown
+number (``postings.py``) and the reason is derived again from the stored
+matrix, never stored. Weak fit reads the RAW number (below): it is about how
+few requirements are met, and under the default settings both caps sit above
+its percent, so the two readings agree.
+
 WEAK FIT (:func:`is_weak_fit`). A posting whose verdict waits on the user's
 answers (``needs_answers``) while few of its requirements are met AND the
 rank score is low is not worth the user's answers: its state is
@@ -92,6 +109,10 @@ DEFAULT_WEAK_FIT_BELOW_RANK = 50
 DEFAULT_ASSESS_MIN_RANK = 50
 #: How many times a must-have counts in the fit number; a ``nice_to_have`` counts once.
 MUST_HAVE_WEIGHT = 2
+#: 0.1.11.12 F2a: the shown fit's ceiling with an ``unmet`` hard row, and with an ``unmet`` askable or an
+#: ``unclear``/``answered`` must-have row.
+UNMET_CAP = 49
+OPEN_CAP = 69
 
 SETTINGS_BLOCK = "fit"
 SOURCE_DEFAULT = "default"
@@ -101,6 +122,11 @@ SOURCE_UNREADABLE = "settings_unreadable"
 _NICE_TO_HAVE = "nice_to_have"
 _MET = "met"
 _PENDING = "pending_user_answers"
+_HARD = "hard"
+_ASKABLE = "askable"
+_UNMET = "unmet"
+#: The open statuses of a must-have row, as the cap's reason says them.
+_OPEN_WORDS = {"unclear": "unclear", "answered": "answered yes but not on your resume"}
 
 
 @dataclass(frozen=True)
@@ -190,6 +216,60 @@ def fit_percent(matrix: Iterable[object]) -> int | None:
         if getattr(getattr(row, "status", None), "value", None) == _MET:
             met += weight
     return plain_percent(met, total)
+
+
+@dataclass(frozen=True)
+class FitCap:
+    """The ceiling on the shown fit and the row behind it: ``row`` is its id (``None`` for a row with none), ``reason`` one plain sentence."""
+
+    ceiling: int
+    row: str | None
+    reason: str
+
+    def to_json(self) -> dict[str, object]:
+        return {"row": self.row, "reason": self.reason}
+
+
+def fit_cap(matrix: Iterable[object]) -> FitCap | None:
+    """The lowest cap the matrix's must-have rows set (the module text), naming the first row of it; ``None``: uncapped. Pure."""
+
+    from .find_jobs.contracts import is_row_id
+    from .resume_gate import is_authorization_row, uses_v9_rules  # the gate's own reading of the sponsorship label
+
+    rows = list(matrix)
+    labels = uses_v9_rules(rows)  # a v9 matrix's sponsorship row is a label, never a gate or a cap
+    found: FitCap | None = None
+    for row in rows:
+        kind = getattr(getattr(row, "requirement_class", None), "value", None)
+        status = getattr(getattr(row, "status", None), "value", None)
+        if status == _UNMET and kind in (_HARD, None):
+            ceiling, words = UNMET_CAP, "unmet"
+        elif status == _UNMET and kind == _ASKABLE:
+            ceiling, words = OPEN_CAP, "unmet"
+        elif status in _OPEN_WORDS and kind in (_HARD, _ASKABLE, None):
+            ceiling, words = OPEN_CAP, _OPEN_WORDS[status]
+        else:
+            continue
+        if (found is not None and found.ceiling <= ceiling) or (labels and is_authorization_row(row)):
+            continue
+        row_id = getattr(row, "id", None)
+        article = "An" if (kind or _HARD) == _ASKABLE else "A"
+        reason = f"{article} {kind or _HARD} requirement is {words}, so the fit shows at most {ceiling}%."
+        found = FitCap(ceiling, row_id if is_row_id(row_id) else None, reason)
+    return found
+
+
+def capped(percent: int | None, cap: FitCap | None) -> int | None:
+    """``percent`` under ``cap``'s ceiling: never raised, ``None`` stays ``None``."""
+
+    return percent if percent is None or cap is None else min(percent, cap.ceiling)
+
+
+def shown_fit(matrix: Iterable[object]) -> int | None:
+    """The fit number a reader sees: :func:`fit_percent` under :func:`fit_cap`'s ceiling; ``None`` for an empty matrix."""
+
+    rows = list(matrix)
+    return capped(fit_percent(rows), fit_cap(rows))
 
 
 # --- the two rules --------------------------------------------------------------------------
@@ -290,13 +370,18 @@ __all__ = [
     "MUST_HAVE_WEIGHT",
     "NEEDS_ANSWERS",
     "NOT_ASSESSED",
+    "OPEN_CAP",
     "RANKED_LOW",
     "THIN_LABEL",
     "THIN_POSTING",
     "THIN_POSTING_ROWS",
+    "UNMET_CAP",
     "WEAK_FIT",
+    "FitCap",
     "FitSetting",
     "assessment_is_weak_fit",
+    "capped",
+    "fit_cap",
     "fit_percent",
     "fit_setting",
     "is_low_rank",
@@ -304,6 +389,7 @@ __all__ = [
     "is_thin_posting",
     "is_weak_fit",
     "plain_percent",
+    "shown_fit",
     "shown_state",
     "stored_rank_scores",
     "thin_state",

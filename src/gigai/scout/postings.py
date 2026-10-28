@@ -149,7 +149,9 @@ MATCH_VERSION = "posting-match:10"
 # :4 is 0.1.11.2: a match with no row about the job has the state ``thin_posting`` (stored rows get their facts again).
 # :5 is 0.1.11.9: a row's assessment and resume are the JOB's (whichever role's row it is, and whichever copy of a
 # job posted once per country it is: ``find_jobs.job_key``), so stored rows get their facts again, once.
-FACTS_VERSION = "posting-facts:5"
+# :6 is 0.1.11.12 F2a: the stored fit is the SHOWN one, capped by the must-have rows (``fit.shown_fit``), so stored
+# rows get their facts again, once.
+FACTS_VERSION = "posting-facts:6"
 
 STATE_ACTIVE = "active"
 BUILD_FULL = "matched"
@@ -561,7 +563,7 @@ class _Facts:
 
         from .find_jobs.job_key import find_boards, job_key
         from .find_jobs.job_state import NOT_ASSESSED, _identity_digest, derive_job_state, quick_assessment_fact
-        from .fit import fit_percent, plain_percent, shown_state, thin_state
+        from .fit import capped, fit_cap, fit_percent, plain_percent, shown_state, thin_state
         from .pipeline.steps import read_label
 
         profile_id = self.view.profile_id
@@ -576,7 +578,10 @@ class _Facts:
         item = self._sources.quick_assessment(kept, profile_id) if key in self._assessed else None
         tailored = key in self._tailored and self._sources.tailored_at(kept, profile_id)[0]
         state, stale, assessed_at, met, requirements, questions = NOT_ASSESSED, None, None, None, None, 0
+        # ``fit`` is the number stored and shown (0.1.11.12 F2a: capped by the must-have rows, ``fit.fit_cap``); ``raw``
+        # is the uncapped percent the weak-fit rule reads.
         fit: int | None = None
+        raw: int | None = None
         if item is not None:
             fact = quick_assessment_fact(item, basis_stale=self._sources.basis.reason(item))
             derived = derive_job_state(
@@ -587,13 +592,14 @@ class _Facts:
             requirements = len(item.result.matrix)
             met = sum(1 for entry in item.result.matrix if entry.status.value == "met")
             questions = len(item.result.structured_questions) or len(item.result.questions)
-            fit = fit_percent(item.result.matrix)
+            raw = fit_percent(item.result.matrix)
+            fit = capped(raw, fit_cap(item.result.matrix))
         ran = self._run_latest.get(row.job)
         if ran is not None and (assessed_at is None or (ran.assessed_at or "") > assessed_at):
             # An old run's assessment, newer than anything in the quick store (DESIGN 10.4: latest wins).
             state, stale = ran.state, self._run_stale(ran, row)
             assessed_at, met, requirements, questions = ran.assessed_at, ran.reqs_met, ran.reqs_total, ran.open_questions
-            fit = plain_percent(met, requirements)  # a run's row has counts only: no classes to weight by
+            fit = raw = plain_percent(met, requirements)  # a run's row has counts only: no classes to weight by, no cap
             state = thin_state(state, requirements or 0)  # 0.1.11.2: a run's match with no requirement row at all
         # 0110-8-12: a tailored resume is the ``tailored`` flag below; the verdict state stays.
         label, ats_score = None, None
@@ -604,8 +610,8 @@ class _Facts:
                 label = value if isinstance(value, str) else None
                 ats_score = score if type(score) is int and score >= 0 else None
         rank_score = self.rank_score(row.listing_digest)
-        # 0110-10-02: a needs-answers posting with few requirements met AND a low rank is a weak fit (``fit.py``).
-        state = shown_state(state, fit, rank_score, self._fit)
+        # 0110-10-02: a needs-answers posting with few requirements met AND a low rank is a weak fit (``fit.py``): the raw percent.
+        state = shown_state(state, raw, rank_score, self._fit)
         return replace(
             row, rank_score=rank_score, state=state, stale_code=stale, assessed_at=assessed_at,
             reqs_met=met, reqs_total=requirements, open_questions=questions, tailored=bool(tailored), label=label,
