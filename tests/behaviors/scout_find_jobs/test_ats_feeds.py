@@ -913,3 +913,53 @@ def test_counting_client_tallies_workday_posts_like_gets(tmp_path) -> None:
 
     assert len(calls) == 5 and result.stats.requests == 5
     assert counting.requests == 5  # 3 list POSTs + 2 detail GETs, not the GETs alone
+
+
+@pytest.mark.parametrize(
+    ("key", "roles", "titles", "detailed", "filtered_out"),
+    [
+        # f5: both recorded details are manager titles, which the title prefilter does not pass, so the one title it does pass gets no detail.
+        ("f5", ("security engineer",), ["Principal Security Engineer"], False, 5),
+        ("comcast", ("engineer",), ["Development Engineer 2", "Quality and Automation Engineer 3"], True, 4),
+    ],
+)
+def test_workday_recorded_fixture_parses(key, roles, titles, detailed, filtered_out) -> None:
+    """Bytes RECORDED from two shipped tenants on 2026-10-29 (``tests/support/workday_fixtures.py``): the real robots file, list page
+    and detail pages, served through the whole fetcher behind the robots gate. No request leaves the process."""
+    from tests.support.workday_fixtures import recorded
+
+    tenant = recorded(key)
+    token = str(tenant["token"])
+    name, pod, site = token.split(".", 2)
+    prefix = f"/wday/cxs/{name}/{site}"
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(f"{request.method} {request.url.path}")
+        assert request.url.host == f"{name}.{pod}.myworkdayjobs.com"
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text=str(tenant["robots"]))
+        if request.method == "POST":
+            return httpx.Response(200, json=tenant["list"] if json.loads(request.content)["offset"] == 0 else {"total": 0, "jobPostings": []})
+        detail = tenant["details"].get(request.url.path.removeprefix(prefix))
+        return httpx.Response(200, json=detail) if detail is not None else httpx.Response(404)
+
+    clients = ATSBoardClients(robots=RobotsGuard())
+    result = clients.fetch_board(httpx.Client(transport=httpx.MockTransport(handler)), "workday", token, _config(roles), descriptions=True)
+
+    assert [row.title for row in result.rows] == titles
+    assert result.stats.listed == 6 and result.stats.prefiltered_out == filtered_out and not result.stats.partial
+    assert calls[0] == "GET /robots.txt" and calls.count(f"POST {prefix}/jobs") == 2  # page 1 says total 257 (more than listed): page 2 is asked, empty
+    assert all(row.provider is ATSProvider.WORKDAY and row.board_token == token and row.url.startswith(f"https://{name}.{pod}.myworkdayjobs.com/{site}/job/") for row in result.rows)
+    if detailed:
+        assert result.stats.detail_fetched == 2
+        for row in result.rows:
+            assert row.published_at == "2026-10-29T00:00:00Z"  # the detail's startDate; the list said "Posted Today"
+            assert row.text and "<" not in row.text and row.content_sha256 and row.countries == ("IN",)
+    else:
+        assert result.stats.detail_fetched == 0 and all(row.text is None for row in result.rows)
+    # The recorded detail pages read through the same table the pasted-URL path uses.
+    for path, detail in tenant["details"].items():
+        assert ats_feeds.detail_title("workday", detail) in (info["title"] for info in tenant["list"]["jobPostings"])
+        assert ats_feeds.detail_text("workday", detail)
+        assert path.rsplit("_", 1)[1] == ats_feeds.workday_posting_id({"externalPath": path})

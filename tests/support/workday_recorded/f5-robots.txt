@@ -1,0 +1,7 @@
+Sitemap: https://ffive.wd5.myworkdayjobs.com/f5jobs/siteMap.xml
+Sitemap: https://ffive.wd5.myworkdayjobs.com/f5events/siteMap.xml
+
+User-agent: *
+Allow: /f5jobs/
+Allow: /f5events/
+Disallow: /refreshFacet/
