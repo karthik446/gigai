@@ -454,6 +454,11 @@ def _pick_lines(view: dict[str, object]) -> list[str]:
         for item in view["conflicts"]  # type: ignore[union-attr]
     ]
     lines.append("Conflicts: " + (", ".join(conflicts) or "none"))
+    # 0.1.11.12 (dossier-B): for the user to read, not an error; nothing is rewritten or blocked. Absent: nothing to read or no master.
+    checks = view.get("fact_checks")
+    if isinstance(checks, list) and checks:
+        against = "or the posting" if view.get("fact_checks_posting") is True else "(the pasted posting is not kept, so it was not checked against it)"
+        lines.append("Check (not an error): " + ", ".join(str(item) for item in checks) + f" -- not in your resume {against}.")
     asking = [str(item["question_id"]) for item in view.get("open_questions", ())]  # type: ignore[union-attr]
     if asking:
         lines.append("Open questions (answer one with `gigai scout answers save QUESTION_ID`): " + ", ".join(asking))

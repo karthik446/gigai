@@ -51,6 +51,12 @@ mechanics here. Those belong in the internal changelog.
   URL, in the UI or with the CLI, is refused with the company, the reason and the evidence.
 - **Large Workday boards read as far as 100 list pages.** A board with more than 2,000 postings is stored as far as
   read, and `gigai scout sources status` prints `partial: <company> stopped at 100 list pages` for it.
+- **A job's resume is checked against your master and the posting.** The job page and `gigai scout resume pick` list
+  the words and numbers a stored resume states that neither your master resume nor the posting states (a tool, a
+  place, a figure, a credential), each as "not in your resume or the posting". They are checks for you to read, not
+  errors: nothing is rewritten, dropped or blocked, and saving, applying and the PDF are unchanged. No model call; a
+  pasted job keeps no posting text, so it is checked against the master alone and the notice says so
+  (`fact_checks_posting: false`); a profile without a master is not checked.
 
 #### Changed
 

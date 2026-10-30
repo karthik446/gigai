@@ -92,6 +92,11 @@ export function suggestionsAnswer(suggestions, view = null) {
     master_stored: pick && typeof pick.master_stored === "boolean" ? pick.master_stored : null,
     // 0.1.11.4 item 9d: the master holds an Education entry (null: no master, or a server that does not say).
     master_education: pick && typeof pick.master_education === "boolean" ? pick.master_education : null,
+    // 0.1.11.12 (dossier-B): the words and numbers the stored resume states that neither the master nor the posting
+    // states, as the server read them (null: not checked, no master, or a server that does not say). To read, not errors.
+    fact_checks: pick && Array.isArray(pick.fact_checks) ? pick.fact_checks.filter((item) => typeof item === "string" && item) : null,
+    // Whether the posting's text was there to check against (false for a pasted job: it is never kept; the master alone).
+    fact_checks_posting: Boolean(pick && pick.fact_checks_posting === true),
     suggestions: body ? list(body.suggestions) : [],
   };
   const stale = pick && Array.isArray(pick.stale) ? pick.stale.filter((code) => typeof code === "string") : null;
@@ -375,6 +380,19 @@ export function resumeHasEducation(stored) {
 // AND the stored resume prints none. Never when either has it, and never when the server does not say.
 export function needsEducationNotice(record, stored) {
   return Boolean(stored) && object(record) !== null && record.master_education === false && !resumeHasEducation(stored);
+}
+
+// --- the fact checks (0.1.11.12, dossier-B) ----------------------------------------------------
+
+// What the fact checks' notice says first: they are the user's to read; nothing is rewritten, dropped or blocked.
+export const FACT_CHECKS_HEADING = "Checks for you to read, not errors.";
+
+// The rows of the fact checks' notice, one per flagged word or number: [{word, text}]. [] when the server sent none or
+// did not check (no master). The text names what was checked: the posting too, or the master alone (a pasted job).
+export function factCheckItems(record) {
+  const checks = object(record) !== null && Array.isArray(record.fact_checks) ? record.fact_checks : [];
+  const against = object(record) !== null && record.fact_checks_posting === true ? "or the posting" : "(the pasted posting is not kept, so it was not checked against it)";
+  return checks.map((word) => ({ word, text: `${word} — not in your resume ${against}` }));
 }
 
 // How many content lines the resume prints (headings and the header are not lines).

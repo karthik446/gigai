@@ -1547,7 +1547,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {
             "schema_version": "scout-job-suggestions-response:1", "job_identity": _JOB_URL, "profile_id": "prof_1", "updated_at": "2026-10-05T10:05:00Z",
             "gate": {"decision": "suggest", "ready": True, "reasons": []}, "counts": {"open": 1, "done": 0, "dismissed": 0},
-            "verdict": "matched_above_threshold", "basis": "master", "master_stored": True, "master_education": True, "stale": ["master_newer"], "stale_lines": [],
+            "verdict": "matched_above_threshold", "basis": "master", "master_stored": True, "master_education": True, "fact_checks": [], "fact_checks_posting": True, "stale": ["master_newer"], "stale_lines": [],
             "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:05:00Z", "pages": None, "max_pages": 2,
                        "max_bullets": 20, "pick_rules_version": "pick-rules:1", "selector_version": "sel-7"},
             "problems": [], "added_by_code": [], "conflicts": [], "selection_error": None, "proposed": None, "selected_lines": ["b-8aef71"],
@@ -1624,7 +1624,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "POST", "/api/job-resumes/pick", "Take one explicit step on a job's resume: pick again, make a draft, or take or drop the proposed one.", "write", "none",
         {
             "schema_version": "scout-job-resume-pick:1", "action": "refresh", "job_identity": _JOB_URL, "profile_id": "prof_1", "verdict": "matched_above_threshold",
-            "gate": {"decision": "suggest", "ready": True, "reasons": []}, "basis": "master", "master_stored": True, "master_education": True, "stale": [], "stale_lines": [],
+            "gate": {"decision": "suggest", "ready": True, "reasons": []}, "basis": "master", "master_stored": True, "master_education": True, "fact_checks": [], "fact_checks_posting": True, "stale": [], "stale_lines": [],
             "resume": {
                 "updated_at": "2026-10-05T10:07:00Z", "made_by": "scout.pick", "edited": None, "replaceable": True, "lines": 41,
                 "counts": {"picked": 28, "left_out": 30, "cut_for_length": 0}, "folder_path": "~/Documents/GigAI/resumes/acme-software-engineer-2026-10-05.md",

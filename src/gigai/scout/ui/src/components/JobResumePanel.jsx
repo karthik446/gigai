@@ -20,9 +20,11 @@ import {
   NO_RESUME_OLD_ASSESSMENT_TEXT,
   OWN_RESUME_TEXT,
   REASSESS_LABEL,
+  FACT_CHECKS_HEADING,
   assessmentIsOld,
   attentionItems,
   changedLines,
+  factCheckItems,
   gateHolds,
   holdSentence,
   isUsersResume,
@@ -244,6 +246,27 @@ function Attention({ items, onShowLine }) {
                 show {line} under Left out
               </button>
             ))}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// 0.1.11.12 (dossier-B): the words and numbers this resume states that neither the master nor the posting states
+// (jobResumeModel.factCheckItems). For the user to read, not errors: nothing is rewritten, dropped or blocked, and no
+// button is offered. Nothing when the server sent none or did not check (no master).
+function FactChecks({ items }) {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <div className="callout info" data-role="fact-checks">
+      <strong>{FACT_CHECKS_HEADING}</strong>
+      <ul>
+        {items.map((item) => (
+          <li key={item.word} data-word={item.word}>
+            {item.text}
           </li>
         ))}
       </ul>
@@ -587,6 +610,7 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
         <>
           <Attention items={attention} onShowLine={state.showLine} />
           <Stale items={items} busy={busy} picking={picking} onRepick={() => state.pick("refresh")} onReassess={reassess ? reassess.onClick : undefined} reassess={reassess} yours={users} fixes={staleLineFixes(record, stored)} onFix={fixStaleLine} />
+          <FactChecks items={factCheckItems(record)} />
           {provenance && provenance.draft && (
             <p className="muted small" data-role="draft-note">
               This is a draft: you asked for it on a job the assessment holds. It is not a suggested resume.
