@@ -145,7 +145,9 @@ questions and assess again.</li>
 <p>How it is made: one model call per posting. Your model gets the posting text, your resume with
 the name and contact lines removed, your answers, and the few stories that fit the posting. It
 fills a table of the posting’s requirements, each one met, not met or unclear, with the line of
-your resume or the answer it relied on. The verdict is read from that table.</p>
+your resume or the answer it relied on. Scout then checks every met must-have row: a row that cites
+no resume line reads as unclear, and a row that rests only on one of your answers reads as
+<strong>answered</strong> (you said yes; the resume shows no line for it). The verdict is read from that table.</p>
 <p>A model can misread a posting. The table shows what it relied on for each requirement, so you
 can check it. An assessment made before your settings, your answers or Scout’s prompt changed
 reads <strong>Assessed with older settings</strong>; the verdict still shows, and nothing is assessed again
@@ -153,7 +155,9 @@ until you ask.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="fit">Fit</h2><a class="sl-anchor-link" href="#fit"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fit”</span></a></div>
 <p>On the Jobs page each job has two chips under its title. <strong>Fit</strong> (“Fit 92% · 19/22”) is the
 share of requirements met, with the must-haves counted twice, then met of total: 19 of the 22
-rows of the assessment’s table are marked met. <strong>Rank</strong> (“Rank 92”) is the rank above, or
+rows of the assessment’s table are marked met. The share is capped by the must-have rows: at
+most 49 when a must-have is not met, at most 69 when a must-have is unclear or answered, or an
+askable one is not met. <strong>Rank</strong> (“Rank 92”) is the rank above, or
 “Not ranked yet”. An assessed job’s page shows both in the box at the top right.</p>
 <p>The Fit chip is green only for a matched job; on any other job it is grey, so a high fit
 beside “Needs your answers” is not a match yet. A posting too thin to have a table of

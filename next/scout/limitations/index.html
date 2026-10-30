@@ -80,5 +80,23 @@ can be set in the setup wizard or <code dir="auto">find-jobs.json</code>.</li>
 re-assess them (an old “Matched” on a Lever posting may not hold).</li>
 <li>The run dialog does not save “All new postings” as your default; set it in
 <code dir="auto">find-jobs.json</code> (<code dir="auto">"default_assess_cap": "all"</code>) if you want it to stick.</li>
+<li>A Workday posting listed as “30+ days ago” shows as undated until its
+detail is read, which happens only for titles that match your profiles.</li>
+<li>A Workday board is read up to 100 list pages (2,000 postings); a larger
+board is stored as far as read and <code dir="auto">gigai scout sources status</code> prints a
+<code dir="auto">partial:</code> line for it.</li>
+<li>A Workday board gets at most 200 detail requests in one update; the rest
+are read in a later update, so the first update after upgrading to
+0.1.11.12 can take more than one pass.</li>
+<li>For the 49 Workday boards in the catalog, the H-1B figure beside a posting
+is the employer’s certified H-1B LCA count for software occupations, FY2026
+through Q3, from the public US Department of Labor data, not a USCIS
+approvals count, and it has no denials number; the chip’s tooltip still
+reads “(USCIS)” for these boards.</li>
+<li>A posting that decides sponsorship case by case is recorded as
+<code dir="auto">case_by_case</code>, and the Jobs list marks it with that label as written.</li>
+<li>After the upgrade every stored fit is counted again once (the shown fit is
+now capped by the must-have rows), and a posting’s stored requirement list
+is read again on its next assessment.</li>
 </ul>
 </div><footer class="sl-flex astro-ddtxxk7k"><div class="meta sl-flex astro-ddtxxk7k"><a href="https://github.com/karthik446/gigai/edit/main/gigai-docs/src/content/docs/scout/limitations.md" class="sl-flex print:hidden astro-qlekgd3o"><svg aria-hidden="true" class="astro-qlekgd3o astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.2em;"><path d="M22 7.24a1 1 0 0 0-.29-.71l-4.24-4.24a1 1 0 0 0-1.1-.22 1 1 0 0 0-.32.22l-2.83 2.83L2.29 16.05a1 1 0 0 0-.29.71V21a1 1 0 0 0 1 1h4.24a1 1 0 0 0 .76-.29l10.87-10.93L21.71 8c.1-.1.17-.2.22-.33a1 1 0 0 0 0-.24v-.14l.07-.05ZM6.83 20H4v-2.83l9.93-9.93 2.83 2.83L6.83 20ZM18.17 8.66l-2.83-2.83 1.42-1.41 2.82 2.82-1.41 1.42Z"/></svg>Edit page</a></div><div class="pagination-links print:hidden astro-b5raizh3" dir="ltr"><a href="/gigai/next/scout/learning/" rel="prev" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-b5raizh3">Previous<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Learning pathways</span></span></a><a href="/gigai/next/scout/roadmap/" rel="next" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-b5raizh3">Next<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Roadmap</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>
