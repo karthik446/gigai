@@ -834,10 +834,15 @@ class StrictEntry:
 
 @dataclass(frozen=True)
 class StrictMaster:
-    """The whole master as the strict post-check reads it: every line by id, and the entries (roles, projects, degrees)."""
+    """The whole master as the strict post-check reads it: every line by id, the entries (roles, projects, degrees) and the skills lines.
+
+    ``skills``: the text of each Skills bullet, with or without an id (the evidence view prints the skills line without one), in the
+    file's order: what the candidate declares (0.1.11.12 dossier-A, T8); a lab line is left out.
+    """
 
     lines: dict[str, StrictLine]
     entries: tuple[StrictEntry, ...]
+    skills: tuple[str, ...] = ()
 
     @property
     def roles(self) -> tuple[StrictEntry, ...]:
@@ -875,7 +880,8 @@ def strict_master(markdown: str, *, today: date | None = None) -> StrictMaster:
     """The evidence view (``evidence_text(ids=True)``) or a stored master (``Master.markdown(ids=True)``) as the strict check reads it. Pure.
 
     Private note lines and comment bodies are not read; a personal lab line is left out (0.1.11.7 T2). The skills line of the
-    evidence view has no id and gives nothing: a ``/``-joined skills name is a list there (``Go/Ruby/Python``), never aliases.
+    evidence view has no id, so it is no line a row may cite, but its text is kept in ``skills`` (what the candidate declares,
+    T8): a ``/``-joined skills name is a list there (``Go/Ruby/Python``), never aliases.
     """
 
     from .master_lab import is_lab_text
@@ -885,6 +891,7 @@ def strict_master(markdown: str, *, today: date | None = None) -> StrictMaster:
     today = today or date.today()
     lines: dict[str, StrictLine] = {}
     entries: list[StrictEntry] = []
+    skills: list[str] = []
     section = ""
     open_entry: tuple[str, str, str] | None = None  # (id, kind, heading) of the entry whose lines are being read
     sublines: list[str] = []
@@ -931,8 +938,10 @@ def strict_master(markdown: str, *, today: date | None = None) -> StrictMaster:
             continue
         text = text[2:].strip()
         if section == "skills":
-            if line_id is not None and not is_lab_text(text):
-                lines[line_id] = StrictLine(line_id, LINE_SKILLS, text)
+            if not is_lab_text(text):
+                skills.append(text)
+                if line_id is not None:
+                    lines[line_id] = StrictLine(line_id, LINE_SKILLS, text)
             continue
         if line_id is None or is_lab_text(text):
             continue
@@ -942,7 +951,7 @@ def strict_master(markdown: str, *, today: date | None = None) -> StrictMaster:
         else:
             lines[line_id] = StrictLine(line_id, _SECTION_KINDS.get(section, LINE_OTHER), text)
     close()
-    return StrictMaster(lines, tuple(entries))
+    return StrictMaster(lines, tuple(entries), tuple(skills))
 
 
 __all__ = [

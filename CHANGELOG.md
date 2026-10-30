@@ -85,6 +85,11 @@ mechanics here. Those belong in the internal changelog.
 - **The H-1B figure beside a Workday posting** is the employer's certified H-1B LCA count for software occupations,
   FY2026 through Q3, from the public US Department of Labor data, not a USCIS approvals count, and it has no denials
   number.
+- **A programming language you list is met whatever its recency.** A must-have row that asks only for a language
+  (for example "Fluency in Go") is met when that language is on your resume's skills line or in a saved answer, even
+  if your last role using it ended years ago. A row that adds a domain or a years figure is read as before, and a
+  language you do not list stays unmet or unclear. A "remote-friendly" posting that lists offices in a country you
+  search meets the location requirement instead of asking about it.
 
 ### 0.1.11.11
 

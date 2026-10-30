@@ -175,3 +175,73 @@ def test_us_cities_are_read_as_the_united_states_and_every_place_is_in_the_note(
 def test_a_city_and_its_country_are_one_place_in_the_note() -> None:
     note = _location(_run("Our offices are in Toronto, Canada and London, UK.")).code_note
     assert note is not None and "(Toronto, Canada, London, UK)" not in note and "Toronto, Canada; London, UK" in note
+
+
+# --- 0.1.11.12 dossier-A (gigai-zu4): a remote-friendly posting with an office in an eligible country -------------------
+#
+# Operator decision (2026-10-30, the Cohere case): "remote-friendly, but we also have offices in Toronto, London, New York
+# City, San Francisco, ..." with countries ("US",) is remote for this candidate: a met row stays met, an unclear one (the
+# model's or F5b's) is lifted by the existing lift path and its question dropped. The office list alone, or with a denied
+# remote statement, or with no office in an eligible country, is F5b as before.
+
+REMOTE_OFFICES = (
+    "We are remote-friendly, but we also have offices in Toronto, London, New York City, San Francisco, Montreal, Paris, Berlin and Seoul.\n"
+    "You will serve large language models."
+)
+OWN_REMOTE_US = [{"question_id": "location:remote_us", "question": "Are you able to work remotely from the US?", "requirement": LOCATION_MET["requirement"]}]
+
+
+@pytest.mark.parametrize("status", ["met", "unclear"])
+def test_remote_friendly_with_an_office_in_an_eligible_country_is_met_and_asks_nothing(status: str) -> None:
+    row = {**LOCATION_MET, "status": status}
+    more = {"questions": OWN_REMOTE_US, "verdict": PENDING} if status == "unclear" else {}
+    parsed = _run(REMOTE_OFFICES, location=row, **more)
+    assert _location(parsed).status.value == "met" and _location(parsed).code_note is None
+    assert parsed.verdict.value == MATCHED and not parsed.structured_questions and not parsed.questions
+
+
+def test_remote_friendly_with_an_office_in_an_eligible_country_reads_the_candidates_countries() -> None:
+    parsed = _run(REMOTE_OFFICES, countries=("DE",), location={**LOCATION_MET, "status": "unclear"}, questions=OWN_REMOTE_US, verdict=PENDING)
+    assert _location(parsed).status.value == "met" and parsed.verdict.value == MATCHED  # Berlin
+    parsed = _run(REMOTE_OFFICES, countries=("PL",), location={**LOCATION_MET, "status": "unclear"}, questions=OWN_REMOTE_US, verdict=PENDING)
+    assert _location(parsed).status.value == "unclear" and parsed.verdict.value == PENDING  # no office in Poland
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        REMOTE_OFFICES.replace("We are remote-friendly, but we also have", "We have"),  # the list alone
+        REMOTE_OFFICES.replace("We are remote-friendly, but we also have", "We are not a remote company, but we have"),  # a denied remote statement
+        f"We are remote-friendly.\n{OFFICES}",  # no office in an eligible country
+    ],
+)
+def test_the_office_list_alone_a_denied_remote_statement_or_no_eligible_office_is_f5b_as_before(body: str) -> None:
+    parsed = _run(body)
+    assert _location(parsed).status.value == "unclear" and parsed.verdict.value == PENDING
+    assert _location(parsed).code_note is not None and _location(parsed).code_note.startswith("Location (rule 4)")
+    parsed = _run(body, location={**LOCATION_MET, "status": "unclear"}, questions=OWN_REMOTE_US, verdict=PENDING)
+    assert _location(parsed).status.value == "unclear" and [item.question_id for item in parsed.structured_questions] == ["location:remote_us"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "This is an on-site role in our New York office; no remote work. We also have offices in London and Toronto.",
+        "This is a hybrid role: 3 days a week in our New York office, remote the other days. We also have offices in London and Toronto.",
+        "Remote work is not offered. We have offices in New York, London and Toronto.",
+        "We are remote-friendly.\nThis role is in-office in our New York hub; our other offices are in London and Toronto.",
+    ],
+)
+def test_an_on_site_hybrid_or_no_remote_posting_with_an_eligible_office_is_not_remote(body: str) -> None:
+    # Fix round 2 (independent read): "no remote work", "on-site", "in-office" and "hybrid" are not a remote statement.
+    parsed = _run(body)
+    assert _location(parsed).status.value == "unclear" and parsed.verdict.value == PENDING
+    assert _location(parsed).code_note is not None and _location(parsed).code_note.startswith("Location (rule 4)")
+    parsed = _run(body, location={**LOCATION_MET, "status": "unclear"}, questions=OWN_REMOTE_US, verdict=PENDING)
+    assert _location(parsed).status.value == "unclear" and [item.question_id for item in parsed.structured_questions] == ["location:remote_us"]
+
+
+def test_remote_teams_across_offices_reads_as_remote() -> None:
+    # A judgement left as it falls: "remote teams ... across offices in ..." cannot be told from "remote-friendly, offices in ..." by its words.
+    parsed = _run("Our remote teams collaborate across offices in Toronto, New York and London.", location={**LOCATION_MET, "status": "unclear"}, questions=OWN_REMOTE_US, verdict=PENDING)
+    assert _location(parsed).status.value == "met" and parsed.verdict.value == MATCHED

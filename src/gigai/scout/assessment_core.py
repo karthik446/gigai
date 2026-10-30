@@ -1396,6 +1396,13 @@ def says_eligible_pay_office_or_entity(posting_text: str, countries: tuple[str, 
 # (or "ANY") is untouched. Places are read from country names (``_COUNTRY_NAMES``, the word "US"), the hub-city tables
 # ``filters`` reads bare cities with, US state names and a short US hub-city list; never from other two-letter codes
 # ("CA" is a state too). A false ``unclear`` costs one question; a false ``met`` keeps the model's own reading.
+#
+# dossier-A (gigai-zu4, 2026-10-30): one exception. A posting that says it is remote (``_REMOTE``, in a sentence that denies
+# nothing) and lists an office in one of the candidate's eligible countries ("remote-friendly, but we also have offices in
+# Toronto, London, New York City, San Francisco, ...") is remote for this candidate (``remote_with_eligible_office``): the
+# list does not lower a ``met`` row, and an ``unmet`` / ``unclear`` row is lifted by the lift above with its questions dropped.
+# The list alone, a denied remote statement, an on-site / in-office / hybrid / "no remote work" posting (``_NOT_REMOTE``), or a
+# list with no eligible office is F5b as written.
 
 _SENTENCES = re.compile(r"(?<=[.!?])\s+|\n+")
 _OFFICE_LIST = re.compile(r"\boffices?\b|\bhubs?\b|headquarter\w*|\bHQ\b", re.IGNORECASE)
@@ -1501,6 +1508,31 @@ def office_places(posting_text: str) -> list[tuple[str, str]]:
     return out
 
 
+#: Rule 4 (dossier-A): words that say the role is not (fully) remote, anywhere in the posting: "no remote work", "on-site",
+#: "in-office", a hybrid arrangement ("hybrid role", not "hybrid cloud"), "N days a week in the office".
+_NOT_REMOTE = re.compile(
+    r"\bno\s+remote\b|\bon-?\s?site\b|\bin-?\s?office\b|\bhybrid\b(?!\s*[-/]?\s*(?:cloud|search|retrieval|model|approach))|\b\d+\s+days?\s+(?:a|per|each)\s+(?:week|month)\b",
+    re.IGNORECASE,
+)
+
+
+def remote_with_eligible_office(posting_text: str, codes: tuple[str, ...]) -> bool:
+    """Rule 4 (dossier-A, the Cohere case): the posting says it is remote in a sentence that denies nothing ("We are remote-friendly,
+    but we also have offices in Toronto, London, New York City, San Francisco, ..."), says nowhere that the role is on-site, in-office,
+    hybrid or without remote work (``_NOT_REMOTE``), and one of its offices (``office_places``) is in an eligible country: remote for
+    this candidate. Pure.
+
+    Not it: the office list alone (F5b), a denied remote statement ("not a remote company, but we have offices in ..."), an on-site or
+    hybrid role with an eligible office, or a list with no office in an eligible country (F5b as before).
+    """
+
+    if not codes or _NOT_REMOTE.search(posting_text):
+        return False
+    if not any(_REMOTE.search(sentence) and not _DENIES.search(sentence) for sentence in _SENTENCES.split(posting_text)):
+        return False
+    return any(code in codes for _written, code in office_places(posting_text))
+
+
 def _office_list_note(places: list[tuple[str, str]], codes: tuple[str, ...]) -> str:
     def name(code: str) -> str:
         written = _COUNTRY_NAMES[code][0].title() if code in _COUNTRY_NAMES else code
@@ -1518,11 +1550,12 @@ def _location_unclear(decoded: Mapping[str, object], boundary: Boundary) -> tupl
 
     Lowered: a ``met`` row on a several-country office list that nothing says may be done from an eligible country (the
     text or the LOCATION header) is read as ``unclear`` with one question, and the note says why (``None`` otherwise).
-    Lifted (unchanged before F5b, and never on such a list): an ``unmet`` or ``unclear`` row is read as ``met`` when the
-    posting says it can be done from anywhere or shows an eligible pay band, office or entity beside remote work; the
-    row's questions (the model's) are dropped; a ``not_a_match`` that rested on the row alone is read again from the
-    remaining rows (``pending_user_answers`` when a must-have question is still open, else matched), and the model's
-    reason for it is dropped. Anything else is returned untouched.
+    Lifted (unchanged before F5b, and never on such a list unless the posting says it is remote and an office is in an
+    eligible country, ``remote_with_eligible_office``): an ``unmet`` or ``unclear`` row is read as ``met`` when the posting
+    says it can be done from anywhere, is remote with an eligible office, or shows an eligible pay band, office or entity
+    beside remote work; the row's questions (the model's) are dropped; a ``not_a_match`` that rested on the row alone is
+    read again from the remaining rows (``pending_user_answers`` when a must-have question is still open, else matched),
+    and the model's reason for it is dropped. Anything else is returned untouched.
     """
 
     matrix = decoded.get("matrix")
@@ -1532,11 +1565,12 @@ def _location_unclear(decoded: Mapping[str, object], boundary: Boundary) -> tupl
     codes = tuple(code for code in boundary.countries if code) if "ANY" not in boundary.countries else ()
     worldwide = says_worldwide(text)
     said_where = worldwide or says_may_be_done_from(text, codes) or header_says_eligible(boundary.posting_location, codes)
-    places = office_places(text) if codes and not said_where else []
+    remote_office = bool(codes) and not said_where and remote_with_eligible_office(text, codes)
+    places = office_places(text) if codes and not said_where and not remote_office else []
     if len({code for _written, code in places}) >= 2:
         return _office_list_unclear(decoded, matrix, places, codes)
     rows = [row for row in matrix if row.get("id") == LOCATION_ROW_ID and row.get("status") in ("unmet", "unclear")]
-    if not rows or not (worldwide or says_eligible_pay_office_or_entity(text, boundary.countries)):
+    if not rows or not (worldwide or remote_office or says_eligible_pay_office_or_entity(text, boundary.countries)):
         return decoded, None
     out = dict(decoded)
     out["matrix"] = [{**row, "status": "met"} if any(row is hit for hit in rows) else row for row in matrix]
@@ -1847,13 +1881,30 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     # 0.1.11.12 F1: the strict-met post-check (``assess_strict``), after the stated check so nothing re-promotes a row it
     # lowered, before the caps so a lowered must-have row's own question competes for a place and ``_unasked`` finds it.
     # A resume block without id comments (a fixture, an older prompt) gives the check no line to read, so it stays out.
+    # dossier-A (T8): a row the check reads as met from a declared language takes its question with it (the model's own, by
+    # requirement text or id, as ``settle_stated`` does), and the verdict is read again below as for a settled row.
     strict_rows_changed: list[tuple[str, str, str]] = []  # (row id, step, status after)
+    strict_lifted = False
     if is_v9 and boundary.strict is not None and boundary.strict.lines:
         from .assess_strict import strict_rows  # lazy: the master modules import this one
 
         asked_rows = {fold(str(item.get("requirement") or "")) for item in structured_questions if isinstance(item, dict)}
         for change in strict_rows(normalized_matrix, boundary.strict, id_of_row):  # type: ignore[arg-type]
             strict_rows_changed.append((change.row_id or "", change.step, change.after))
+            if change.after == "met" and change.before != "met":
+                strict_lifted = True
+                own_id = row_question_id(change.row_id) if change.row_id else None
+                lifted = [
+                    item
+                    for item in structured_questions
+                    if isinstance(item, dict) and (fold(str(item.get("requirement") or "")) == fold(change.requirement) or item.get("question_id") == own_id)
+                ]
+                if lifted:
+                    structured_questions = [item for item in structured_questions if not any(item is gone for gone in lifted)]
+                    gone = sorted(plain_at.pop(id(item)) for item in lifted if id(item) in plain_at)
+                    plain_questions = [text for index, text in enumerate(plain_questions) if index not in gone]
+                    plain_at = {key: at - sum(1 for index in gone if index < at) for key, at in plain_at.items()}
+                continue
             if change.after != "unclear" or change.row_id is None or fold(change.requirement) in asked_rows:
                 continue
             asked = row_question(change.row_id, change.requirement)
@@ -1920,7 +1971,7 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
             result["sponsorship"] = sponsorship
     if "verdict" in decoded:
         verdict = _normalize_verdict(decoded.get("verdict"))
-        if met_by_master and verdict == "pending_user_answers":
+        if (met_by_master or strict_lifted) and verdict == "pending_user_answers":
             # The verdict the model gave may rest on a settled row: read it again from what is left (as for a removed
             # authorization row). ``settled_verdict`` below makes it pending when a must-have is still open.
             verdict = "matched_above_threshold"

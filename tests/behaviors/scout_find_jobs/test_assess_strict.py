@@ -73,6 +73,13 @@ def _check(row: dict):
     return row, changes
 
 
+def _check_with(row: dict, skills: str = "Languages: Ruby/Python"):
+    """As ``_check`` with the skills line replaced: with Go (or Python) off it, T8 (``test_declared_languages``) does not read a
+    language row as met before T1/T2 get to it, so the T1/T2 mechanics below are still exercised on the Go rows."""
+    changes = strict_rows([row], strict_master(MASTER.replace("Languages: Go/Ruby/Python", skills), today=TODAY))
+    return row, changes
+
+
 # --- the master as read ------------------------------------------------------------------------------------
 
 
@@ -110,7 +117,7 @@ def test_names_in_reads_past_a_list_opener_a_glued_level_word_and_names_the_c_la
     assert names_in("Nice to have: Go") == ("Go",) and names_in("Strong candidates will have: Go") == ("Go",)
     row, changes = _check(_row("Proficient with modern observability tools (e.g. Datadog, Honeycomb)", sources=["b-cur1"]))
     assert row["status"] == "met" and changes[0].step == "T2"
-    row, changes = _check(_row("Nice to have: Go", sources=["b-p1"]))
+    row, changes = _check_with(_row("Nice to have: Go", sources=["b-p1"]))
     assert row["status"] == "met" and changes[0].step == "T1"
     # R-M2: a level word glued to the tool opens the run; the tool is still named and the level word still governs it.
     assert names_in("Strong Datadog experience, and familiarity with Go") == ("Datadog", "Go")
@@ -175,8 +182,10 @@ def test_t1_a_tools_word_on_a_clear_line_keeps_met_and_cites_the_line() -> None:
 def test_t1_a_dotted_name_is_named_by_its_stem_and_a_skills_list_is_not_an_alias() -> None:
     row, _ = _check(_row("Node.js services", alternatives=["Node.js"], sources=["sk-1"]))
     assert row["status"] == "met" and row["sources"] == ["sk-1", "b-cur2"]
-    row, _ = _check(_row("Python services", alternatives=["Python"], sources=["sk-1"]))
-    assert row["status"] == "unclear" and "Python only on sk-1 (skills line) and o-1 (Other)" in row["code_note"]
+    row, changes = _check(_row("Python services", alternatives=["Python"], sources=["sk-1"]))
+    assert row["status"] == "met" and changes[0].step == "T8" and row["sources"] == ["sk-1"]  # a declared language, not sk-1 as a clear line
+    row, _ = _check_with(_row("Terraform modules", alternatives=["Terraform"], sources=["sk-1"]), skills="Tools: Rails/Terraform")
+    assert row["status"] == "unclear" and "Terraform only on sk-1 (skills line)" in row["code_note"]
 
 
 def test_t1_tools_joined_by_and_are_all_required_unless_examples_or_in_a_parenthesis() -> None:
@@ -191,9 +200,11 @@ def test_t1_tools_joined_by_and_are_all_required_unless_examples_or_in_a_parenth
 
 
 def test_t2_a_level_word_needs_the_current_role_or_two_roles_in_the_window() -> None:
-    row, changes = _check(_row("Fluency in Go and/or Rust", alternatives=["Go", "Rust"], sources=["b-mid1", "b-p1"]))
+    row, changes = _check_with(_row("Fluency in Go and/or Rust", alternatives=["Go", "Rust"], sources=["b-mid1", "b-p1"]))
     assert row["status"] == "unclear" and changes[0].step == "T2"
     assert "'fluency' asks for depth" in row["code_note"] and "Go on b-mid1 (role, ended 2022)" in row["code_note"]
+    row, changes = _check(_row("Fluency in Go and/or Rust", alternatives=["Go", "Rust"], sources=["b-mid1", "b-p1"]))
+    assert row["status"] == "met" and changes[0].step == "T8"  # with Go on the skills line, T8 reads it first (docker, 2026-10-29)
     row, changes = _check(_row("Strong Datadog experience", alternatives=["Datadog"], sources=["b-cur1"]))
     assert row["status"] == "met" and changes[0].step == "T2"
     row, _ = _check(_row("Go on Kubernetes", alternatives=["Go"], sources=["b-mid1"]))
@@ -210,15 +221,15 @@ def test_t2_the_level_word_governs_an_example_list_and_a_colon_list_but_not_past
     assert row["status"] == "met" and changes[0].step == "T1"
     row, changes = _check(_row("Strong Datadog experience, and familiarity with Kubernetes", alternatives=["Kubernetes"], sources=["b-mid1"]))
     assert row["status"] == "met" and changes[0].step == "T1"
-    row, changes = _check(_row("Strong knowledge of Playwright, Datadog, and Go", alternatives=["Go"], sources=["b-mid1"]))
+    row, changes = _check_with(_row("Strong knowledge of Playwright, Datadog, and Go", alternatives=["Go"], sources=["b-mid1"]))
     assert row["status"] == "unclear" and changes[0].step == "T2"  # ", and Go" continues the list the level word governs
 
 
 def test_t2_a_level_word_on_a_skill_or_on_an_understanding_of_something_else_does_not_govern_the_tool() -> None:
     # M1 (D6) and the brief's "deep understanding of system design".
-    row, changes = _check(_row("Strong communication skills and experience with Go", alternatives=["Go"], sources=["b-mid1"]))
+    row, changes = _check_with(_row("Strong communication skills and experience with Go", alternatives=["Go"], sources=["b-mid1"]))
     assert row["status"] == "met" and changes[0].step == "T1"
-    row, changes = _check(_row("A deep understanding of distributed systems and experience with Go", alternatives=["Go"], sources=["b-mid1"]))
+    row, changes = _check_with(_row("A deep understanding of distributed systems and experience with Go", alternatives=["Go"], sources=["b-mid1"]))
     assert row["status"] == "met" and changes[0].step == "T1"
     row, changes = _check(_row("Strong knowledge of Go and Playwright", alternatives=["Go", "Playwright"], sources=["b-mid1", "b-p1"]))
     assert row["status"] == "unclear" and changes[0].step == "T2"
@@ -322,7 +333,7 @@ def test_t5_leaves_a_language_or_collaboration_row_alone_but_a_named_tool_row_is
     for requirement in ("Strong English communication is required.", "Excellent written and verbal communication", "A self-starter who thrives in teamwork"):
         row, changes = _check(_row(requirement, sources=["sum-1"]))
         assert row["status"] == "met" and changes == (), requirement
-    row, _ = _check(_row("Strong Go experience with clear communication", alternatives=["Go"], sources=["sum-1"]))
+    row, _ = _check_with(_row("Strong Go experience with clear communication", alternatives=["Go"], sources=["sum-1"]))
     assert row["status"] == "unclear" and "'strong' asks for depth" in row["code_note"]
 
 

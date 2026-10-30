@@ -3,8 +3,8 @@
 A Scout ``met`` must mean what a strict ATS screener sees in the submitted resume. The model reads leniently (a
 summary line, the skills line, a project, a role older than the window, or a yes answer made a row ``met`` in 9 of
 28 gold rows: ``research/scout/SPIKE-assessment-strictness.md`` section 4.1, option B). This module runs after the
-answer is normalized and the stated check settled it, and only ever lowers a must-have row (``hard``/``askable``)
-or turns a bare ``unmet`` into a question:
+answer is normalized and the stated check settled it, and only ever lowers a must-have row (``hard``/``askable``),
+turns a bare ``unmet`` into a question, or (T8) reads a declared language as ``met``:
 
 T1  a row with named tools (``alternatives`` less the open entries, "other X") is ``met`` only if a CLEAR line
     (a bullet or heading of a role within the window, or of a project) names one of them: a tool's word on the
@@ -22,6 +22,12 @@ T5  any other ``met`` row resting only on buried lines (summary, skills, Other, 
     communication", "teamwork", "self-starter") is a claim no resume line settles and keeps the model's status.
 T6  a ``met`` row resting only on answers or stories is ``answered``: the candidate said yes; no line shows it.
 T7  an ``unmet`` row that cites nothing is ``unclear``: a silence is a question, not a gap.
+T8  a programming language the candidate declares (a name of a skills line, or of a saved answer the row cites that
+    does not deny it) is a fact about the candidate, not a dated one (operator decision 2026-10-30, dossier-A): a row
+    that is about languages alone (``LANGUAGES``; one of an "or" list, all of an "and" or slashed list, no framework or
+    infrastructure beside them, nothing but filler words around them: "payments systems in Go" is about payments) is
+    ``met`` whether the model said ``met`` or ``unclear``, keeps its sources, and T1/T2 do not lower it. A years row
+    stays T3, a degree row T4, an ``unmet`` row T7.
 
 Every row the check touches gets a ``code_note`` naming the posting's term, the lines found and why they do not
 count. ``elig-`` rows and the authorization row are never touched. Pure: the master is a
@@ -109,6 +115,18 @@ _SOFT_CLAIM = re.compile(
     r"|collaborat\w*|teamwork|team player|self[- ]starter|interpersonal|written and verbal|verbal and written)\b",
     re.IGNORECASE,
 )
+#: T8: a programming language the candidate may declare on the skills line (casefolded). SQL is in (a query language the
+#: skills line declares the same way); frameworks and runtimes (Node.js, React, Rails) are out, so "TypeScript and Node"
+#: is no language row.
+LANGUAGES = frozenset(
+    "go golang rust java kotlin python typescript javascript c c++ c# ruby swift scala php elixir erlang haskell clojure dart r lua perl sql".split()
+)
+_LANGUAGE_ALIASES = {"golang": "go", "js": "javascript", "ts": "typescript"}
+#: T8: an answer that takes something back ("no, I have not used Rust") declares no language.
+_DENIAL = re.compile(r"\b(?:no|not|never|\w+n['’]t)\b", re.IGNORECASE)
+#: T8: what separates the names of a skills line ("Languages: Go/Ruby/Python", "Python (FastAPI, Django)") or the words of an
+#: answer; a hyphen stays, so "Objective-C" does not declare C.
+_NAME_SPLIT = re.compile(r"[\s/,;:()\[\]·•]+")
 
 
 @dataclass(frozen=True)
@@ -515,6 +533,119 @@ def _answered(row: Mapping[str, object]) -> bool:
     return quoted or any(item.startswith(_ANSWER_PREFIX) for item in _sources_of(row))
 
 
+# --- T8: declared languages ---------------------------------------------------------------------------------
+
+
+def _language(name: str) -> str | None:
+    """The language ``name`` names, casefolded with the aliases folded ("Golang" -> "go"), or ``None`` when it is none."""
+
+    word = name.strip().casefold().rstrip(".")
+    word = _LANGUAGE_ALIASES.get(word, word)
+    return word if word in LANGUAGES else None
+
+
+def _languages_in(text: str) -> frozenset[str]:
+    return frozenset(language for language in map(_language, _NAME_SPLIT.split(text)) if language is not None)
+
+
+def declared_languages(master: StrictMaster) -> frozenset[str]:
+    """T8: the languages the master's skills lines declare (casefolded)."""
+
+    return frozenset().union(*(_languages_in(text) for text in master.skills))
+
+
+def _answers_of(row: Mapping[str, object]) -> tuple[str, ...]:
+    """T8: the candidate's answers the row cites: ``Your answer: ...`` / ``Story bank <id>: ...`` evidence, and the id of an ``A ...`` source."""
+
+    evidence = row.get("resume_evidence")
+    quoted = [item for item in evidence if isinstance(item, str) and _BANK_ANSWER.match(item)] if isinstance(evidence, (list, tuple)) else []
+    return (*quoted, *(item[len(_ANSWER_PREFIX) :] for item in _sources_of(row) if item.startswith(_ANSWER_PREFIX)))
+
+
+#: T8: the words a language row may carry beside its language names and still be about the language alone ("Strong experience
+#: building and operating production backend systems in Go, our primary backend language"). A word outside this set
+#: ("payments", "reporting", "teams", "trading") makes the row about something more, which T8 does not read.
+_LANGUAGE_FILLER = frozenset(
+    """
+    a an the our your you we have has is are be must should with in of on for to at as and or plus also
+    experience experienced expertise expert knowledge skill skills skilled familiarity familiar comfortable proficiency proficient
+    fluency fluent strong deep solid excellent good great advanced extensive significant demonstrated proven hands-on
+    working write writing code coding develop developing development build building operate operating ship shipping
+    production production-quality production-grade high-quality well-tested clean maintainable scalable reliable modern
+    backend back-end frontend front-end full-stack server-side systems system services software applications programs programming
+    language languages fundamentals concepts primary main one more such like similar other another equivalent comparable any
+    including especially ideally preferably required preferred nice level senior using use ability able
+    e.g i.e etc
+    """.split()
+)
+
+
+def _slash_joined(requirement: str, tools: Sequence[str]) -> bool:
+    """T8: whether a tool is slash-joined to a neighbour in the requirement ("Java/JavaScript"): as the stated check reads it, every
+    name of such a list is required ("and/or" joins no name)."""
+
+    text = requirement.casefold()
+    return any(re.search(rf"{re.escape(tool.casefold())}\s*/|/\s*{re.escape(tool.casefold())}", text) for tool in tools)
+
+
+def _tool_pattern(tool: str) -> re.Pattern[str]:
+    """The tool's name as a whole word in casefolded text ("c" is not the "c" of "experience", "c++" keeps its pluses)."""
+
+    return re.compile(rf"(?<![\w#+]){re.escape(tool.casefold())}(?![\w#+])")
+
+
+def _only_language_words(requirement: str, tools: Sequence[str]) -> bool:
+    """T8: whether nothing but the tool names, ``_LANGUAGE_FILLER`` and punctuation make up the requirement (a parenthesis is dropped)."""
+
+    text = _PARENTHESIS.sub(" ", requirement.casefold())
+    for tool in sorted(tools, key=len, reverse=True):
+        text = _tool_pattern(tool).sub(" ", text)
+    for word in re.split(r"[\s/,;:!?]+", text):
+        word = word.strip("'’\"").rstrip(".")
+        if word and not re.fullmatch(r"[\W_]+", word) and word not in _LANGUAGE_FILLER:
+            return False
+    return True
+
+
+def _step_declared(row: MutableMapping[str, object], requirement: str, tools: Sequence[str], on_skills: frozenset[str]) -> tuple[str, str] | None:
+    """T8: ``("T8", note)`` with the row ``met`` when it needs only languages the candidate declares (the module text), else ``None``.
+
+    A language row names nothing but languages (a framework or infrastructure beside them: T1/T2 as before), names at least one
+    in its own words (a language only the model's ``alternatives`` guessed, "Backend development experience", is not the row's),
+    and says nothing beside them but filler (``_only_language_words``: "payments systems in Go" is about payments). It needs
+    every tool of an "and" list (``_requires_all``) or a slashed list ("Java/JavaScript", ``_slash_joined``) and any one language
+    of any other list. A cited answer that denies ("no", "not", "never", "n't") leaves the row as it came.
+    """
+
+    if not tools or not all(_language(tool) for tool in tools):
+        return None
+    text = requirement.casefold()
+    tools = [tool for tool in tools if _tool_pattern(tool).search(text)]
+    if not tools or not _only_language_words(requirement, tools):
+        return None
+    required = _requires_all(requirement, tools) or (tuple(tools) if _slash_joined(requirement, tools) else ())
+    named = [(tool, _language(tool)) for tool in (required or tools)]
+    answers = _answers_of(row)
+    if any(_DENIAL.search(text) for text in answers):
+        return None
+    in_answer = frozenset().union(*(_languages_in(text) for text in answers))
+    skills_tools = [tool for tool, language in named if language in on_skills]
+    answer_tools = [tool for tool, language in named if language in in_answer and language not in on_skills]
+    found = len(skills_tools) + len(answer_tools)
+    if not found or (required and found < len(named)):
+        return None
+    parts = []
+    if skills_tools:
+        parts.append(f"{_join(skills_tools)} {'is' if len(skills_tools) == 1 else 'are'} on your skills line")
+    if answer_tools:
+        parts.append(f"{_join(answer_tools)} {'is' if len(answer_tools) == 1 else 'are'} in your answer")
+    row["status"] = MET
+    row["code_note"] = _note(f"Strict read (T8): {' and '.join(parts)}.")
+    return ("T8", str(row["code_note"]))
+
+
+# --- the check ------------------------------------------------------------------------------------------------
+
 
 def strict_rows(matrix: Sequence[MutableMapping[str, object]], master: StrictMaster, id_of_row: Mapping[int, str] | None = None) -> tuple[StrictChange, ...]:
     """Run the check over ``matrix`` (changed in place) against ``master``; what it did, per touched row, in matrix order.
@@ -523,6 +654,7 @@ def strict_rows(matrix: Sequence[MutableMapping[str, object]], master: StrictMas
     """
 
     matcher = _Matcher(master)
+    declared = declared_languages(master)
     changes: list[StrictChange] = []
     for row in matrix:
         row_id = row.get("id") if isinstance(row.get("id"), str) else (id_of_row or {}).get(id(row))
@@ -531,9 +663,13 @@ def strict_rows(matrix: Sequence[MutableMapping[str, object]], master: StrictMas
         requirement = str(row.get("requirement") or "")
         before = str(row.get("status") or "")
         step_note: tuple[str, str] | None = None
-        if before == MET:
-            tools = named_tools(row)
-            years = _years_required(requirement)
+        tools = named_tools(row)
+        years = _years_required(requirement)
+        if before in (MET, UNCLEAR) and tools and years is None and not _DEGREE.search(requirement):
+            step_note = _step_declared(row, requirement, tools, declared)
+        if step_note is not None:
+            pass
+        elif before == MET:
             sources = _sources_of(row)
             if _DEGREE.search(requirement):
                 step_note = _step_degree(row, requirement, master)  # a degree row's "alternatives" name degrees, not tools
@@ -564,9 +700,11 @@ def strict_rows(matrix: Sequence[MutableMapping[str, object]], master: StrictMas
 __all__ = [
     "ANSWERED",
     "GENERIC_TOKENS",
+    "LANGUAGES",
     "MAX_CODE_NOTE_CHARS",
     "OPEN_WORDS",
     "StrictChange",
+    "declared_languages",
     "named_tools",
     "names_in",
     "practice_alternatives",
