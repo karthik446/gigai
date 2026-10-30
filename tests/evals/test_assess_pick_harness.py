@@ -174,6 +174,10 @@ def test_two_lists_of_one_posting_same_words_close_words_and_rows_without_a_coun
         ([_row("a", "hard"), _row("b", "askable", "unclear")], runner.PENDING, runner.GATE_HOLD_QUESTION),
         ([_row("a", "hard", "unmet"), _row("b", "askable", "unclear")], runner.NOT_A_MATCH, runner.GATE_NOT_A_MATCH),
         ([_row("a", "hard"), _row("b", "askable", "unmet")], runner.MATCHED, runner.GATE_HOLD_UNMET),
+        # 0.1.11.12 F2a: a must-have the user said yes to with no resume line (``answered``) holds like an open question,
+        # before an askable gap is read; an answered list item holds nothing.
+        ([_row("a", "hard"), _row("b", "askable", "answered"), _row("c", "askable", "unmet")], runner.MATCHED, runner.GATE_HOLD_QUESTION),
+        ([_row("a", "hard"), _row("c", "list_item", "answered")], runner.MATCHED, runner.GATE_SUGGEST),
         # Only must-haves hold (OD2): two open list items leave the gate at suggest, whatever the model's verdict.
         ([_row("a", "hard"), _row("c", "list_item", "unclear"), _row("d", "list_item", "unclear")], runner.PENDING, runner.GATE_SUGGEST),
     ],
@@ -492,7 +496,15 @@ def test_the_v9_shape_runs_through_a_tree_that_has_the_pick(tmp_path: Path) -> N
     assert matched["model_selection"]["page_fit"] and matched["model_selection"]["picked_by"] in ("model", "code") and "lost" in matched["model_selection"]
     # The stored selection says its cap and counts no page (0.1.11.5 item 1c).
     assert matched["model_selection"]["pages"] is None and 0 < matched["model_selection"]["bullets"] <= matched["model_selection"]["max_bullets"] == 20
-    # The job with a confirmed gap: Matched by the model, held by the gate, and no pick is kept (OD1).
+    # The job with a confirmed gap: Matched by the model, held by the gate, and no pick is kept (OD1). 0.1.11.12: the
+    # MongoDB must-have rests on a story-bank answer and no resume line, so the strict check reads it ``answered`` (T6)
+    # and the gate holds on it like an open question (F2a) before it reads the Rust gap; the pick is dropped either way.
     held = by_case["m12-answered-backend"]
-    assert held["answer"]["resume_gate"]["decision"] == runner.GATE_HOLD_UNMET and held["answer"]["pick"] is None and held["boundary"]["pick_dropped"]
-    assert not held["labels"]["gate_stored_differs"]
+    gate = held["answer"]["resume_gate"]
+    assert gate["decision"] == runner.GATE_HOLD_QUESTION and held["answer"]["pick"] is None and held["boundary"]["pick_dropped"]
+    rows = {row["requirement"]: row for row in held["answer"]["matrix"]}
+    answered = next(row for row in rows.values() if row["status"] == "answered")
+    assert "Cassandra" in answered["requirement"] and answered["class"] == "askable"
+    assert [reason["code"] for reason in gate["reasons"]] == ["answered"] and gate["reasons"][0]["requirement"] == answered["id"]
+    assert any(row["status"] == "unmet" and row["class"] == "askable" and "Rust" in row["requirement"] for row in rows.values())
+    assert held["answer"]["questions"] == [] and not held["labels"]["gate_stored_differs"]

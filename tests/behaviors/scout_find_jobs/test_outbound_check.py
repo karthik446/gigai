@@ -332,13 +332,21 @@ _PATHOLOGICAL = [
 ]
 
 
-def _seconds(text: str) -> float:
-    best = float("inf")
+def _seconds(short: str, long: str) -> tuple[float, float]:
+    """The best of three readings of each text, in this process's own CPU time, the two interleaved.
+
+    Wall-clock readings (``perf_counter``) on a shared runner are mostly the other workers of a full run: the
+    0.1.11.12 pre-check read 0.227 s and 0.785 s (3.5x) on the 3.12 lane for a path that is 2x (see the quadratic
+    guard below, 0.1.11.9 FX2). CPU time reads the scan alone; one round per pair so a load change hits both.
+    """
+
+    bests = [float("inf"), float("inf")]
     for _ in range(3):
-        started = time.perf_counter()
-        redact_text(text)
-        best = min(best, time.perf_counter() - started)
-    return best
+        for index, text in enumerate((short, long)):
+            started = time.process_time()
+            redact_text(text)
+            bests[index] = min(bests[index], time.process_time() - started)
+    return bests[0], bests[1]
 
 
 @pytest.mark.parametrize("unit", _PATHOLOGICAL)
@@ -346,7 +354,7 @@ def test_a_pathological_100k_input_is_read_in_linear_time(unit: str) -> None:
     short = unit * (100_000 // len(unit))
     long = unit * (200_000 // len(unit))
     assert len(short) >= 99_990
-    t_short, t_long = _seconds(short), _seconds(long)
+    t_short, t_long = _seconds(short, long)
     # Measured: at most 0.08 s for 100,000 characters. A quadratic scan of 100,000 takes minutes.
     assert t_short < 2.0, f"{unit!r}: {t_short:.3f} s for 100,000 characters"
     # Twice the text, about twice the time (4x would be quadratic); 50 ms of slack for a busy machine.

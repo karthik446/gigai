@@ -397,7 +397,9 @@ def gate_by_spec(rows: Sequence[Mapping[str, Any]], verdict: str | None) -> str:
 
     if verdict == NOT_A_MATCH or any(row["status"] == "unmet" and row["class"] in ("hard", None) for row in rows):
         return GATE_NOT_A_MATCH
-    if any(row["status"] == "unclear" and row["class"] in MANDATORY for row in rows):
+    # 0.1.11.12 F2a (resume_gate.gate): a must-have the user said yes to that no resume line shows (``answered``, the
+    # strict check's T6) holds like an unclear one, before an askable gap is read.
+    if any(row["status"] in ("unclear", "answered") and row["class"] in MANDATORY for row in rows):
         return GATE_HOLD_QUESTION
     if any(row["status"] == "unmet" and row["class"] == "askable" for row in rows):
         return GATE_HOLD_UNMET

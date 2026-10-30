@@ -31,7 +31,7 @@ from click.testing import CliRunner
 import pytest
 
 from gigai.cli import cli
-from gigai.scout import learning_render, learning_shipped_store as store, learning_store, run_supervisor
+from gigai.scout import learning_job, learning_render, learning_shipped_store as store, learning_store, run_supervisor
 from gigai.scout.find_jobs.api.learning import pathways_response, shipped_response, shipped_summary
 from gigai.scout.learning_store import LearningError
 
@@ -491,8 +491,10 @@ def test_list_and_show_name_the_shipped_courses(home_target: tuple[Path, Path], 
     listed = _run(home, target, "list")
     assert listed.exit_code == 0, listed.output
     lines = listed.output.splitlines()
+    # The layout: the shipped rows, the "more courses" note (learning_job.MORE_COURSES_NOTE), the imported pathways, then the open hint.
     assert lines[0] == f"{KEY}  shipped  {ROLE}  (4 lessons)  [shipped with GigAI]  your pathway page is not built yet"
-    assert lines[1].startswith(done.id) and "[imported]" in lines[1]
+    assert lines[1] == learning_job.MORE_COURSES_NOTE
+    assert lines[2].startswith(done.id) and "[imported]" in lines[2]
     assert "gigai scout learning open ID" in lines[-1] and "ROLE_KEY" in lines[-1]
     assert _json(_run(home, target, "list", "--json")) == pathways_response(home, target)
 

@@ -262,8 +262,10 @@ def test_provider_interval_and_the_floor_table() -> None:
 
     pace = market_acquisition.provider_interval
     assert providers.spec("workable").min_interval_seconds == 2.0  # half the rate its host refused the seed at
-    assert [name for name in providers.provider_names() if providers.spec(name).min_interval_seconds is not None] == ["workable"]
+    assert providers.spec("workday").min_interval_seconds == 1.0  # 0.1.11.12 Workday P1: a floor of its own (and concurrency 1)
+    assert [name for name in providers.provider_names() if providers.spec(name).min_interval_seconds is not None] == ["workable", "workday"]
     assert pace("workable", 0.125, {}) == 2.0 and pace("workable", 0.4, {}) == 2.0 and pace("workable", 3.0, {}) == 3.0
+    assert pace("workday", 0.125, {}) == 1.0 and pace("workday", 3.0, {}) == 3.0
     assert pace("greenhouse", 0.125, {}) == 0.125 and pace("page:careers.example.com", 0.125, {}) == 0.125
     assert pace("workable", 0.0, {"GIGAI_SCOUT_ATS_PROVIDER_FLOORS": "0"}) == 0.0
     assert pace("workable", 0.0, {"GIGAI_SCOUT_ATS_PROVIDER_FLOORS": "1"}) == 2.0

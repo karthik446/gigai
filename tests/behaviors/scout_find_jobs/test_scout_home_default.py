@@ -215,6 +215,16 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "pipeline approvals list": ("scout", "pipeline", "approvals", "list"),
     "pipeline approvals approve": ("scout", "pipeline", "approvals", "approve", "apv_0123456789abcdef0123456789abcdef"),
     "pipeline approvals deny": ("scout", "pipeline", "approvals", "deny", "apv_0123456789abcdef0123456789abcdef"),
+    # The learning pathways (learning_cli): every command resolves its target first, through scout_cli._resolved_target.
+    "learning list": ("scout", "learning", "list"),
+    "learning show": ("scout", "learning", "show", "lp-00000000"),
+    "learning open": ("scout", "learning", "open", "lp-00000000", "--no-browser"),
+    "learning pathway": ("scout", "learning", "pathway", "synthetic-widget-engineer"),
+    "learning import": ("scout", "learning", "import", "own-course", "--role", "Gadget engineer"),
+    "learning corpus": ("scout", "learning", "corpus", "Gadget engineer"),
+    "learning generate": ("scout", "learning", "generate", "Gadget engineer"),
+    "learning cancel": ("scout", "learning", "cancel", "lp-00000000"),
+    "learning resume": ("scout", "learning", "resume", "lp-00000000"),
 }
 
 
