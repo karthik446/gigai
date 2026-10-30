@@ -598,8 +598,9 @@ jobs:
   # or stdout that is not JSON fails the step, and so the pre-check. Its table goes to
   # the job summary and into the every-run artifact; each step's output is under
   # build/ui-artifacts/core-flow/logs/, so a failed run uploads it with the rest. Step
-  # limit by the same rule: 6 min on a laptop on 2026-10-04 -> 20. The job's limit is
-  # the steps' limits plus 10 minutes for the setup and the uploads.
+  # limit by the same rule: 6 min on a laptop on 2026-10-04 (about 10,000 boards), 13.6 min on 2026-10-30 (25,210 boards:
+  # the company catalog of rev 6 added 14,860, and the source update is about 9 ms a board cold, 21 ms warm) -> 45. The
+  # job's limit is the steps' limits plus 10 minutes for the setup and the uploads, to the next 5.
   # 0.1.10.11 SGATE: the same job then runs the WRITE TIMING GATE (`make
   # test-operator-writes`, tests/behaviors/scout_pipeline/test_operator_sized_writes.py)
   # in REPORT mode. The bar is no interactive operation over 1 s on this home; the
@@ -623,7 +624,7 @@ jobs:
     if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'full'
     name: Operator-sized home timing gate, browser flows and core-flow smoke (290k postings)
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     continue-on-error: true
     env:
       GIGAI_TEST_LATENCY_SCALE: "3"
@@ -680,7 +681,7 @@ jobs:
       - name: Core-flow smoke (the wheel's gigai command on the operator-sized home, cold then warm)
         id: core_flow
         if: ${{ !cancelled() && steps.home.outcome == 'success' }}
-        timeout-minutes: 20
+        timeout-minutes: 45
         run: make test-core-flow CORE_FLOW_OUT=build/ui-artifacts/core-flow
       - name: Core-flow table in the job summary
         if: ${{ !cancelled() && steps.home.outcome == 'success' }}

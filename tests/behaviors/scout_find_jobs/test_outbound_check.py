@@ -365,17 +365,20 @@ def test_the_timing_check_would_catch_a_quadratic_pattern() -> None:
     # The shape resume_privacy had before its linear rewrite: tried from every character of a run.
     naive = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
-    def seconds(text: str) -> float:
-        # The best of five, in this process's own CPU time: one wall-clock reading of 14 ms is mostly the other
-        # workers of a full run (0.1.11.9 FX2: 26 ms and 72 ms were read there, 2.7x, for a pattern that is 4x).
-        best = float("inf")
-        for _ in range(5):
-            started = time.process_time()
-            naive.search(text)
-            best = min(best, time.process_time() - started)
-        return best
+    def seconds(short: str, long: str) -> tuple[float, float]:
+        # The best of seven rounds, in this process's own CPU time, the two texts read in the same round (0.1.11.9 FX2:
+        # 26 ms and 72 ms wall-clock, 2.7x, for a pattern that is 4x; 0.1.11.12 pre-check: 42 ms and 119 ms of CPU, 2.8x,
+        # on a 3.12 runner, where the five readings of the short text were all taken before the long text's: a change
+        # in the runner's load between the two sets hit only one of them).
+        bests = [float("inf"), float("inf")]
+        for _ in range(7):
+            for index, text in enumerate((short, long)):
+                started = time.process_time()
+                naive.search(text)
+                bests[index] = min(bests[index], time.process_time() - started)
+        return bests[0], bests[1]
 
-    t_short, t_long = seconds("a" * 3_000), seconds("a" * 6_000)
+    t_short, t_long = seconds("a" * 3_000, "a" * 6_000)
     assert t_long > 3.0 * t_short + 0.0, (t_short, t_long)
 
 

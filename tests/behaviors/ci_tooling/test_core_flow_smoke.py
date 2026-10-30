@@ -192,7 +192,7 @@ def test_the_release_precheck_runs_the_smoke_on_the_prebuilt_home_with_a_limit_a
     assert "    if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'full'\n" in job  # 0.1.11.1: the sweep; the pre-check runs the small-home `core-flow` job
     (smoke,) = [step for step in steps if "make test-core-flow" in step]
     assert smoke.rstrip().endswith("run: make test-core-flow CORE_FLOW_OUT=build/ui-artifacts/core-flow")
-    assert HOME_BUILT in smoke and "timeout-minutes: 20" in smoke and "continue-on-error" not in code.replace("    continue-on-error: true\n", "")
+    assert HOME_BUILT in smoke and "timeout-minutes: 45" in smoke and "continue-on-error" not in code.replace("    continue-on-error: true\n", "")
     # The home built once in this job (GIGAI_OPERATOR_HOME_PREBUILT, exported by the build step) is the one it takes.
     (build,) = [step for step in steps if "tests.support.operator_home" in step]
     assert f'echo "{operator_home.PREBUILT_ENV}=${{home}}/op" >> "${{GITHUB_ENV}}"' in build and steps.index(build) < steps.index(smoke)
