@@ -18,14 +18,18 @@ Pinned, by the ticket's part:
     2 were not started.", exactly two postings are assessed on the server and no model process is left.
 Then the two that were never started are assessed by a second batch that runs to its end ("Assessed 2 of 2.").
 
-This flow CHANGES the shared home (four postings become assessed; the small home has six that are not, and "Assess
-these" takes two): it runs after every other flow but the profile's delete, so no flow reads a home it changed.
+This flow runs on a small home of ITS OWN (the session's build again, 12 to 17 s): four of its six not-assessed postings
+become assessed. The shared home's six are spoken for: "Assess these" takes two, and the applied-by-address flow
+applies to one (the list then leaves it out), so three are left for a flow that needs four.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
+import shutil
+import tempfile
 import threading
 import time
 from urllib.parse import quote, urlsplit
@@ -38,7 +42,6 @@ from tests.ui.evidence import shot
 from tests.ui.support import tid
 
 pytestmark = pytest.mark.ui
-UI_ORDER = 88  # changes the shared home (the last four not-assessed postings become assessed): after every flow but the profile's delete
 
 ASSESS = "/api/postings/assess"
 STATUS = "/api/postings/assess/status"
@@ -53,33 +56,51 @@ class _Served:
 
 
 @pytest.fixture
-def batch_ui(request, ui_browser, scout_server, ui_artifacts, tmp_path, monkeypatch):
-    """`ui` on a server of THIS process (the session's home), whose model calls the test holds open."""
+def batch_ui(request, ui_browser, ui_artifacts, tmp_path, monkeypatch):
+    """`ui` on a server of THIS process, on a small home of this flow's own, whose model calls the test holds open."""
 
     from tools.media import demo_home
 
-    with synthetic_environment(scout_server.home):
-        os.environ.update(demo_home.SEAM_ENV)
-        from gigai.scout.find_jobs import assess_all
-        from gigai.scout.find_jobs.api.server import ScoutFindJobsBackend, serve
+    # The session's home, built again (tests/ui/conftest.py `scout_server`): gitignored and outside any git repository.
+    home = Path(tempfile.mkdtemp(prefix="gigai-ui-")).resolve()
+    root = home / "demo"
+    try:
+        with synthetic_environment(home):
+            os.environ.update(demo_home.SEAM_ENV)
+            from gigai.scout import run_supervisor
+            from gigai.scout.find_jobs import assess_all
+            from gigai.scout.find_jobs.api.server import ScoutFindJobsBackend, serve
 
-        monkeypatch.setattr(assess_all, "assess_concurrency", lambda cpus=None: 2)
-        gate = gate_model_calls(monkeypatch, tmp_path / "gate")
-        server = serve(backend=ScoutFindJobsBackend(home_root=scout_server.gigai_home, target=scout_server.target), bind=("127.0.0.1", 0))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        served = _Served(f"http://127.0.0.1:{server.server_address[1]}", os.getpid(), scout_server.log_path)
+            demo_home.build(root, log=lambda line: None)
+            gigai_home = demo_home.demo_gigai_home(root)
+            target = gigai_home / "scout"
+            state = run_supervisor.status(home_root=gigai_home, requested_target=target)
+            if state.state != "running" or state.pid is None:
+                raise RuntimeError(f"the Scout server is not running after the home was built: {state.state}")
+            monkeypatch.setattr(assess_all, "assess_concurrency", lambda cpus=None: 2)
+            gate = gate_model_calls(monkeypatch, tmp_path / "gate")
+            server = serve(backend=ScoutFindJobsBackend(home_root=gigai_home, target=target), bind=("127.0.0.1", 0))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            served = _Served(f"http://127.0.0.1:{server.server_address[1]}", os.getpid(), str(state.log_path))
+            try:
+                with _ui_session(request, ui_browser, served, ui_artifacts) as session:
+                    yield session, gate
+            finally:
+                gate.release()
+                from gigai.scout import assess_batch_job
+
+                assess_batch_job.wait_for_batch(gigai_home, target, timeout=60)
+                server.shutdown()
+                server.server_close()
+                thread.join(10)
+    finally:
+        # Stopped here, not in the inner finally: a failure between the build and the server leaves the Scout server `demo_home.build` started.
         try:
-            with _ui_session(request, ui_browser, served, ui_artifacts) as session:
-                yield session, gate
+            with synthetic_environment(home):
+                demo_home.stop(root)
         finally:
-            gate.release()
-            from gigai.scout import assess_batch_job
-
-            assess_batch_job.wait_for_batch(scout_server.gigai_home, scout_server.target, timeout=60)
-            server.shutdown()
-            server.server_close()
-            thread.join(10)
+            shutil.rmtree(home, ignore_errors=True)
 
 
 def _rows(ui) -> dict[str, dict]:

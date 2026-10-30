@@ -890,6 +890,7 @@ export default function FindJobsView({
           expireJobsList(); // 0.1.11.5: an assess batch gave this posting its result: the kept list and the assessments are read again
           loadQuickItems();
         }}
+        onPostingClosed={expireJobsList} // 0.1.11.12: the read says the board no longer lists it: the kept list shows it as live until read again
       />
     );
   }

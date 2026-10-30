@@ -387,6 +387,7 @@ export default function JobPage({
   onApplicationsChanged,
   onTailored,
   onBatchChanged,
+  onPostingClosed,
 }) {
   // 0.1.11.5 (ASSESS-01, UI-01 part 3): "is it still assessing?". While an assess batch runs the page says how far
   // it is and whether this posting waits in it; when the posting gets its result (or the batch ends) the page's
@@ -495,6 +496,13 @@ export default function JobPage({
   }, [jobId, askJob]);
   const servedDates = askDates && served && served.posting ? served.posting : null;
   const liveness = served && served.liveness ? served.liveness : null;
+  // 0.1.11.12: the read found the board no longer lists the posting (the server marked it removed): the kept Jobs list
+  // still shows it as live, so it is read again on return (as after an application, 0.1.11.3 item 12).
+  useEffect(() => {
+    if (liveness && liveness.state === "closed" && onPostingClosed) {
+      onPostingClosed();
+    }
+  }, [liveness, onPostingClosed]);
 
   const servedText = askFullText && servedDates && typeof servedDates.text === "string" && servedDates.text.trim() ? servedDates.text : null;
   const posting = useMemo(

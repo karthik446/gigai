@@ -40,6 +40,7 @@ from tests.behaviors.scout_learning.test_learning_course import lesson_answer, l
 from tests.behaviors.scout_learning.test_learning_generate_cli import corpus_answers, course_answer, seed_boards
 from tests.support.scout_profile_fixtures import build_gig_with_resume
 from tests.ui.conftest import _ui_session
+from tests.ui.evidence import shot
 from tests.ui.support import tid
 
 pytestmark = [pytest.mark.ui, pytest.mark.skipif(sqlite3.sqlite_version_info < (3, 9, 0), reason="needs FTS5")]
@@ -49,13 +50,7 @@ ROLE_INPUT = "#learning-role"
 GENERATE = '[data-action="learning-generate"]'
 DIALOG = tid("learning-request-dialog")
 ROW = '[data-testid="learning-row"]'
-SHOT_DIR = Path("/Users/kar/orca/workspaces/gigai/orchestrator/research/role-packet/out/ui-shots")
 ROLE = "MLOps engineer"
-
-
-def shot(ui, name: str) -> None:
-    SHOT_DIR.mkdir(parents=True, exist_ok=True)
-    ui.page.screenshot(path=str(SHOT_DIR / f"{name}.png"))
 
 
 # ---------------------------------------------------------------------------------------------------------------

@@ -85,8 +85,13 @@ def test_the_jobs_page_shows_how_far_the_rank_is_ranks_now_and_re_ranks_with_the
             if ui.page.locator(RANK_NOW).is_disabled():
                 break
             ui.page.locator(RANK_NOW).click()
+            # The job's end shows a notice first; the list (the line's own numbers) is read again AFTER it, so the line
+            # is sampled only once it says every posting is ranked, or once the notice says the rank did not run
+            # (the lane was held: no "Ranked N postings in M calls"). `settle` cannot wait for that read: the page
+            # reached "networkidle" once already, and the load state does not come back for a read within the page.
             ui.page.wait_for_function(
-                "([line, notice, done]) => (document.querySelector(line)?.textContent || '').trim() === done || !!document.querySelector(notice)",
+                "([line, notice, done]) => (document.querySelector(line)?.textContent || '').trim() === done"
+                " || /^(?!Ranked \\d+ postings? in )./.test((document.querySelector(notice)?.textContent || '').trim())",
                 arg=[LINE, NOTICE, all_ranked], timeout=60000,
             )
             ui.settle()

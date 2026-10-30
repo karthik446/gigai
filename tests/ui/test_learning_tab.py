@@ -46,6 +46,7 @@ from tests.behaviors.scout_learning.test_learning_shipped_store import KEY, ROLE
 from tests.behaviors.scout_learning.test_learning_store import make_course
 from tests.support.scout_profile_fixtures import build_gig_with_resume
 from tests.ui.conftest import _ui_session
+from tests.ui.evidence import shot
 
 pytestmark = pytest.mark.ui
 
@@ -59,7 +60,6 @@ ERROR = '[data-role="learning-error"]'
 LOCAL_PAGE = '[data-role="learning-local-page"]'
 ROLE_INPUT = "#learning-role"
 GENERATE = '[data-action="learning-generate"]'
-SHOT_DIR = Path("/Users/kar/orca/workspaces/gigai/orchestrator/research/role-packet/out/ui-shots")
 
 EMPTY_NOTE = "No courses yet"
 IMPORT_COMMAND = 'gigai scout learning import <folder> --role "<role>"'
@@ -199,8 +199,7 @@ def test_rows_show_role_date_status_cost_lessons_size_and_source_and_open_course
     assert new_page.title() == "Synthetic course"
     new_page.close()
 
-    SHOT_DIR.mkdir(parents=True, exist_ok=True)
-    ui.page.screenshot(path=str(SHOT_DIR / "learning-tab.png"))
+    shot(ui, "learning-tab")
     ui.assert_clean()
 
 
@@ -288,6 +287,5 @@ def test_a_shipped_course_is_the_first_row_and_open_course_opens_its_real_pages(
     assert [(button.text_content() or "").strip() for button in ui.page.locator(f"{row} button").all()] == ["Rebuild my pathway"]
     assert ui.page.locator(f'{row} [data-action="open-pathway-page"]').get_attribute("href") == f"/learning/shipped/{KEY}/pathway.html"
 
-    SHOT_DIR.mkdir(parents=True, exist_ok=True)
-    ui.page.screenshot(path=str(SHOT_DIR / "learning-tab-shipped.png"))
+    shot(ui, "learning-tab-shipped")
     ui.assert_clean()

@@ -45,6 +45,7 @@ from tests.behaviors.scout_learning.test_learning_corpus import seed_board
 from tests.behaviors.scout_learning.test_learning_pathway_local import KEY, ROLE, WIDGETCO, make_catalog
 from tests.behaviors.scout_learning.test_learning_render_shipped import shipped_course, shipped_paths, write_data
 from tests.behaviors.scout_learning.test_learning_store import make_course
+from tests.ui.evidence import shot
 from tests.ui.test_learning_tab import LOCAL_PAGE, OPEN, ROW, learning_home, learning_ui  # noqa: F401 - the two are fixtures
 
 pytestmark = [pytest.mark.ui, pytest.mark.skipif(sqlite3.sqlite_version_info < (3, 9, 0), reason="needs FTS5")]
@@ -59,7 +60,6 @@ DIALOG = '[data-testid="learning-pathway-dialog"]'
 APPROVE = '[data-action="learning-pathway-approve"]'
 NOT_NOW = '[data-action="learning-pathway-cancel"]'
 BUILD_PATH = f"/api/learning/shipped/{KEY}/pathway"
-SHOT_DIR = Path("/Users/kar/orca/workspaces/gigai/orchestrator/research/role-packet/out/ui-shots")
 
 #: A made-up master: one experience line, a skills list.
 MASTER = (("e-0a1b2c", "Ran the Widgetflow line for three widget plants"), ("s-112233", "Gearbox, Widgetflow, Sprocket"))
@@ -183,8 +183,7 @@ def test_the_button_asks_first_and_build_compares_the_resume_and_the_row_follows
     assert "stays here" in _text(ui, f'{DIALOG} [data-role="learning-pathway-page"]')
     assert [(button.text_content() or "").strip() for button in ui.page.locator(f"{DIALOG} button").all()] == ["Not now", "Build"]
     assert ui.page.locator(f"{DIALOG} input, {DIALOG} select").count() == 0, "the dialog offers no option: the resume is always compared"
-    SHOT_DIR.mkdir(parents=True, exist_ok=True)
-    ui.page.screenshot(path=str(SHOT_DIR / "learning-tab-pathway-dialog.png"))
+    shot(ui, "learning-tab-pathway-dialog")
 
     # "Not now": nothing starts.
     ui.page.locator(NOT_NOW).click()
@@ -203,7 +202,7 @@ def test_the_button_asks_first_and_build_compares_the_resume_and_the_row_follows
     ui.page.wait_for_function("selector => document.querySelector(selector).textContent.includes('Comparing')", arg=BUILDING)
     assert _text(ui, BUILDING) == "Comparing your resume with the lessons…" and ui.page.locator(BUILD).is_disabled()
     assert ui.page.locator(OPEN_PAGE).count() == 0 and home.starts == [KEY]
-    ui.page.screenshot(path=str(SHOT_DIR / "learning-tab-pathway-building.png"))
+    shot(ui, "learning-tab-pathway-building")
     home.port.gate.set()
 
     # Built: the row follows the server.
@@ -234,12 +233,12 @@ def test_the_button_asks_first_and_build_compares_the_resume_and_the_row_follows
     shown = page.locator("main").text_content() or ""
     assert "What your resume shows" in shown and "Ran the Widgetflow line" in shown and "Production evidence" in shown
     assert page.locator("html").get_attribute("data-theme") == "light", "the course's theme script ran"
-    page.screenshot(path=str(SHOT_DIR / "learning-pathway-page.png"), full_page=True)
+    shot(SimpleNamespace(page=page), "learning-pathway-page")  # the evidence helper reads `.page`: here the opened tab
     page.locator('a[href="concept-lesson-alpha.html"]').first.click()
     page.wait_for_url(f"**/learning/shipped/{KEY}/concept-lesson-alpha.html")
     assert console == [] and failed == [], (console, failed)
     page.close()
-    ui.page.screenshot(path=str(SHOT_DIR / "learning-tab-pathway-built.png"))
+    shot(ui, "learning-tab-pathway-built")
 
     # Built by another GigAI version: one quiet line says why, and a rebuild (the same dialog, the same build) clears it.
     with monkeypatch.context() as patched:
@@ -248,7 +247,7 @@ def test_the_button_asks_first_and_build_compares_the_resume_and_the_row_follows
         ui.page.locator(STALE).wait_for()
         assert _text(ui, STALE) == "It is out of date: GigAI was updated since. Rebuild it to bring it up to date."
         assert _text(ui, f"{SHIPPED} {LOCAL_PAGE}").startswith("Your pathway page was built on ") and ui.page.locator(OPEN_PAGE).count() == 1
-        ui.page.screenshot(path=str(SHOT_DIR / "learning-tab-pathway-stale.png"))
+        shot(ui, "learning-tab-pathway-stale")
         home.port.answers.append(ANSWER)
         _open_dialog(ui)
         _approve(ui)

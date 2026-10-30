@@ -74,6 +74,9 @@ operator-visible capability and must link to the relevant release or evidence.
 - **A posting from a job aggregator is assessed with its employer unknown.** A posting whose "company" is an
   aggregator site (Jobgether) is marked `employer_unknown`, and the assessment is told the posting came through the
   aggregator rather than that the aggregator is the employer. Nothing filters on it.
+- **A posting the board no longer lists leaves the Jobs list as live.** When a job's page reads that the board has
+  removed the posting, the Jobs list is read again on return and shows it as closed, instead of keeping it live for up
+  to half a minute.
 - **The network notice counts ten hiring systems** ("Greenhouse, Lever, Ashby and seven more hiring systems").
 - **The H-1B figure beside a Workday posting** is the employer's certified H-1B LCA count for software occupations,
   FY2026 through Q3, from the public US Department of Labor data, not a USCIS approvals count, and it has no denials
