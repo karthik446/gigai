@@ -26,7 +26,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from gigai.scout import learning_store
+from gigai.scout import learning_shipped_store, learning_store
 
 from tests.api_e2e.harness import setup_and_init, start_server, stop_server
 from tests.behaviors.scout_learning.test_learning_store import APP_JS, MARK_SVG, SITE_CSS, make_course
@@ -72,9 +72,22 @@ def test_learning_pathways_are_listed_and_a_done_course_is_served_locked_down(tm
     try:
         client, port = server.client, server.port
 
-        # ---- 1. an empty store ------------------------------------------------------------------------------
+        # ---- 1. an empty store: only the courses that ship inside GigAI (0.1.11.10), source "shipped" ----------------
+        shipped_ids = [course.role_key for course in learning_shipped_store.list_courses()]
+        assert shipped_ids, "GigAI ships at least one course"
         empty = client.get("/api/learning/pathways")
-        assert empty.status_code == 200 and empty.json() == {"schema_version": "scout-learning-pathways-response:1", "pathways": [], "total": 0}
+        assert empty.status_code == 200
+        empty_body = empty.json()
+        assert empty_body["schema_version"] == "scout-learning-pathways-response:1" and empty_body["total"] == len(shipped_ids)
+        assert [row["id"] for row in empty_body["pathways"]] == shipped_ids
+        for row in empty_body["pathways"]:
+            assert row["source"] == "shipped" and row["status"] == "done" and row["label"] == "Shipped with GigAI"
+            assert (row["requested_at"], row["cost"], row["imported_from"], row["error"], row["error_code"], row["progress"]) == (None,) * 6
+            assert row["url"] == f"/learning/shipped/{row['id']}/index.html" and row["local_page"]["state"] == "not_built"
+            assert set(row) == {
+                "id", "role_text", "requested_at", "status", "cost", "course", "url", "source", "imported_from", "error", "error_code", "progress",
+                "label", "local_page",
+            }
         for unknown in ("lp-00000000", "nope", "lp-0000000", "LP-00000000"):
             _error(client.get(f"/api/learning/pathways/{unknown}"), 404, "not_found")
         _error(client.get("/api/learning/pathways", params={"limit": "5"}), 422, "unknown_key")
@@ -97,9 +110,12 @@ def test_learning_pathways_are_listed_and_a_done_course_is_served_locked_down(tm
         listed = client.get("/api/learning/pathways")
         assert listed.status_code == 200 and listed.headers["x-gigai-labels"] == "user-private"
         body = listed.json()
-        assert body["schema_version"] == "scout-learning-pathways-response:1" and body["total"] == 3
-        rows = {row["id"]: row for row in body["pathways"]}
-        assert [row["id"] for row in body["pathways"]] == [item.id for item in learning_store.list_pathways(home, target)], "newest request first"
+        assert body["schema_version"] == "scout-learning-pathways-response:1" and body["total"] == len(shipped_ids) + 3
+        # The shipped courses first, unchanged; then the user's own.
+        assert [row["id"] for row in body["pathways"][: len(shipped_ids)]] == shipped_ids
+        own = body["pathways"][len(shipped_ids):]
+        rows = {row["id"]: row for row in own}
+        assert [row["id"] for row in own] == [item.id for item in learning_store.list_pathways(home, target)], "newest request first"
         assert all(
             set(row) == {"id", "role_text", "requested_at", "status", "cost", "course", "url", "source", "imported_from", "error", "error_code", "progress"}
             for row in rows.values()

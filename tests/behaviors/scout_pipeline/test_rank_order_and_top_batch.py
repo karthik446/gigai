@@ -38,7 +38,7 @@ from gigai.scout.pipeline.store import PipelineStore, pipeline_path
 from gigai.scout.quick_assess import read_quick_assessment
 
 from tests.support.fit_fixtures import assess_one, matrix_answer, seed_rank
-from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, job_url, lever_job
+from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, freeze_scout_new_clock, job_url, lever_job
 
 
 def _search(fx: PostingsFixture, **kwargs: object) -> dict[str, object]:
@@ -186,6 +186,7 @@ def test_the_list_is_ordered_by_rank_and_low_ranked_unassessed_postings_are_list
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     jobs = _scene(fx, monkeypatch)
 
     listed = _search(fx)

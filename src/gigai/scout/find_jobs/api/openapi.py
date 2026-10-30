@@ -2370,6 +2370,13 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "running": False,
             "update": None,
             "index": {"status": "ready", "needs_update": False, "message": None, "companies_indexed": 120, "last_checked_at": "2026-10-01T12:00:00.000Z", "stale_after_hours": 24.0},
+            # 0.1.11.12: the boards GigAI does not read (excluded_boards.py; the shipped list before any update has run).
+            "excluded": [{
+                "provider": "workday", "token": "relx.wd3.RiskSolutions", "company": "LexisNexis Risk Solutions", "reason": "terms",
+                "evidence": "https://risk.lexisnexis.com/corporate/terms forbids any \"robot, spider, other automatic software or device, or manual process to monitor or copy\" (workers/READ-workday-terms.md, 2026-10-20)",
+                "evidence_short": "https://risk.lexisnexis.com/corporate/terms forbids any \"robot, spider, other automatic software or device, or manual...",
+                "since": "2026-10-20", "decided_by": "operator",
+            }],
             "background": {
                 "auto_refresh": {"enabled": True, "source": "default", "active": True},
                 "state": "waiting",
@@ -2456,7 +2463,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "(`stores.tags.titles_backfilled`: stored titles this update gave their first rules tag, a level, in its one-time "
             "catch-up; it is not the number of titles with a function), `catch_up` is that one-time work, done after boards settle "
             "and never before the first request: `tags` {companies_done, companies_total, pending} and `text_index` and `search_index` (each deferred until "
-            "the boards are done, building, or null). `index` says whether a search can read the stored postings. `background` is "
+            "the boards are done, building, or null). `index` says whether a search can read the stored postings. `excluded` lists the "
+            "boards GigAI does not read, as the last update saw the shipped list (before any update: the shipped list itself): each row "
+            "`provider`, `token` (one board, or a whole Workday tenant as `<tenant>.<pod>.*`), `company`, `reason` (`terms`: the employer's "
+            "terms forbid automated access; `robots`: its robots.txt disallows the public job path), `evidence` with its short form "
+            "`evidence_short`, `since` and `decided_by`; seeding skips these boards and `POST /api/watchlist` refuses them. `background` is "
             "the background refresh and the two stores: `auto_refresh` {enabled, source: default|setting|environment|settings_unreadable, active: a "
             "refresh thread runs in this server}; `state` is disabled, inactive, needs_first_update (run Update sources once: the "
             "background refresh never fills an empty index), running, waiting or due; `in_progress` and `trigger` describe the live "

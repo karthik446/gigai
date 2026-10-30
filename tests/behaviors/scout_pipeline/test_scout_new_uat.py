@@ -268,6 +268,7 @@ def _mixed(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> dict[str, st
 
 def test_04_the_grid_orders_current_then_stale_then_not_assessed_and_says_n_of_m(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     jobs = _mixed(fx, monkeypatch)
     names = {url: name for name, url in jobs.items()}
     # 0.1.11.2: a thin posting (fewer than 4 requirement rows) is listed after every posting that is not thin.

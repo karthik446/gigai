@@ -186,6 +186,7 @@ def test_a_stored_posting_table_from_before_gains_the_fit_column_in_place_and_ke
 
 def test_a_weak_fit_is_not_in_needs_your_answers_has_its_own_state_and_asks_no_question(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     jobs = weak_fixture(fx, monkeypatch)
     names = {url: name for name, url in jobs.items()}
 

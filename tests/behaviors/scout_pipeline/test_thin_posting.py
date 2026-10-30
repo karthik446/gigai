@@ -32,7 +32,7 @@ from gigai.scout.pipeline.store import PipelineStore, RunAssessment, pipeline_pa
 from gigai.scout.quick_assess import quick_assess_path
 
 from tests.support.fit_fixtures import assess_one, five_of_ten, matrix_answer, seed_rank
-from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, job_url, lever_job
+from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, freeze_scout_new_clock, job_url, lever_job
 
 THIN = "thin posting, not enough requirements to score"
 NAMES = ("two", "four", "lone", "empty", "unranked_four", "needs")
@@ -98,6 +98,7 @@ def test_the_rule_is_one_place() -> None:
 
 def test_a_match_on_fewer_than_four_requirements_says_thin_posting_and_is_listed_last(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     jobs = _scene(fx, monkeypatch)
     names = {url: name for name, url in jobs.items()}
     everything = _search(fx)
@@ -219,6 +220,7 @@ def test_a_thin_posting_is_listed_after_every_real_match_and_every_ranked_postin
     from gigai.scout.find_jobs.present_api import ScoutFindJobsBackend, serve
 
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     fx.seed("order", [lever_job("order", n) for n in range(1, 5)], seen_at=days_ago(1))
     jobs = {name: job_url("order", n) for n, name in enumerate(("thin", "real", "ranked", "unranked"), start=1)}
     names = {url: name for name, url in jobs.items()}
@@ -287,6 +289,7 @@ def test_no_percentage_for_a_thin_posting_in_any_json_row_api_new_scout_new_and_
     from gigai.scout.find_jobs.api.server import ScoutFindJobsBackend, serve
 
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    freeze_scout_new_clock(monkeypatch)  # the commands read the clock: the postings are seeded relative to NOW
     jobs = _scene(fx, monkeypatch)
     thin_jobs, full_jobs = {jobs["two"], jobs["lone"], jobs["empty"]}, {jobs["four"], jobs["unranked_four"]}
     since = "2020-01-01T00:00:00Z"  # every posting of the scene, whatever today is

@@ -112,18 +112,22 @@ class _FixtureClock(datetime):
 
 
 def freeze_scout_new_clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``gigai scout new`` reads the clock itself when a caller gives it no ``now`` (the command line never does).
+    """``gigai scout new`` and ``gigai scout jobs list`` read the clock themselves when a caller gives no ``now`` (the
+    command line never does).
 
     The postings here are seeded relative to :data:`NOW` (``days_ago``), and a first ``scout new`` looks back seven
     days: run against the real clock, a "new" posting stops being new a week after :data:`NOW` and a test of the
-    command goes red on a date (it did, on 2026-10-09). A test that runs the command over postings seeded with
-    ``days_ago`` calls this first: ``scout_new``'s own ``datetime.now`` then answers :data:`NOW`, as every test that
-    calls the function with ``now=NOW`` already has it. (A test that seeds relative to the real clock does not.)
+    command goes red on a date (it did, on 2026-10-09). The profile's "posted within" cutoff (60 days) judges by the
+    clock too: a posting seeded 40 days before :data:`NOW` left ``scout jobs list`` on 2026-10-23. A test that runs
+    either command over postings seeded with ``days_ago`` calls this first: ``scout_new``'s and ``posting_search``'s
+    own ``datetime.now`` then answer :data:`NOW`, as every test that calls the functions with ``now=NOW`` already has
+    it. (A test that seeds relative to the real clock does not.)
     """
 
-    from gigai.scout import scout_new
+    from gigai.scout import posting_search, scout_new
 
     monkeypatch.setattr(scout_new, "datetime", _FixtureClock)
+    monkeypatch.setattr(posting_search, "datetime", _FixtureClock)
 
 
 def build_postings_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, deleted: bool = True) -> PostingsFixture:

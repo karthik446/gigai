@@ -1063,7 +1063,7 @@ The resume picked for ONE job, as stored: who picked it, the gate, what is stale
 
 `gigai scout resume pick [OPTIONS]`
 
-effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object: {ok, schema_version, job_identity, profile_id, basis, master_stored, master_education, verdict, gate, stale, stale_lines, resume, resume_unreadable, picked, problems, added_by_code, conflicts, selection_error, proposed} (and action after a step).
+effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object: {ok, schema_version, job_identity, profile_id, basis, master_stored, master_education, fact_checks, fact_checks_posting, verdict, gate, stale, stale_lines, resume, resume_unreadable, picked, problems, added_by_code, conflicts, selection_error, proposed} (and action after a step). fact_checks: words and numbers the resume states that neither the master nor the posting states, for you to read, not errors (null: no master); fact_checks_posting: false when the posting's text was not there (a pasted job), so the check was against the master alone.
 
 Example:
 

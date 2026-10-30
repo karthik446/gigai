@@ -48,7 +48,8 @@ mechanics here. Those belong in the internal changelog.
   reading (LexisNexis Risk Solutions; CVS Health, including Aetna and Caremark; Amgen; Mastercard) or their
   `robots.txt` disallows the public job path (Zoom, Equifax, Equinix, ASML US). `gigai scout sources status` prints
   one `skipped: <reason> - <company> (<evidence>)` line per board, before any update has run; adding such a board by
-  URL, in the UI or with the CLI, is refused with the company, the reason and the evidence.
+  URL, in the UI or with the CLI, is refused with the company, the reason and the evidence. `GET /api/sources/update`
+  serves the same list as `excluded`.
 - **Large Workday boards read as far as 100 list pages.** A board with more than 2,000 postings is stored as far as
   read, and `gigai scout sources status` prints `partial: <company> stopped at 100 list pages` for it.
 - **A job's resume is checked against your master and the posting.** The job page and `gigai scout resume pick` list

@@ -129,7 +129,9 @@ def test_the_bounded_call_count_is_stated_and_exists() -> None:
 def test_the_privacy_section_lists_the_other_network_traffic() -> None:
     privacy = _privacy()
     assert "## Network traffic besides your model Scout makes these other requests" in privacy
-    assert "Job boards (Greenhouse, Lever, Ashby) get plain public requests" in privacy and "see your IP address" in privacy
+    # 0.1.11.12: the bullet names the ten hiring systems; the promise it guards is the plain request and the IP address.
+    assert "Job boards on the ten hiring systems Scout reads (Greenhouse, Lever, Ashby" in privacy
+    assert "get plain public requests without a key or login and see your IP address; nothing else about you is sent" in privacy
     assert "Exa, only if enabled in your sources, receives the search query (your target roles), a start date, a country code and your Exa key" in privacy
     assert "The setup interview itself makes no network request" in privacy
     assert "Discover companies button, only if an OpenAI key is set" in privacy

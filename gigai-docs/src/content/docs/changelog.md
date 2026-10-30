@@ -40,9 +40,16 @@ operator-visible capability and must link to the relevant release or evidence.
   reading (LexisNexis Risk Solutions; CVS Health, including Aetna and Caremark; Amgen; Mastercard) or their
   `robots.txt` disallows the public job path (Zoom, Equifax, Equinix, ASML US). `gigai scout sources status` prints
   one `skipped: <reason> - <company> (<evidence>)` line per board, before any update has run; adding such a board by
-  URL, in the UI or with the CLI, is refused with the company, the reason and the evidence.
+  URL, in the UI or with the CLI, is refused with the company, the reason and the evidence. `GET /api/sources/update`
+  serves the same list as `excluded`.
 - **Large Workday boards read as far as 100 list pages.** A board with more than 2,000 postings is stored as far as
   read, and `gigai scout sources status` prints `partial: <company> stopped at 100 list pages` for it.
+- **A job's resume is checked against your master and the posting.** The job page and `gigai scout resume pick` list
+  the words and numbers a stored resume states that neither your master resume nor the posting states (a tool, a
+  place, a figure, a credential), each as "not in your resume or the posting". They are checks for you to read, not
+  errors: nothing is rewritten, dropped or blocked, and saving, applying and the PDF are unchanged. No model call; a
+  pasted job keeps no posting text, so it is checked against the master alone and the notice says so
+  (`fact_checks_posting: false`); a profile without a master is not checked.
 
 #### Changed
 
@@ -71,6 +78,16 @@ operator-visible capability and must link to the relevant release or evidence.
 - **The H-1B figure beside a Workday posting** is the employer's certified H-1B LCA count for software occupations,
   FY2026 through Q3, from the public US Department of Labor data, not a USCIS approvals count, and it has no denials
   number.
+- **A programming language you list is met whatever its recency.** A must-have row that asks only for a language
+  (for example "Fluency in Go") is met when that language is on your resume's skills line or in a saved answer, even
+  if your last role using it ended years ago. A row that adds a domain or a years figure is read as before, and a
+  language you do not list stays unmet or unclear. A "remote-friendly" posting that lists offices in a country you
+  search meets the location requirement instead of asking about it.
+- **Up to three red flags sit beside a job's fit score.** From the assessment's own rows, a job shows a flag for a
+  place or work mode that does not fit ("San Francisco, CA - Hybrid"), for a required language you do not list
+  ("Asks for Java, Kotlin") and for a years or seniority ask you may not meet. They show on the job page, the Jobs
+  list, `gigai scout assess` and in the JSON as `red_flags`. They are a warning only: the fit number, the verdict and
+  the questions do not change, and nothing is stored.
 
 ### 0.1.11.11
 

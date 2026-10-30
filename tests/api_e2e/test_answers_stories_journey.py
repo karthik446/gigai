@@ -216,9 +216,21 @@ def test_answers_and_stories_journey(tmp_path: Path, monkeypatch: pytest.MonkeyP
         }
 
         # --- 5. the CLI prints the same shapes (acceptance g) ----------------------------------------
+        # 0110-10-03 (company_names.with_company_names): the SERVER names every posting-shaped object of a response
+        # (`company_slug`, `company_name` beside `company`), an answer's `jobs` rows among them; the CLI prints the
+        # bank's object as it is. The two are the same object apart from that naming, and the naming repeats the name.
+        def unnamed(node: object) -> object:
+            if isinstance(node, list):
+                return [unnamed(item) for item in node]
+            if not isinstance(node, dict):
+                return node
+            if "company_name" in node:
+                assert set(node) >= {"company", "company_slug", "company_name"} and node["company_name"] == node["company"]
+            return {key: unnamed(value) for key, value in node.items() if key not in ("company_slug", "company_name")}
+
         def same(cli: dict[str, object], api: dict[str, object]) -> None:
             assert cli.pop("ok") is True
-            assert cli == api
+            assert cli == unnamed(api)
 
         same(_cli(home, target, "answers", "list"), client.get("/api/answers").json())
         same(_cli(home, target, "answers", "list", "--search", "bigquery", "--tag", "cloud platforms"), client.get("/api/answers", params={"q": "bigquery", "tag": "cloud platforms"}).json())

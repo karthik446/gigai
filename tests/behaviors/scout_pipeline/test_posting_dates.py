@@ -38,7 +38,7 @@ from gigai.scout.find_jobs.contracts import ATSProvider, normalize_url
 from gigai.scout.find_jobs.watchlist import add_company_from_url
 
 from tests.support.answers_stories_fixtures import config as fixture_config
-from tests.support.posting_fixtures import NOW, TITLE_BOTH, PostingsFixture, build_postings_fixture, days_ago, job_url, lever_job
+from tests.support.posting_fixtures import NOW, TITLE_BOTH, PostingsFixture, build_postings_fixture, days_ago, freeze_scout_new_clock, job_url, lever_job
 
 _GH_TOKEN = "harborgrid"
 _GH_URL = "https://www.harborgrid-example.test/jobs?gh_jid=4411"
@@ -90,6 +90,7 @@ def test_a_jobs_row_carries_the_boards_date_what_it_means_and_when_scout_first_s
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    freeze_scout_new_clock(monkeypatch)  # the commands read the clock: the postings are seeded relative to NOW (60-day cutoff)
     monkeypatch.setattr("gigai.config.load_config", fixture_config)
     _seed(fx)
     seen = postings.stamp(index_stamp(_SEEN))
@@ -229,10 +230,11 @@ def test_every_board_kind_says_what_its_date_means() -> None:
     assert set(scout_new.PUBLISHED_KINDS.values()) <= {"posted", "updated"}
     # ats_board_clients: Greenhouse's `first_published`, Lever's `createdAt`, Ashby's `publishedAt`; 0.1.11.8: Workable's
     # `published_on`, Rippling's `createdOn` (detail), Gem's `first_published_at`, Recruitee's `published_at`, Breezy's
-    # `published_date`; Pinpoint's feed has no date (its postings are undated, the entry is never read).
+    # `published_date`; Pinpoint's feed has no date (its postings are undated, the entry is never read); 0.1.11.12:
+    # Workday's `postedOn`.
     assert scout_new.PUBLISHED_KINDS == {
         "greenhouse": "posted", "lever": "posted", "ashby": "posted", "workable": "posted", "rippling": "posted",
-        "gem": "posted", "recruitee": "posted", "pinpoint": "posted", "breezy": "posted",
+        "gem": "posted", "recruitee": "posted", "pinpoint": "posted", "breezy": "posted", "workday": "posted",
     }
     # The table names the list field each date is read from (Pinpoint has none: no field, undated postings); a
     # provider nobody listed is the weaker claim.

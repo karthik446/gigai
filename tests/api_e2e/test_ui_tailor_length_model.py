@@ -113,7 +113,8 @@ await build({{ root: process.cwd(), logLevel: "silent", plugins: [react()], buil
 const {{ Preview }} = await import(path.join(out, "panel.mjs"));
 const React = (await import("react")).default;
 const {{ renderToStaticMarkup }} = await import("react-dom/server");
-const render = (response, handler) => renderToStaticMarkup(React.createElement(Preview, {{ response, profileLabel: "p1", promptFor: () => null, onChooseLine: handler ? () => {{}} : null, onLength: handler ? () => {{}} : null }}));
+// `rendered` (ccfc55ed): the job page's render-prop around the clean copy (ResumePreview); here the copy itself.
+const render = (response, handler) => renderToStaticMarkup(React.createElement(Preview, {{ response, rendered: (node) => node, onLength: handler ? () => {{}} : null }}));
 process.stdout.write(JSON.stringify({{ cut: render(input.cut, true), restored: render(input.restored, true), readonly: render(input.cut, false), fits: render(input.fits, true) }}));
 fs.rmSync(out, {{ recursive: true, force: true }});
 """

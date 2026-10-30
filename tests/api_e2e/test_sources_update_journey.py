@@ -41,6 +41,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from gigai.scout.find_jobs.excluded_boards import excluded_boards_json
 from tests.api_e2e.after_journey import assert_clean_and_healthy, timed_request
 from tests.api_e2e.harness import (
     add_resume,
@@ -157,6 +158,9 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
             "next_tick_in_minutes": None,
         }
         assert not (home / "cache" / "scout" / "tags.sqlite").exists() and not (home / "cache" / "scout" / "text.sqlite").exists()
+        # 0.1.11.12: the boards GigAI does not read are named before any update has run (the shipped list; this
+        # watchlist holds none of them, so the list is the shipped one and nothing else).
+        assert before_body.pop("excluded") == excluded_boards_json() != []
         assert before_body == {
             "schema_version": "scout-sources-update-status:1",
             "running": False,
@@ -195,6 +199,8 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
         assert update["update_id"] == start_body["update_id"]
         assert update["status"] == "succeeded", update
         assert update["boards"] == {"total": 2, "done": 2, "checked": 2, "fetched": 1, "cached": 0, "failed": 1, "skipped": 0, "never_checked": 0, "up_to_date": 0}
+        # The update keeps the excluded list it ran with, and the status serves that copy.
+        assert update["excluded"] == first["excluded"] == excluded_boards_json() and update["partial_boards"] == []
         assert update["companies"]["checked"] == 1 and update["companies"]["indexed"] == 1
         assert update["postings"] == {"new": 1, "changed": 0, "removed": 0, "live": 1}
         assert update["summary"] == "1 company with new postings: 1 new, 0 changed, 0 removed"

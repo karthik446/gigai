@@ -38,7 +38,7 @@ from gigai.scout.find_jobs import job_copies
 from gigai.workpad import committed_read_cache
 
 from tests.support.copies_fixtures import ABROAD, COUNTRIES, JOBS, NOT_ABROAD, ONE_JOB, OTHER, POSTINGS, SLUG, anywhere_profile, board, copy_job, seed_copies
-from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, job_url
+from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, freeze_scout_new_clock, job_url
 
 @pytest.fixture
 def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PostingsFixture:
@@ -220,7 +220,8 @@ def test_assess_these_by_a_filter_is_one_posting_per_job(fx: PostingsFixture, an
     assert named["counts"]["selected"] == 2 and named["counts"]["to_assess"] == 1
 
 
-def test_the_command_says_what_us_only_left_out_and_what_the_rows_stand_for(fx: PostingsFixture, anywhere: str) -> None:
+def test_the_command_says_what_us_only_left_out_and_what_the_rows_stand_for(fx: PostingsFixture, anywhere: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     def run(*args: str) -> str:
         result = CliRunner().invoke(cli, ["scout", "jobs", "list", "--profile", anywhere, *args, "--home", str(fx.home_root), "--target", str(fx.target)])
         assert result.exit_code == 0, result.output

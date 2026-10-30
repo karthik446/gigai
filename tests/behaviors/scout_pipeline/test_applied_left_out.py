@@ -156,7 +156,8 @@ def test_a_named_applied_posting_is_still_assessed(fx: PostingsFixture, monkeypa
     assert _jobs(_search(fx)) == LISTED and _search(fx)["counts"]["applied"] == 3
 
 
-def test_jobs_list_says_how_many_are_left_out_and_how_to_show_them(fx: PostingsFixture) -> None:
+def test_jobs_list_says_how_many_are_left_out_and_how_to_show_them(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     home = ["--home", str(fx.home_root), "--target", str(fx.target)]
     plain = CliRunner().invoke(cli, ["scout", "jobs", "list", *home])
     assert plain.exit_code == 0 and "left out" not in plain.output, "no application: no line"
