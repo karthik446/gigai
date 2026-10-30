@@ -1097,12 +1097,12 @@ class NodeContext(_Contract):
         value = _object(obj, ("schema_version", "run_id", "project_id", "gig_id", "graph_id", "graph_version", "goal_slug", "manifest_digest", "operation_key", "target_observation_digest", "workpad_path", "redeemed_consent_ref", "model_target"), "node_context")
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "node_context.schema_version is unsupported")
-        for field, prefix, entity_prefix in (("run_id", "run", EntityPrefix.RUN), ("project_id", "project", EntityPrefix.PROJECT), ("gig_id", "gig", EntityPrefix.GIG)):
-            identifier = _string(value[field], field)
+        for key, prefix, entity_prefix in (("run_id", "run", EntityPrefix.RUN), ("project_id", "project", EntityPrefix.PROJECT), ("gig_id", "gig", EntityPrefix.GIG)):
+            identifier = _string(value[key], key)
             try:
                 validate_entity_id(identifier, expected_prefix=entity_prefix)
             except ValueError as exc:
-                _fail("invalid_value", f"{field} is not a canonical {prefix} ID")
+                _fail("invalid_value", f"{key} is not a canonical {prefix} ID")
                 raise AssertionError("unreachable") from exc
         return cls(
             _string(value["run_id"], "run_id"),
@@ -1373,9 +1373,9 @@ class URLSetDiff(_Contract):
     @classmethod
     def from_json(cls, obj: object) -> "URLSetDiff":
         value = _object(obj, ("added", "removed", "unchanged", "edited"), "url_set_diff")
-        for field in ("added", "removed", "unchanged", "edited"):
-            if type(value[field]) is not list:
-                _fail("wrong_type", f"url_set_diff.{field} must be an array")
+        for key in ("added", "removed", "unchanged", "edited"):
+            if type(value[key]) is not list:
+                _fail("wrong_type", f"url_set_diff.{key} must be an array")
         return cls(
             tuple(URLObservation.from_json(item) for item in value["added"]),
             tuple(URLObservation.from_json(item) for item in value["removed"]),
@@ -2298,9 +2298,9 @@ class PresentPayload(_Contract):
         value = _object(obj, ("schema_version", "run_id", "config", "pinned_resume", "rows", "failures", "assessments", "not_assessed", "node_receipts", "status"), "present_payload")
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "present_payload.schema_version is unsupported")
-        for field in ("rows", "failures", "assessments", "not_assessed", "node_receipts"):
-            if type(value[field]) is not list:
-                _fail("wrong_type", f"present_payload.{field} must be an array")
+        for key in ("rows", "failures", "assessments", "not_assessed", "node_receipts"):
+            if type(value[key]) is not list:
+                _fail("wrong_type", f"present_payload.{key} must be an array")
         result = cls(_string(value["run_id"], "run_id"), FindJobsConfig.from_json(value["config"]), None if value["pinned_resume"] is None else PinnedResume.from_json(value["pinned_resume"]), tuple(PostingRowResult.from_json(item) for item in value["rows"]), tuple(FailureRow.from_json(item) for item in value["failures"]), tuple(AssessmentResult.from_json(item) for item in value["assessments"]), tuple(NotAssessedRow.from_json(item) for item in value["not_assessed"]), tuple(NodeReceipt.from_json(item) for item in value["node_receipts"]), _enum(value["status"], AggregateStatus, "status"))
         if result.node_receipts and result.status.value != aggregate_status(item.status for item in result.node_receipts):
             _fail("invalid_value", "present_payload status must agree with node receipt statuses")
