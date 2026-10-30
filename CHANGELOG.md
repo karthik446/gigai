@@ -90,6 +90,11 @@ mechanics here. Those belong in the internal changelog.
   if your last role using it ended years ago. A row that adds a domain or a years figure is read as before, and a
   language you do not list stays unmet or unclear. A "remote-friendly" posting that lists offices in a country you
   search meets the location requirement instead of asking about it.
+- **Up to three red flags sit beside a job's fit score.** From the assessment's own rows, a job shows a flag for a
+  place or work mode that does not fit ("San Francisco, CA - Hybrid"), for a required language you do not list
+  ("Asks for Java, Kotlin") and for a years or seniority ask you may not meet. They show on the job page, the Jobs
+  list, `gigai scout assess` and in the JSON as `red_flags`. They are a warning only: the fit number, the verdict and
+  the questions do not change, and nothing is stored.
 
 ### 0.1.11.11
 

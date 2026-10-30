@@ -303,7 +303,7 @@ def _note(text: str) -> str:
 # --- the steps ------------------------------------------------------------------------------------------------
 
 
-def _requires_all(requirement: str, tools: Sequence[str]) -> tuple[str, ...]:
+def requires_all(requirement: str, tools: Sequence[str]) -> tuple[str, ...]:
     """The tools the row words as all required: joined by "and" with no "or" between the first and the last, not opened as
     examples, and not in a parenthesis ("TypeScript (and modern JavaScript) plus Node.js" requires TypeScript and Node.js). Empty when any one is enough."""
 
@@ -335,7 +335,7 @@ def _level_word(requirement: str, tools: Sequence[str]) -> str | None:
     return None if found is None else found.group(1).casefold()
 
 
-def _years_required(requirement: str) -> tuple[int, str] | None:
+def years_required(requirement: str) -> tuple[int, str] | None:
     """T3: ``(N, the years clause)`` of "N+ years of X", or ``None``."""
 
     found = _YEARS.search(requirement)
@@ -410,7 +410,7 @@ def _step_tools(row: MutableMapping[str, object], requirement: str, tools: Seque
     for tool in tools:
         for line in matcher.lines_naming(tool):
             (clear if master.is_clear(line.id) else buried).setdefault(tool, []).append(line)
-    required_all = _requires_all(requirement, tools)
+    required_all = requires_all(requirement, tools)
     shown = [tool for tool in tools if tool in clear]
     if not shown and practices and not required_all:
         return _step_sources(row, master)
@@ -536,7 +536,7 @@ def _answered(row: Mapping[str, object]) -> bool:
 # --- T8: declared languages ---------------------------------------------------------------------------------
 
 
-def _language(name: str) -> str | None:
+def language_of(name: str) -> str | None:
     """The language ``name`` names, casefolded with the aliases folded ("Golang" -> "go"), or ``None`` when it is none."""
 
     word = name.strip().casefold().rstrip(".")
@@ -545,7 +545,7 @@ def _language(name: str) -> str | None:
 
 
 def _languages_in(text: str) -> frozenset[str]:
-    return frozenset(language for language in map(_language, _NAME_SPLIT.split(text)) if language is not None)
+    return frozenset(language for language in map(language_of, _NAME_SPLIT.split(text)) if language is not None)
 
 
 def declared_languages(master: StrictMaster) -> frozenset[str]:
@@ -580,7 +580,7 @@ _LANGUAGE_FILLER = frozenset(
 )
 
 
-def _slash_joined(requirement: str, tools: Sequence[str]) -> bool:
+def slash_joined(requirement: str, tools: Sequence[str]) -> bool:
     """T8: whether a tool is slash-joined to a neighbour in the requirement ("Java/JavaScript"): as the stated check reads it, every
     name of such a list is required ("and/or" joins no name)."""
 
@@ -613,18 +613,18 @@ def _step_declared(row: MutableMapping[str, object], requirement: str, tools: Se
     A language row names nothing but languages (a framework or infrastructure beside them: T1/T2 as before), names at least one
     in its own words (a language only the model's ``alternatives`` guessed, "Backend development experience", is not the row's),
     and says nothing beside them but filler (``_only_language_words``: "payments systems in Go" is about payments). It needs
-    every tool of an "and" list (``_requires_all``) or a slashed list ("Java/JavaScript", ``_slash_joined``) and any one language
+    every tool of an "and" list (``requires_all``) or a slashed list ("Java/JavaScript", ``slash_joined``) and any one language
     of any other list. A cited answer that denies ("no", "not", "never", "n't") leaves the row as it came.
     """
 
-    if not tools or not all(_language(tool) for tool in tools):
+    if not tools or not all(language_of(tool) for tool in tools):
         return None
     text = requirement.casefold()
     tools = [tool for tool in tools if _tool_pattern(tool).search(text)]
     if not tools or not _only_language_words(requirement, tools):
         return None
-    required = _requires_all(requirement, tools) or (tuple(tools) if _slash_joined(requirement, tools) else ())
-    named = [(tool, _language(tool)) for tool in (required or tools)]
+    required = requires_all(requirement, tools) or (tuple(tools) if slash_joined(requirement, tools) else ())
+    named = [(tool, language_of(tool)) for tool in (required or tools)]
     answers = _answers_of(row)
     if any(_DENIAL.search(text) for text in answers):
         return None
@@ -664,7 +664,7 @@ def strict_rows(matrix: Sequence[MutableMapping[str, object]], master: StrictMas
         before = str(row.get("status") or "")
         step_note: tuple[str, str] | None = None
         tools = named_tools(row)
-        years = _years_required(requirement)
+        years = years_required(requirement)
         if before in (MET, UNCLEAR) and tools and years is None and not _DEGREE.search(requirement):
             step_note = _step_declared(row, requirement, tools, declared)
         if step_note is not None:
@@ -705,9 +705,13 @@ __all__ = [
     "OPEN_WORDS",
     "StrictChange",
     "declared_languages",
+    "language_of",
     "named_tools",
     "names_in",
     "practice_alternatives",
+    "requires_all",
+    "slash_joined",
     "strict_rows",
     "tokens",
+    "years_required",
 ]

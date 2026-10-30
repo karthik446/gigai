@@ -248,6 +248,8 @@ def test_url_posting_text_is_served_and_listed_and_no_rank_score_is_written(runn
     assert body["job"]["company_name"] == "Acme"
     # 0110-10-03: and ``company_slug``: null here, since "Acme" is a name its page gave, not a board token.
     assert listed[0]["job"].pop("company_slug") is None and body["job"]["company_slug"] is None
+    # 0.1.11.12 dossier-C: and the derived ``red_flags`` (none here); the stored file never carries them.
+    assert listed[0].pop("red_flags") == [] and body["red_flags"] == []
     assert listed[0] == json.loads(Path(body["stored_path"]).read_text(encoding="utf-8"))
 
 
@@ -432,3 +434,37 @@ def test_backend_without_a_target_is_404_target_unavailable(fx: ProfileFixtureGi
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_post_assess_and_the_listed_assessments_carry_the_red_flags(running_server, ollama_config, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.12 dossier-C: ``red_flags`` beside the result on POST /api/assess and on every GET /api/assessments item; never stored."""
+    client, _fx, _port = running_server
+    toast = json.dumps(
+        {
+            "verdict": "pending_user_answers",
+            "matrix": [
+                {
+                    "requirement": "8+ years of back-end experience in Java, Kotlin, or other object-oriented languages", "class": "hard",
+                    "status": "unclear", "resume_evidence": [], "alternatives": ["Java", "Kotlin", "other object-oriented languages"],
+                },
+                {"requirement": "Postgres", "class": "askable", "status": "met", "resume_evidence": ["six years"], "alternatives": ["Postgres"]},
+            ],
+            "suggestions": [],
+            "questions": [{"question_id": "lang:java", "question": "Have you shipped Java or Kotlin services?", "requirement": "8+ years of back-end experience in Java, Kotlin, or other object-oriented languages"}],
+            "not_a_match_reason": None,
+        }
+    )
+    _install_model(monkeypatch, [toast, _MATCH])
+    flag = {"kind": "language", "text": "Asks for Java, Kotlin"}
+
+    flagged = client.post("/api/assess", json={"job": {"job_text": "Toast: 8+ years of back-end experience in Java, Kotlin, or other object-oriented languages; Postgres.", "title": "Staff Software Engineer", "company": "Toast"}})
+    assert flagged.status_code == 200, flagged.text
+    body = flagged.json()
+    assert body["red_flags"] == [flag] and "red_flags" not in body["result"]
+    assert "red_flags" not in json.loads(Path(body["stored_path"]).read_text(encoding="utf-8"))
+    clean = client.post("/api/assess", json={"job": {"job_text": _POSTING, "title": "Staff AI Engineer", "company": "Acme"}})
+    assert clean.status_code == 200 and clean.json()["red_flags"] == [], clean.text
+
+    listed = client.get("/api/assessments").json()
+    by_path = {item["stored_path"]: item["red_flags"] for item in listed["items"]}
+    assert by_path == {body["stored_path"]: [flag], clean.json()["stored_path"]: []}

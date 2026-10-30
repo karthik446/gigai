@@ -51,6 +51,7 @@ from ....canonical import parse_json_bytes
 from ... import story_bank
 from ...question_ids import normalize_question_id
 from ...quick_assess import QuickAssessError
+from ...red_flags import red_flags_json, stored_declared
 from ...requirement_weights import minor_gap_text, minor_gaps
 from ..contracts import AcquireOutput, FindJobsContractError
 from ..job_state import JobStateSources, is_text_identity, normalize_job_identity
@@ -76,17 +77,19 @@ def _link(method: str, path: str, body: dict[str, object] | None = None) -> dict
     return link
 
 
-def _weights(result: dict[str, object]) -> dict[str, object]:
-    """0110-10-03: what an assessment's rows weigh, derived on read: the minor gaps (named, and as one line) and the rows not shown."""
+def _weights(result: dict[str, object], declared: frozenset[str]) -> dict[str, object]:
+    """0110-10-03: what an assessment's rows weigh, derived on read: the minor gaps (named, and as one line), the rows not shown,
+    and (dossier-C) up to three red flags beside the fit: location, a language the resume lacks, level."""
 
     matrix = result.get("matrix")
     gaps = minor_gaps(matrix) if isinstance(matrix, list) else []
-    return {"minor_gaps": gaps, "minor_gap_text": minor_gap_text(gaps), "rows_not_shown": result.get("rows_not_shown", 0)}
+    flags = red_flags_json(matrix, declared) if isinstance(matrix, list) else []
+    return {"minor_gaps": gaps, "minor_gap_text": minor_gap_text(gaps), "rows_not_shown": result.get("rows_not_shown", 0), "red_flags": flags}
 
 
-def _run_assessment_entry(run_id: str, source: str, profile_id: str | None, assessment: dict[str, object]) -> dict[str, object]:
+def _run_assessment_entry(run_id: str, source: str, profile_id: str | None, assessment: dict[str, object], declared: frozenset[str]) -> dict[str, object]:
     body = {key: value for key, value in assessment.items() if key != "posting"}
-    return {"source": source, "run_id": run_id, "profile_id": profile_id, **body, **_weights(body)}
+    return {"source": source, "run_id": run_id, "profile_id": profile_id, **body, **_weights(body, declared)}
 
 
 def _index_join(home_root: Path, target: Path, identity: str, *, profile_id: str | None, basis) -> dict[str, object] | None:
@@ -226,7 +229,7 @@ def job_tailored_resumes(home_root: Path, target: Path, identity: str) -> list:
     return list(list_tailored_resumes(Path(home_root), Path(target), job_identity=identity))
 
 
-def _quick_entry(item, basis) -> dict[str, object]:
+def _quick_entry(item, basis, declared: frozenset[str]) -> dict[str, object]:
     note = {} if item.requirements_note is None else {"requirements_note": item.requirements_note}  # GUARDFIX
     return {
         "source": "quick",
@@ -237,7 +240,7 @@ def _quick_entry(item, basis) -> dict[str, object]:
         **basis.served(item),
         **note,
         **item.result.to_json(),
-        **_weights(item.result.to_json()),
+        **_weights(item.result.to_json(), declared),
     }
 
 
@@ -347,6 +350,8 @@ class AgentRoutesMixin:
         # 0.1.10.11 S4: this job's one file per resume identity, by its key; never a listing of every stored file.
         quick_items = job_quick_assessments(home_root, target, identity)
         tailored_items = job_tailored_resumes(home_root, target, identity)
+        # dossier-C: the master's declared languages, read once a request (``stored_master`` keeps it per journal head).
+        declared = stored_declared(home_root, target) if (run_hits or quick_items) else frozenset()
 
         posting: dict[str, object] | None = None
         row: dict[str, object] = {}
@@ -377,12 +382,12 @@ class AgentRoutesMixin:
                     row = detail["row"]  # type: ignore[assignment]
                     posting = row.get("posting")  # type: ignore[assignment]
                     if detail["assessment"] is not None:
-                        run_assessments.append(_run_assessment_entry(latest_run, "run", run_profile_id, detail["assessment"]))  # type: ignore[arg-type]
+                        run_assessments.append(_run_assessment_entry(latest_run, "run", run_profile_id, detail["assessment"], declared))  # type: ignore[arg-type]
                     if detail["carried_forward"] is not None:
                         carried = detail["carried_forward"]
                         result = carried.get("result") if isinstance(carried, dict) else None  # type: ignore[union-attr]
                         if isinstance(result, dict):
-                            run_assessments.append(_run_assessment_entry(latest_run, "carried_forward", run_profile_id, result))
+                            run_assessments.append(_run_assessment_entry(latest_run, "carried_forward", run_profile_id, result, declared))
             except Exception:  # noqa: BLE001 - a run that cannot be read must not hide the stores below
                 _logger.exception("job %s: the newest run could not be read", identity)
 
@@ -421,7 +426,7 @@ class AgentRoutesMixin:
 
         # 0.1.11.9: the JOB's one stored assessment (a pasted resume's has no role and is not the job's).
         job_item = next((item for item in quick_items if item.resume.profile_id), None)
-        quick_entries = [(item, _quick_entry(item, sources.basis)) for item in quick_items]
+        quick_entries = [(item, _quick_entry(item, sources.basis, declared)) for item in quick_items]
         job_entry = next((entry for item, entry in quick_entries if item is job_item), None) if job_item is not None else None
         assessments = [*run_assessments, *(entry for _item, entry in quick_entries)]
         # 0.1.10.7 C: every assessment's questions are answered by the USER's

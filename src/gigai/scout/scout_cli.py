@@ -1695,8 +1695,12 @@ def assess_command(
         _fail(exc, as_json=as_json, fallback="scout_assess_failed", assess=True)
         return
 
+    from .red_flags import red_flags_json, stored_declared
+
+    # dossier-C: up to three red flags from the stored rows, read now (never stored): location, a language the resume lacks, level.
+    flags = red_flags_json(response.result.matrix, stored_declared(home_root, target))
     if as_json:
-        _emit({"ok": True, **response.to_json()}, True, "")
+        _emit({"ok": True, **response.to_json(), "red_flags": flags}, True, "")
         return
     result = response.result
     job = response.job
@@ -1708,6 +1712,8 @@ def assess_command(
 
     gap_text = minor_gap_text(minor_gaps(result.matrix))  # 0110-10-03: "matched_above_threshold, 1 minor gap: Helm"
     click.echo(f"  Verdict: {result.verdict.value if result.verdict is not None else 'none returned'}" + (f", {gap_text}" if gap_text else ""))
+    if flags:
+        click.echo(f"  Red flags: {'; '.join(flag['text'] for flag in flags)}")
     from .fit import THIN_LABEL, THIN_POSTING_ROWS
     from .quick_assess import requirements_note_text
 

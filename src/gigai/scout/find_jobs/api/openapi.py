@@ -103,7 +103,12 @@ _WEIGHTS_NOTE = (
     "question is still asked, and one of them open does not hold a match), `nice_to_have` is a bonus. So a `matched_above_threshold` "
     "assessment can carry one question. `minor_gaps` names the `list_item` and `nice_to_have` rows that are not met and "
     "`minor_gap_text` says them in one line (\"1 minor gap: Helm\"). The matrix has a row for every requirement the posting "
-    "states, must-haves first; past 40 rows `rows_not_shown` counts the rest."
+    "states, must-haves first; past 40 rows `rows_not_shown` counts the rest. `red_flags` (at most 3, derived on read, never "
+    "stored, never moving the fit or the verdict) name what the posting asks for that the resume does not show, in the "
+    "posting's words: `{kind: location | language | level, text}`: the place or work mode of an unmet eligibility row, a "
+    "programming language a must-have row needs that the master's skills line does not declare (\"Asks for Java, Kotlin\"; an "
+    "or-list is met by any one declared language), a hard row asking for years or a seniority title (\"Asks for 8+ years of ...\"). "
+    "Without a stored master nothing is declared, so every language a must-have row names is flagged. `[]` when the rows raise none."
 )
 _BASIS_NOTE = (
     "A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings "
@@ -377,6 +382,7 @@ _NEW_EXAMPLE: dict[str, object] = {
             "/rows/*/title": "public-untrusted", "/rows/*/company": "public-untrusted", "/rows/*/company_slug": "public-untrusted", "/rows/*/company_name": "public-untrusted", "/rows/*/location": "public-untrusted",
             "/rows/*/salary": "public-untrusted", "/rows/*/description": "public-untrusted",
             "/rows/*/unmet/*": "public-untrusted", "/rows/*/minor_gaps/*": "public-untrusted", "/rows/*/minor_gap_text": "public-untrusted",
+            "/rows/*/red_flags/*/text": "public-untrusted",
             "/rows/*/open_questions/*/question": "public-untrusted",
             "/rows/*/locations/*": "public-untrusted", "/rows/*/locations_text": "public-untrusted", "/rows/*/members/*/location": "public-untrusted",
         },
@@ -392,7 +398,7 @@ _NEW_EXAMPLE: dict[str, object] = {
             "profiles": [{"profile_id": "prof_1", "match_rank": 1, "rank_score": 82, "state": "not_assessed"}],
             "state": "not_assessed", "tailored": False, "stale_reason": None, "stale_label": None, "sort_group": "not_assessed",
             "score": 82, "score_kind": "rank", "score_text": "rank 82 · not assessed", "thin_posting": False, "ranked_low": False, "fit": None, "rank_score": 82, "assessment": None,
-            "assessment_detail": None, "needs_tailoring": None, "unmet": [], "minor_gaps": [], "minor_gap_text": None, "rows_not_shown": 0,
+            "assessment_detail": None, "needs_tailoring": None, "unmet": [], "minor_gaps": [], "minor_gap_text": None, "rows_not_shown": 0, "red_flags": [],
             "open_questions": [], "label": None, "ats_score": None,
             "tag_pending": False,
             # 0.1.11.9 NEW1: one row a job: the same job posted twice is this ONE row (its canonical posting).
@@ -966,7 +972,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "assessments": [{
                 "source": "run", "run_id": "run_20260929T100000Z", "profile_id": None, "verdict": "matched_above_threshold",
                 "matrix": [{"requirement": "Helm", "class": "list_item", "status": "unclear", "resume_evidence": []}],
-                "suggestions": [], "questions": [], "minor_gaps": ["Helm"], "minor_gap_text": "1 minor gap: Helm", "rows_not_shown": 0,
+                "suggestions": [], "questions": [], "minor_gaps": ["Helm"], "minor_gap_text": "1 minor gap: Helm", "rows_not_shown": 0, "red_flags": [],
             }],
             "open_questions": [{"question_id": "auth:work_authorization", "question": "Are you authorized to work in the US?", "requirement": None}],
             "answers": [],
@@ -1228,7 +1234,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     # --- assess / answers / applications / tailoring ----------------------------------
     RouteSpec(
         "POST", "/api/assess", "Assess one job (URL or pasted text) against a resume: verdict, requirement matrix, questions.", "write", "model",
-        {"schema_version": "scout-assess-response:1", "job": {"job_identity": _JOB_URL}, "result": {"verdict": "matched_above_threshold", "matrix": [], "suggestions": [], "questions": []}},
+        {"schema_version": "scout-assess-response:1", "job": {"job_identity": _JOB_URL}, "result": {"verdict": "matched_above_threshold", "matrix": [], "suggestions": [], "questions": []}, "red_flags": []},
         schema_version="scout-assess-response:1", params=(*_JOB_INPUT, _b("preferences", "object", "Override the effective preferences."), _b("origin", "string", "quick_assess | job_page.")),
         request_example={"job": {"job_url": _JOB_URL}},
         errors=(*_ROW_ERRORS, (422, "job_input_invalid"), (502, "job_fetch_failed"), (504, "assess_timeout"), *_MODEL_ERRORS, (500, "assessment_not_stored"), (409, "posting_closed"), _NO_TARGET),

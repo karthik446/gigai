@@ -15,6 +15,7 @@ import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
 import { inProgressCount } from "../jobStateModel.js";
 import { COPIES_SHORT, HELP, JOBS_TABS, SEARCH_TAB_HASH, TAB_SEARCH, TAB_YOURS, US_ONLY_SHORT, rememberTab, tabOfHash } from "../jobsTabsModel.js";
 import { h1bLabel } from "../jobModel.js";
+import { redFlagsMarker, redFlagsOf } from "../redFlagsModel.js";
 import {
   EMPTY_FILTER,
   ORDER_CHIP,
@@ -157,6 +158,7 @@ function PostingRow({ row, profiles, anchor, usOnly, selected, onSelect }) {
   const posted = postedLine(row);
   const copies = copiesTag(row);
   const unclear = unclearLabel(row, usOnly);
+  const redFlags = redFlagsMarker(redFlagsOf({ listedRow: row })); // dossier-C: the row already carries them; no request
   return (
     <li
       className={`posting-row${row.removed_at ? " removed" : ""}`}
@@ -225,6 +227,11 @@ function PostingRow({ row, profiles, anchor, usOnly, selected, onSelect }) {
               {chip.label}
             </span>
           ))}
+          {redFlags && (
+            <span className="score-chip red-flags tone-danger" data-testid="red-flags-chip" data-count={redFlags.count} title={redFlags.title}>
+              {redFlags.label}
+            </span>
+          )}
         </div>
       </div>
       <div className="posting-score" data-role="score">

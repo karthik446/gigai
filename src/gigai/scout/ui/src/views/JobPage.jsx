@@ -19,6 +19,7 @@ import { useAnswerDrafts } from "../answerDrafts.js";
 import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate } from "../answersModel.js";
 import { REASSESS_LABEL, coverageRows, gateOf, headerChip, staleCodes, staleItems } from "../jobResumeModel.js";
 import { applicationBadge, boardLink, closedBanner, postedLine, postingDate, profileTags, roleTagTitle, scoreBox } from "../postingsModel.js";
+import { redFlagsOf } from "../redFlagsModel.js";
 import { displayCompanyName, notAssessedReasonDetail, thinPostingLine, unchangedSinceLabel } from "../display.js";
 import { jobBatchLine, jobLeftBatch, jobWaitsInBatch } from "../assessBatchModel.js";
 import { useAssessBatch } from "../useAssessBatch.js";
@@ -225,6 +226,23 @@ function OpenOnBoard({ board, className }) {
     <a className={className} href={board.url} target="_blank" rel="noopener noreferrer" data-role="open-on-board">
       {board.label} ↗
     </a>
+  );
+}
+
+// dossier-C: the red flags under the fit number (or under the rank tile of a job without a box). The text is the
+// posting's own words (a requirement row, the languages it names): shown as text only.
+function RedFlagsList({ flags }) {
+  if (!flags.length) {
+    return null;
+  }
+  return (
+    <ul className="score-box-flags" data-role="red-flags" title="Red flags: what the assessment's own rows say against this job. They do not change the fit.">
+      {flags.map((flag, index) => (
+        <li key={`${flag.kind}:${index}`} data-kind={flag.kind}>
+          {flag.text}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -597,6 +615,8 @@ export default function JobPage({
   const staleList = staleItems(staleCodes({ served: resume.stale, job, stored: resume.stored, assessedAt: assessedTime }));
   const chip = headerChip(fit, { assessment, gate });
   const box = scoreBox(listedRow); // 0.1.11.5 (UI-01): an assessed job's fit and rank, from the Jobs row it was opened from
+  // dossier-C: up to three red flags the served rows imply (location, a language the resume lacks, level), beside the fit
+  const redFlags = redFlagsOf({ served, listedRow, quick: job.assessmentSource === "quick" ? job.quick : null });
   const coverage = coverageRows({ assessment, record: resume.record, stored: resume.stored });
   // The page's ONE Re-assess, as the stale label and Apply offer it too.
   const reassess = { enabled: Boolean(assessment) && answerDrafts.gate.enabled && !answerDrafts.busy, reason: answerDrafts.gate.reason, onClick: answerDrafts.reassess };
@@ -751,9 +771,13 @@ export default function JobPage({
                     {box.rank}
                   </span>
                 )}
+                <RedFlagsList flags={redFlags} />
               </div>
             ) : (
-              <RankBadge rank={job.rank} detail hideWhenNone={job.status === "on_demand"} />
+              <>
+                <RankBadge rank={job.rank} detail hideWhenNone={job.status === "on_demand"} />
+                <RedFlagsList flags={redFlags} />
+              </>
             )}
           </div>
         </div>

@@ -169,6 +169,7 @@ from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, US
 from .pipeline.busy import LiveBatch, assess_batch
 from .pipeline.store import MODEL_STEPS, PipelineStore, PipelineStoreError, PostingRecord, pipeline_path
 from .postings import PostingModelError, PostingModelPreparing, PostingText, ProfileView, split_board
+from .red_flags import red_flags_json, stored_declared
 from .requirement_weights import minor_gap_text, minor_gaps
 
 SCHEMA_VERSION = "scout-new:1"
@@ -221,6 +222,7 @@ POSTINGS_LABELS = {
     "/rows/*/unmet/*": PUBLIC_UNTRUSTED,
     "/rows/*/minor_gaps/*": PUBLIC_UNTRUSTED,
     "/rows/*/minor_gap_text": PUBLIC_UNTRUSTED,
+    "/rows/*/red_flags/*/text": PUBLIC_UNTRUSTED,  # dossier-C: the posting's words (a row's requirement, its languages)
     "/rows/*/open_questions/*/question": PUBLIC_UNTRUSTED,
     # 0.1.11.9 NEW1: one row a job: the locations of its copies.
     "/rows/*/locations/*": PUBLIC_UNTRUSTED,
@@ -501,6 +503,7 @@ def _row_json(
     item: object | None,
     tag_pending: bool = False,
     labels: Mapping[str, str] | None = None,
+    declared: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     """One posting of the grid. Posting text and what a model derived from it only: nothing of the user's.
 
@@ -512,12 +515,14 @@ def _row_json(
     score, kind = _score(row)
     unmet: list[str] = []
     gaps: list[str] = []
+    flags: list[dict[str, str]] = []
     questions: list[dict[str, object]] = []
     assessment: dict[str, object] | None = None
     if item is not None:
         result = item.result  # type: ignore[attr-defined]
         unmet = [entry.requirement for entry in result.matrix if entry.status.value != "met"]
         gaps = minor_gaps(result.matrix)  # 0110-10-03: a bonus or one-of-a-list row that is not met never blocks a match
+        flags = red_flags_json(result.matrix, declared)  # dossier-C: read-time, from the stored rows the row already holds
         if result.structured_questions:
             questions = [{"question_id": question.question_id, "question": question.question} for question in result.structured_questions]
         else:
@@ -580,6 +585,8 @@ def _row_json(
         # 0110-10-03: "1 minor gap: Helm" (every gap is in ``minor_gaps``), and the rows past the matrix bound ("+N not shown").
         "minor_gaps": gaps,
         "minor_gap_text": minor_gap_text(gaps),
+        # dossier-C: up to three red flags (location, a language the resume lacks, level) beside the fit; [] when clean.
+        "red_flags": flags,
         "rows_not_shown": item.result.rows_not_shown if item is not None else 0,  # type: ignore[attr-defined]
         "open_questions": questions,
         "label": row.label,
@@ -1671,10 +1678,11 @@ def _scout_new(
         pending = postings.TagPending(home_root, views)
         # 0.1.11.9 PERF1: a stored record is read under the job's key, found from the posting's board: the row's own.
         find_boards(home_root, known={row.job: row.board for _group, row in shown if row.state != _NOT_ASSESSED})
+        declared = stored_declared(home_root, target) if any(row.state != _NOT_ASSESSED for _group, row in shown) else frozenset()  # dossier-C: once a listing
         for group, row in shown:
             item = None if row.state == _NOT_ASSESSED else read_quick_assessment(home_root, target, row.profile_id, row.job)
             text = texts.get(row.job)
-            rows_json.append(_row_json(group, row, text, item, pending(tag_owner(group, row, profile_id), None if text is None else text.title), labels))
+            rows_json.append(_row_json(group, row, text, item, pending(tag_owner(group, row, profile_id), None if text is None else text.title), labels, declared))
             rows_json[-1]["ranked_low"] = fit_rules.is_ranked_low(row.state, row.rank_score, setting)  # 0.1.11.2
             rows_json[-1].update(jobs.json(row, text))  # 0.1.11.9 NEW1 (additive): copies, locations, members, location_unclear
             found = _evidence(row, item)
@@ -1934,6 +1942,7 @@ def render(response: Mapping[str, object]) -> str:
                 details.append("tag pending")  # 0110-8-05: matched by a generic title's words; its function tag is not known yet
             # One part per line (the column is narrow): the verdict, "old assessment: ...", "N of M requirements", the rank.
             score = str(row["score_text"]).split(" · ") + ([str(row["minor_gap_text"])] if row.get("minor_gap_text") and row.get("state") == "matched" and not row.get("thin_posting") else [])
+            score += [str(flag["text"]) for flag in row.get("red_flags") or ()]  # dossier-C: the flags under the score, one a line
             if row.get("stale_label"):
                 score[0:1] = [score[0].split(" (")[0], str(row["stale_label"])]
             if row["needs_tailoring"] is None:

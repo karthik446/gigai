@@ -172,6 +172,7 @@ from .pipeline.store import (
     RunAssessment,
 )
 from .postings import PostingModelError, PostingModelPreparing, PostingText, ProfileView
+from .red_flags import stored_declared
 from .scout_new import (
     APPLIED_COMMAND,
     FIRST_USE_DAYS,
@@ -756,10 +757,11 @@ def _rows_json(
     h1b = _h1b_index() if shown else {}  # once per request: a row looks its board up, never reads the catalog
     # 0.1.11.9 PERF1: a stored record is read under the job's key, which is found from the posting's board: the row's own.
     find_boards(home_root, known={row.job: row.board for _group, row in shown if row.state != _NOT_ASSESSED})
+    declared = stored_declared(home_root, target) if any(row.state != _NOT_ASSESSED for _group, row in shown) else frozenset()  # dossier-C: once a request
     for group, row in shown:
         item = None if row.state == _NOT_ASSESSED else read_quick_assessment(home_root, target, row.profile_id, row.job)
         text = texts.get(row.job)
-        entry = _row_json(group, row, text, item, pending(tag_owner(group, row, only), None if text is None else text.title), labels)
+        entry = _row_json(group, row, text, item, pending(tag_owner(group, row, only), None if text is None else text.title), labels, declared)
         # 0.1.11.3 (item 8): LABELS only (never a filter, sort key or hold). ``sponsorship`` is what the assessment read
         # from the posting (null: not stated / not assessed); ``h1b`` the company's catalog figure (null: none held).
         stated = None if item is None else getattr(item.result, "sponsorship", None)  # type: ignore[attr-defined]
@@ -1459,6 +1461,7 @@ def render(response: Mapping[str, object]) -> str:
         no_role = "in no role" if response["schema_version"] == ASSESS_SCHEMA_VERSION else NO_ROLE_TEXT
         tags = ", ".join(str(labels.get(item["profile_id"], item["profile_id"])) for item in row["profiles"]) or no_role
         gap = f" · {row['minor_gap_text']}" if row.get("minor_gap_text") and not row.get("thin_posting") else ""  # 0110-10-03
+        gap += "".join(f" · {flag['text']}" for flag in row.get("red_flags") or ())  # dossier-C: the flags after the score
         copies = row.get("copies")
         places = f" ({row['locations_text']}; {copies} copies)" if type(copies) is int and copies > 1 else ""
         if us_only and row.get("location_unclear"):

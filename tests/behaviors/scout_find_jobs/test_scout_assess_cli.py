@@ -263,3 +263,52 @@ def test_assess_a_match_on_two_requirements_says_thin_posting_under_the_verdict_
     _install_model(monkeypatch, [matched(4)])
     full = runner.invoke(cli, [*_base(home, target), "--job-text", str(posting), "--title", "Staff AI Engineer", "--company", "Acme"])
     assert full.exit_code == 0 and "Verdict: matched_above_threshold" in full.output and "thin posting" not in full.output, full.output
+
+
+def test_assess_says_the_red_flags_under_the_verdict_and_in_its_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.12 dossier-C: up to three red flags beside the verdict, derived from the matrix at read time (never stored)."""
+    home, target, runner = _setup(tmp_path)
+    toast = json.dumps(
+        {
+            "verdict": "pending_user_answers",
+            "matrix": [
+                {
+                    "requirement": "8+ years of back-end experience in Java, Kotlin, or other object-oriented languages", "class": "hard",
+                    "status": "unclear", "resume_evidence": [], "alternatives": ["Java", "Kotlin", "other object-oriented languages"],
+                },
+                {"requirement": "Postgres", "class": "askable", "status": "met", "resume_evidence": ["six years"], "alternatives": ["Postgres"]},
+            ],
+            "suggestions": [],
+            "questions": [{"question_id": "lang:java", "question": "Have you shipped Java or Kotlin services?", "requirement": "8+ years of back-end experience in Java, Kotlin, or other object-oriented languages"}],
+            "not_a_match_reason": None,
+        }
+    )
+    posting = tmp_path / "posting.txt"
+    posting.write_text("Toast is hiring a Staff Software Engineer: 8+ years of back-end experience in Java, Kotlin, or other object-oriented languages; Postgres.\n", encoding="utf-8")
+
+    _install_model(monkeypatch, [toast])
+    text = runner.invoke(cli, [*_base(home, target), "--job-text", str(posting), "--title", "Staff Software Engineer", "--company", "Toast"])
+    assert text.exit_code == 0, text.output
+    lines = text.output.splitlines()
+    verdict_at = next(index for index, line in enumerate(lines) if line.startswith("  Verdict: pending_user_answers"))
+    assert lines[verdict_at + 1] == "  Red flags: Asks for Java, Kotlin", text.output
+
+    # A second pasted posting: a second run of the SAME posting re-assesses its stored rows (ids), a different prompt.
+    second = tmp_path / "posting-2.txt"
+    second.write_text(posting.read_text(encoding="utf-8").replace("Toast is", "Toast Scheduling is"), encoding="utf-8")
+    _install_model(monkeypatch, [toast])
+    as_json = runner.invoke(cli, [*_base(home, target), "--job-text", str(second), "--title", "Staff Software Engineer", "--company", "Toast", "--json"])
+    assert as_json.exit_code == 0, as_json.output
+    payload = json.loads(as_json.output)
+    assert payload["red_flags"] == [{"kind": "language", "text": "Asks for Java, Kotlin"}]
+    assert "red_flags" not in payload["result"] and "red_flags" not in json.loads(Path(payload["stored_path"]).read_text(encoding="utf-8"))
+
+    acme = tmp_path / "acme.txt"
+    acme.write_text(_POSTING, encoding="utf-8")
+    _install_model(monkeypatch, [_PENDING])
+    clean = runner.invoke(cli, [*_base(home, target), "--job-text", str(acme), "--title", "Staff AI Engineer", "--company", "Acme", "--json"])
+    assert clean.exit_code == 0 and json.loads(clean.output)["red_flags"] == [], clean.output
+    acme.write_text(_POSTING.replace("Acme is", "Acme Labs is"), encoding="utf-8")
+    _install_model(monkeypatch, [_PENDING])
+    plain = runner.invoke(cli, [*_base(home, target), "--job-text", str(acme), "--title", "Staff AI Engineer", "--company", "Acme"])
+    assert plain.exit_code == 0 and "Red flags:" not in plain.output, plain.output

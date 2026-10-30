@@ -60,6 +60,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from ...assess_causes import cause_fields
 from ...quick_assess import QuickAssessError, list_quick_assessments, run_quick_assessment
+from ...red_flags import red_flags_json, stored_declared
 from ..assess_contracts import AssessRequest, AssessmentsListResponse
 from ..contracts import FindJobsContractError, Verdict
 from ..job_state import JobStateSources
@@ -156,6 +157,8 @@ class AssessRoutesMixin:
 
         served = story_bank.attach_suggestions(response.to_json(), home_root=self._backend.home_root, target=target)
         served.update(BasisCheck(home_root=self._backend.home_root, target=target).served(response))
+        # dossier-C: up to three red flags beside the result, read from its rows now (never stored).
+        served["red_flags"] = red_flags_json(response.result.matrix, stored_declared(self._backend.home_root, target))
         self._write_json(HTTPStatus.OK, served)
 
     def _handle_get_assessments(self) -> None:
@@ -182,9 +185,12 @@ class AssessRoutesMixin:
             from ... import story_bank
 
             banks: dict[str, tuple[story_bank.BankEntry, ...]] = {}
+            declared = stored_declared(self._backend.home_root, target) if served else frozenset()  # dossier-C: once a request
             for row in served:
                 if isinstance(row, dict):
                     story_bank.attach_suggestions(row, home_root=self._backend.home_root, target=target, cache=banks)
+                    result = row.get("result")
+                    row["red_flags"] = red_flags_json(result.get("matrix") or [], declared) if isinstance(result, dict) else []
         try:
             self._attach_assessment_job_states(target, items, body)
         except Exception:  # noqa: BLE001 - display-only enrichment must never break the list
