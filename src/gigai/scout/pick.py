@@ -598,7 +598,8 @@ def _finish(
         result=result, record=record, candidates=built.candidates, context=built.context, picked_by=picked_by, fallback=fallback, draft=draft,
         model_pick=pick, problems=tuple(problems), added_by_code=tuple(item for item in added if item.id in shown), conflicts=conflicts,
         printed=printed, line_marks={item_id: master.items[item_id].mark for item_id in printed if item_id in master.items},
-        pages=None, max_pages=MAX_PAGES, check=suggestions.check_selection(rows, printed, conflicts=conflicts), max_bullets=max_bullets,
+        pages=None, max_pages=MAX_PAGES, max_bullets=max_bullets,
+        check=suggestions.check_selection(rows, printed, entries=suggestions.shown_entry_ids(result), conflicts=conflicts),
     )
 
 

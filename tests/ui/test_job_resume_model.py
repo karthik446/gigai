@@ -81,15 +81,32 @@ out.stale = {
 };
 
 // Coverage (SPEC 2.3): the record's rows; without a record, the same rule from the rows' sources and what is printed.
+// COVER-01 (0.1.11.13): the put-back ids are the lines the stored resume's selection lists (picked, left out, cut
+// for length) or prints; `input.picked` is the stored resume with that selection.
 const cover = (map) => [...map.entries()].map(([id, row]) => [id, row.coverage, row.inResume, row.putBack]);
 out.coverage = {
-  record: cover(m.coverageRows({ assessment: A, record: input.record, stored: input.stored })),
-  derived: cover(m.coverageRows({ assessment: A, stored: input.stored })),
+  record: cover(m.coverageRows({ assessment: A, record: input.record, stored: input.picked })),
+  derived: cover(m.coverageRows({ assessment: A, stored: input.picked })),
   noResume: cover(m.coverageRows({ assessment: A })),
-  notes: A.matrix.map((row) => m.coverageNote(row, m.coverageRows({ assessment: A, stored: input.stored }))),
+  notes: A.matrix.map((row) => m.coverageNote(row, m.coverageRows({ assessment: A, stored: input.picked }))),
   alternatives: A.matrix.map((row) => m.alternativesLine(row)),
   printed: m.printedIds(input.stored),
   lines: m.printedLineCount(input.stored),
+  // A hand-back's stored resume carries no selection: there is no Left out to show a line under, so nothing is offered to put back.
+  edited: cover(m.coverageRows({ assessment: A, record: input.record, stored: input.stored })),
+};
+
+// COVER-01: an entry id (a role, a project, a school) among a met row's sources is kept when the stored resume shows
+// that entry, and is never a line to put back.
+const E = input.entries;
+const entryCoverage = (record) => m.coverageRows({ assessment: E.assessment, record, stored: E.stored });
+out.entries = {
+  shown: m.shownEntryIds(E.stored),
+  printed: m.printedIds(E.stored),
+  derived: cover(entryCoverage(null)),
+  notes: E.assessment.matrix.map((row) => m.coverageNote(row, entryCoverage(null))),
+  record: cover(entryCoverage(E.record)),
+  lost: m.attentionItems({ record: E.record, assessment: E.assessment, stored: E.stored }).map((item) => [item.requirement, item.lines]),
 };
 
 // Who made the stored resume, and the one provenance line.
@@ -113,8 +130,8 @@ out.provenance = {
 
 // Needs attention: the conflicts first (SPEC 3.3), then the evidence the resume no longer shows (2.3).
 out.attention = {
-  lost: m.attentionItems({ record: input.record, assessment: A }),
-  conflicts: m.attentionItems({ record: selection({ conflicts: input.conflicts }), assessment: A }).map((item) => [item.code, item.requirement, item.text, item.lines]),
+  lost: m.attentionItems({ record: input.record, assessment: A, stored: input.picked }),
+  conflicts: m.attentionItems({ record: selection({ conflicts: input.conflicts }), assessment: A, stored: input.picked }).map((item) => [item.code, item.requirement, item.text, item.lines]),
   // 0.1.11.5 (item 1c): a pick that knows no page limit says how many bullets it holds at most.
   capped: m.attentionItems({ record: selection({ conflicts: input.conflicts, max_bullets: 20, pages: null }), assessment: A }).map((item) => [item.code, item.text]),
   // A stored pick whose ONLY conflicts came from the page limit, on a gate the server already calls ready.
@@ -196,6 +213,17 @@ STORED = {
         {"heading": "experience", "entries": [{"heading": [{"kind": "copy", "text": "### Mossbank", "refs": []}], "bullets": [_copy("b-000001", "Ran the Postgres fleet.", 4), _copy("b-000004", "Cut deploys to 12 minutes.", 5)]}]},
     ]},
 }
+
+
+# The same resume as the pick stores it: its selection lists every master line as picked or left out.
+def _picked(item: str, code: str = "listed") -> dict:
+    return {"id": item, "code": code, "reason": "kept"}
+
+
+PICKED = {**STORED, "producer": {"callable": "scout.pick"}, "selection": {
+    "picked_by": "model", "picked": [_picked("sum-000001"), _picked("b-000001"), _picked("b-000004")],
+    "left_out": [_picked("b-000002", "not_asked"), _picked("b-000003", "cut_for_length")], "cut_for_length": [],
+}}
 CHANGED = {"sections": [{"heading": "experience", "entries": [{"heading": [{"kind": "copy", "text": "### Mossbank", "refs": []}], "bullets": [
     {"kind": "rewritten", "text": "Ran the Postgres fleet for the scheduling services.", "id": "L4", "origin": "user",
      "refs": [{"kind": "resume", "line": 4, "text": "- Ran the Postgres fleet.", "item_id": "b-000001"}, {"kind": "answer", "question_id": "team:size", "text": "Six."}],
@@ -228,6 +256,40 @@ RECORD = {
          "resolved": {"by": "agent", "at": "2026-10-05T12:00:00Z", "how": "dismissed", "ref": None}},
     ],
 }
+
+
+def _heading(item: str, text: str, line: int) -> dict:
+    return {"kind": "copy", "text": f"### {text}", "refs": [{"kind": "resume", "line": line, "text": f"### {text}", "item_id": item}]}
+
+
+# COVER-01: a met row whose sources are entry ids (a role `r-`, a project `p-`, a school `e-`), as the evidence view names them.
+ENTRIES = {
+    "assessment": {"verdict": "matched_above_threshold", "matrix": [
+        {**ROW, "id": "req-000011", "requirement": "Led a platform team", "class": "hard", "status": "met", "resume_evidence": [], "sources": ["r-aaaaaa", "r-bbbbbb"]},
+        {**ROW, "id": "req-000012", "requirement": "A degree", "class": "askable", "status": "met", "resume_evidence": [], "sources": ["e-cccccc"]},
+        {**ROW, "id": "req-000013", "requirement": "Shipped a product", "class": "hard", "status": "met", "resume_evidence": [], "sources": ["p-dddddd"]},
+        {**ROW, "id": "req-000014", "requirement": "Kafka", "class": "askable", "status": "met", "resume_evidence": [], "sources": ["b-000003", "p-dddddd"]},
+        {**ROW, "id": "req-000015", "requirement": "Go", "class": "askable", "status": "met", "resume_evidence": [], "sources": ["b-000001", "r-bbbbbb"]},
+    ]},
+    "stored": {**PICKED, "result": {"sections": [
+        {"heading": "summary", "lines": [_copy("sum-000001", "Staff engineer.", 1)]},
+        {"heading": "experience", "entries": [
+            {"heading": [_heading("r-aaaaaa", "Mossbank", 3), {"kind": "copy", "text": "2019 - 2024", "refs": []}], "bullets": [_copy("b-000001", "Ran the Postgres fleet.", 5), _copy("b-000004", "Cut deploys to 12 minutes.", 6)]},
+            {"heading": [_heading("r-bbbbbb", "Earlier role", 8)], "bullets": []},
+        ]},
+        {"heading": "education", "entries": [{"heading": [_heading("e-cccccc", "BSc Computer Science", 10)], "bullets": []}]},
+    ]}},
+    # A record 0.1.11.12 wrote: the rows read `lost` because their sources are entry ids.
+    "record": {**RECORD, "gate": {"decision": "suggest", "ready": False, "reasons": [
+        {"code": "lost_mandatory_evidence", "requirement": "req-000011"}, {"code": "lost_mandatory_evidence", "requirement": "req-000014"},
+    ]}, "requirements": [
+        {"id": "req-000011", "class": "hard", "status": "met", "sources": ["r-aaaaaa", "r-bbbbbb"], "in_resume": [], "coverage": "lost"},
+        {"id": "req-000013", "class": "hard", "status": "met", "sources": ["p-dddddd"], "in_resume": [], "coverage": "lost"},
+        {"id": "req-000014", "class": "askable", "status": "met", "sources": ["b-000003", "p-dddddd"], "in_resume": [], "coverage": "lost"},
+    ]},
+}
+
+
 CONFLICTS = [
     {"code": "mandatory_evidence_does_not_fit", "requirement": "req-000001", "lines": ["b-000002"], "cut": True},
     {"code": "pinned_line_does_not_fit", "requirement": None, "lines": ["b-000007", "b-000008"], "cut": True},
@@ -276,8 +338,8 @@ def out() -> dict:
         pytest.skip("LOUD SKIP: node is not on PATH; the job page's model was NOT run")
     urls = [(UI_SRC / name).as_uri() for name in ("jobResumeModel.js", "jobStateModel.js")]
     payload = json.dumps({
-        "assessment": ASSESSMENT, "pending": PENDING, "gapGate": GAP_GATE, "stored": STORED, "changed": CHANGED, "record": RECORD, "conflicts": CONFLICTS,
-        "added": ADDED, "skills": SKILLS, "proposed": PROPOSED, "served": SERVED, "pickView": PICK_VIEW, "pickCodes": PICK_CODES,
+        "assessment": ASSESSMENT, "pending": PENDING, "gapGate": GAP_GATE, "stored": STORED, "picked": PICKED, "entries": ENTRIES, "changed": CHANGED, "record": RECORD,
+        "conflicts": CONFLICTS, "added": ADDED, "skills": SKILLS, "proposed": PROPOSED, "served": SERVED, "pickView": PICK_VIEW, "pickCodes": PICK_CODES,
     })
     done = subprocess.run([node, "--input-type=module", "-e", SCRIPT.replace("__URLS__", json.dumps(urls)), payload], capture_output=True, text=True, check=False, timeout=60)
     assert done.returncode == 0, done.stderr
@@ -346,6 +408,30 @@ def test_a_met_row_says_where_its_evidence_is(out: dict) -> None:
         None, None,
     ]
     assert coverage["alternatives"] == ["", "", "any one of: Cassandra, MongoDB", "", ""]
+    # COVER-01: a stored resume without a selection (a hand-back) has no Left out, so no line is offered to put back.
+    assert coverage["edited"] == [
+        ["req-000001", "kept", ["b-000001"], []], ["req-000002", "lost", [], []], ["req-000003", "answer_only", [], []], ["req-000004", None, [], []],
+    ]
+
+
+def test_a_row_that_cites_a_role_a_project_or_a_school_is_kept_when_the_resume_shows_that_entry(out: dict) -> None:
+    """COVER-01 (0.1.11.13): an entry id among a met row's sources is kept when the stored resume shows that entry
+    (a role with bullets, an earlier role as a heading alone, a school) and is never a line to put back."""
+
+    entries = out["entries"]
+    assert entries["shown"] == ["r-aaaaaa", "r-bbbbbb", "e-cccccc"] and entries["printed"] == ["sum-000001", "b-000001", "b-000004"]
+    assert entries["derived"] == [
+        ["req-000011", "kept", ["r-aaaaaa", "r-bbbbbb"], []],
+        ["req-000012", "kept", ["e-cccccc"], []],
+        ["req-000013", "lost", [], []],
+        ["req-000014", "lost", [], ["b-000003"]],
+        ["req-000015", "kept", ["b-000001", "r-bbbbbb"], ["b-000001"]],
+    ]
+    assert [note and note["putBack"] for note in entries["notes"]] == [[], [], [], ["b-000003"], []]
+    assert [note and note["label"] for note in entries["notes"]] == ["in the resume", "in the resume", "not in the resume", "not in the resume", "in the resume"]
+    # A record 0.1.11.12 wrote keeps its recorded coverage until the server checks again, but no put-back link names an entry id.
+    assert entries["record"] == [["req-000011", "lost", [], []], ["req-000013", "lost", [], []], ["req-000014", "lost", [], ["b-000003"]]]
+    assert entries["lost"] == [["req-000011", []], ["req-000014", ["b-000003"]]]
 
 
 def test_one_provenance_line_says_who_made_the_resume(out: dict) -> None:

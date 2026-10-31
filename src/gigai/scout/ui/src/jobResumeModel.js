@@ -369,6 +369,39 @@ export function printedIds(stored) {
   return ids;
 }
 
+// COVER-01: the master ENTRY ids the job resume shows (a role, a project, a school), in print order: every entry
+// heading line cites its entry's id (an earlier role shown as a heading alone included). A heading without a ref,
+// stored before entry ids, names nothing.
+export function shownEntryIds(stored) {
+  const ids = [];
+  list(stored && stored.result && stored.result.sections).forEach((section) => {
+    list(section.entries).forEach((entry) => {
+      list(entry.heading).forEach((line) => {
+        const base = line && line.kind === "custom" && object(line.edited_from) ? line.edited_from : line;
+        list(base && base.refs).forEach((ref) => {
+          if (ref && ref.kind === "resume" && text(ref.item_id) && !ids.includes(ref.item_id)) {
+            ids.push(ref.item_id);
+          }
+        });
+      });
+    });
+  });
+  return ids;
+}
+
+// The master lines a put-back link can land on: what the resume prints plus every line its selection lists as
+// picked, left out or cut (the pick records each master line there). A stored resume without a selection (one
+// handed back from chat) shows no Picked/Left out, so nothing is offered; an entry id is never among them.
+function putBackLines(stored) {
+  const selection = object(stored && stored.selection);
+  if (!selection) {
+    return null;
+  }
+  const ids = new Set(printedIds(stored));
+  ["picked", "left_out", "cut_for_length"].forEach((key) => list(selection[key]).forEach((line) => text(line && line.id) && ids.add(line.id)));
+  return ids;
+}
+
 // 0.1.11.4 item 9d: true when the stored resume prints an Education section (an entry or a line of it).
 export function resumeHasEducation(stored) {
   return list(stored && stored.result && stored.result.sections).some(
@@ -405,31 +438,34 @@ export function printedLineCount(stored) {
 const isAnswerSource = (source) => text(source).startsWith("A ");
 const COVERAGE_WORDS = { kept: "in the resume", lost: "not in the resume", answer_only: "from your answer only" };
 
-// row id -> {coverage, inResume, sources, putBack}: where a `met` row's support is printed. The record's rows when
-// there is a record; else the same rule worked out here from the rows' `sources` and what the stored resume prints
-// (only when there is a stored resume: nothing is "not in the resume" of a job that has none).
+// row id -> {coverage, inResume, sources, putBack}: where a `met` row's support is shown. The record's rows when
+// there is a record; else the same rule worked out here from the rows' `sources` and what the stored resume shows
+// (only when there is a stored resume: nothing is "not in the resume" of a job that has none). A source is shown
+// when it is a printed line or an entry the resume shows (COVER-01); `putBack` names lines only (`putBackLines`).
 export function coverageRows({ assessment = null, record = null, stored = null } = {}) {
   const out = new Map();
+  const landing = putBackLines(stored);
+  const putBack = (sources) => (landing ? sources.filter((source) => !isAnswerSource(source) && landing.has(source)) : []);
   const recorded = list(record && record.requirements).filter(object);
   if (recorded.length > 0) {
     recorded.forEach((row) => {
       const sources = list(row.sources).filter((source) => typeof source === "string");
-      out.set(row.id, { coverage: text(row.coverage) || null, inResume: list(row.in_resume), sources, putBack: sources.filter((source) => !isAnswerSource(source)) });
+      out.set(row.id, { coverage: text(row.coverage) || null, inResume: list(row.in_resume), sources, putBack: putBack(sources) });
     });
     return out;
   }
   if (!stored) {
     return out;
   }
-  const printed = new Set(printedIds(stored));
+  const shown = new Set([...printedIds(stored), ...shownEntryIds(stored)]);
   list(assessment && assessment.matrix).forEach((row) => {
     if (!row || !text(row.id) || row.status !== "met" || !Array.isArray(row.sources)) {
       return;
     }
-    const lines = row.sources.filter((source) => typeof source === "string" && !isAnswerSource(source));
-    const kept = lines.filter((source) => printed.has(source));
-    const coverage = kept.length ? "kept" : lines.length ? "lost" : row.sources.length ? "answer_only" : "none";
-    out.set(row.id, { coverage, inResume: kept, sources: row.sources, putBack: lines });
+    const sources = row.sources.filter((source) => typeof source === "string" && !isAnswerSource(source));
+    const kept = sources.filter((source) => shown.has(source));
+    const coverage = kept.length ? "kept" : sources.length ? "lost" : row.sources.length ? "answer_only" : "none";
+    out.set(row.id, { coverage, inResume: kept, sources: row.sources, putBack: putBack(sources) });
   });
   return out;
 }
