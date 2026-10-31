@@ -30,6 +30,18 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.11.13
+
+#### Fixed
+
+- **A requirement backed by a role or a school is no longer read as lost.** A years-of-experience or degree row that
+  Scout settles from your roles or your school (for example "8+ years" met by 13 years across seven roles) showed
+  "not in the resume" with "put back r-…" links, a "Needs attention" item and a "held" count that included it, even
+  though the job resume shows those roles and the school. The final-selection check now counts a role, project or
+  school the resume shows as kept evidence; a row is lost only when none of its sources, lines or entries, is shown.
+  A put-back or "show … under Left out" link names a line only, never a role or a school. A job page assessed before
+  this release is read with the same rule when it opens, so it needs no new assessment; nothing stored is changed.
+
 ### 0.1.11.12
 
 #### Added
