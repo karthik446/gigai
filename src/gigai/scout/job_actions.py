@@ -164,7 +164,8 @@ def _missing(job: job_brief.StoredJob) -> JobActionError:
 
 
 #: What the OPEN read adds to the suggestions (``GET /api/jobs/suggestions``, the page): ``pick_view``'s stored view.
-OPEN_KEYS: tuple[str, ...] = ("verdict", "basis", "master_stored", "master_education", "stale", "stale_lines", "picked", "problems", "added_by_code", "conflicts", "selection_error", "proposed", "selected_lines", "requirements", "fact_checks", "fact_checks_posting")
+#: ``gate`` and ``requirements`` are the view's, checked against the stored resume as it is (COVER-01), over the record's.
+OPEN_KEYS: tuple[str, ...] = ("verdict", "basis", "master_stored", "master_education", "gate", "stale", "stale_lines", "picked", "problems", "added_by_code", "conflicts", "selection_error", "proposed", "selected_lines", "requirements", "fact_checks", "fact_checks_posting")
 
 
 def list_suggestions(
@@ -300,9 +301,10 @@ def after_handback(
                 return None
             rows = [store.RequirementRow(row.id, row.requirement_class, row.status, row.sources) for row in record.requirements]
             # Recomputed from the STORED resume (SPEC 10.2 item 5): a recorded conflict the resume no longer has is gone.
+            # COVER-01: a row that cites a role, a project or a school is kept while the resume shows that entry.
             printed = store.printed_ids(response.result)  # type: ignore[attr-defined]
             selection, conflicts = store.live_selection(record.selection, printed)
-            check = store.check_selection(rows, printed, conflicts=conflicts)
+            check = store.check_selection(rows, printed, entries=store.shown_entry_ids(response.result), conflicts=conflicts)  # type: ignore[attr-defined]
             record = store.with_selection(
                 record, now=when, check=check, selection=selection, proposed=record.proposed, selection_error=record.selection_error,
             )
@@ -388,7 +390,12 @@ def _fact_checks(resume: object | None, master_text: str | None, assessment: obj
 
 
 def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | None = None) -> dict[str, object]:
-    """What is stored for one job's resume (the module text). Reads only: nothing is recomputed and nothing is written."""
+    """What is stored for one job's resume (the module text). Reads only: nothing is written.
+
+    The requirement rows and the gate are the record's checked against the stored resume as it is now
+    (``suggestions.recheck_stored``, COVER-01): a record 0.1.11.12 wrote read a role, a project or a school a row
+    cites as a lost line, and only a new write would mend it. Everything else is as stored.
+    """
 
     from ..workpad import WorkpadError, resolve_workpad
     from .assessment_basis import BasisCheck
@@ -411,7 +418,7 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
     codes, changed = store.stale_view(home_root, target, job.profile_id, job.job_identity, assessment_stale=reason, resolved=resolved, resume=resume)
     stale = list(codes)
     replaceable = bool(store.is_replaceable(resume, store.read_suggestions(home_root, target, job.profile_id, job.job_identity), path=resume_path))
-    gate = record.get("gate") if isinstance(record.get("gate"), Mapping) else None
+    requirements, gate = store.recheck_stored(record, resume.result if resume is not None else None)
     if gate is None and getattr(job.assessment, "resume_gate", None) is not None:
         stored_gate = job.assessment.resume_gate  # type: ignore[attr-defined]
         gate = {"decision": stored_gate.decision, "ready": None, "reasons": [reason.to_json() for reason in stored_gate.reasons]}
@@ -456,9 +463,9 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
             "lines": list(store.recorded_marks(proposed)),
         },
         "selected_lines": list(store.recorded_marks(selection)),
-        # The requirement rows as stored (id, class, status, sources, in_resume, coverage): nothing is recomputed. A row an
+        # The requirement rows (id, class, status, sources, in_resume, coverage), checked against the stored resume (above). A row an
         # open question asks also names it (`question_id`, what `gigai scout answers save` takes); `open_questions` lists them all.
-        "requirements": [{**row, "question_id": asked.get(str(row.get("id")))} for row in record.get("requirements", ()) if isinstance(row, Mapping)],
+        "requirements": [{**row, "question_id": asked.get(str(row.get("id")))} for row in requirements],
         "open_questions": list(questions),
     }
 

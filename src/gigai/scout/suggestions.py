@@ -21,10 +21,12 @@ REQUIREMENT -> SOURCE IDS (2.2).  ``requirements[]`` is the assessment's matrix
 reduced to ids: the row id, its class and status, and ``sources`` as the model
 gave them after the boundary's cleaning.
 
-THE FINAL-SELECTION CHECK (2.3), ``check_selection(requirements, printed)``:
+THE FINAL-SELECTION CHECK (2.3), ``check_selection(requirements, printed, entries=...)``:
 run after every change of what the job resume prints.  For each ``met`` row:
-``kept`` (a master-line source is printed), ``lost`` (it had master-line
-sources and none is printed), ``answer_only`` (its only sources are answers or
+``kept`` (a master source is shown: a printed line, or a role, project or
+school the resume shows -- the evidence view names those by their ENTRY ids
+and the model cites them, COVER-01), ``lost`` (it had master sources and none
+is shown), ``answer_only`` (its only sources are answers or
 stories: no line of the master states it) or ``none`` (it came back without a
 usable source).  ``ready`` is false, with a reason per row, when a MANDATORY
 row is ``lost`` or the selection has a conflict.  ``ready: false`` never
@@ -244,7 +246,7 @@ class SelectionCheck:
     reasons: tuple[CheckReason, ...] = ()
 
     def lost(self) -> tuple[str, ...]:
-        """The MANDATORY rows whose master-line sources are all unprinted (SPEC 3.5 check 1)."""
+        """The MANDATORY rows none of whose master sources is shown (SPEC 3.5 check 1)."""
 
         return tuple(row.id for row in self.rows if row.mandatory and row.coverage == COVERAGE_LOST)
 
@@ -252,18 +254,23 @@ class SelectionCheck:
         return tuple(row.id for row in self.rows if row.coverage == COVERAGE_ANSWER_ONLY)
 
 
-def check_selection(requirements: Iterable[RequirementRow], printed: Iterable[str], *, conflicts: Sequence[object] = ()) -> SelectionCheck:
+def check_selection(
+    requirements: Iterable[RequirementRow], printed: Iterable[str], *, entries: Iterable[str] = (), conflicts: Sequence[object] = (),
+) -> SelectionCheck:
     """The final-selection check (the module text). Pure.
 
     ``requirements``: the assessment's rows by id (``requirement_rows``).
     ``printed``: the master line ids the job resume shows (a copied line's
     own id; a line changed in chat counts for every master id it cites).
+    ``entries``: the master entry ids the job resume shows (``shown_entry_ids``:
+    every role, project and school with a heading on it, bullets or not).
+    A row's source is kept when it is in either.
     ``conflicts``: the selection's conflicts (``pick.PickConflict``); any one
     makes the resume not ready, named by its own code's row when it has one,
     except a page-driven one (``PAGE_CONFLICTS``), which is no reason.
     """
 
-    shown = set(printed)
+    shown = set(printed) | set(entries)
     rows: list[CoverageRow] = []
     reasons: list[CheckReason] = []
     for row in requirements:
@@ -611,6 +618,43 @@ def with_selection(
     return replace(record, updated_at=now, gate=gate, requirements=check.rows, selection=selection, proposed=proposed, selection_error=selection_error)
 
 
+def recheck_stored(record: Mapping[str, object], result: object | None) -> tuple[list[dict[str, object]], dict[str, object] | None]:
+    """The record's requirement rows and gate as the stored job resume shows them NOW (COVER-01, part 2). Pure.
+
+    ``record`` is the stored record as JSON (SPEC 2.1); ``result`` the stored
+    job resume's structure, or ``None``.  A record 0.1.11.12 wrote read a row
+    that cites a role, a project or a school as ``lost``, and the page reads
+    the stored record: so the view runs the final-selection check again on the
+    stored resume as it is.  Each row's ``coverage`` and ``in_resume`` are the
+    check's; of the gate's reasons only the ``lost_mandatory_evidence`` ones are
+    replaced by the check's (every other reason stays, a ``selection_conflict``
+    included, since the stored conflicts are not checked again); ``ready`` is a
+    ``suggest`` decision with a selection and no lost or conflict reason left.
+    With no stored resume, no rows, or a record the check cannot read, the
+    record's own rows and gate come back unchanged.  Nothing is written.
+    """
+
+    stored_rows = [dict(row) for row in record.get("requirements", ()) if isinstance(row, Mapping)]  # type: ignore[union-attr]
+    gate = dict(record["gate"]) if isinstance(record.get("gate"), Mapping) else None  # type: ignore[arg-type]
+    if result is None or not stored_rows:
+        return stored_rows, gate
+    try:
+        rows = [CoverageRow.from_json(row) for row in stored_rows]
+    except SuggestionError:
+        return stored_rows, gate
+    check = check_selection(
+        [RequirementRow(row.id, row.requirement_class, row.status, row.sources) for row in rows], printed_ids(result), entries=shown_entry_ids(result),
+    )
+    checked = [row.to_json() for row in check.rows]
+    if gate is None:
+        return checked, None
+    own = [reason for reason in gate.get("reasons", ()) if isinstance(reason, Mapping) and reason.get("code") != REASON_LOST_EVIDENCE]  # type: ignore[union-attr]
+    reasons = [*own, *(reason.to_json() for reason in check.reasons)]
+    blocked = any(reason.get("code") in (REASON_LOST_EVIDENCE, REASON_CONFLICT) for reason in reasons)
+    gate.update(reasons=reasons, ready=bool(gate.get("decision") == "suggest" and isinstance(record.get("selection"), Mapping) and not blocked))
+    return checked, gate
+
+
 def add_suggestion(
     record: SuggestionRecord, *, kind: str, why: str, source: str, now: str, line: str | None = None, requirement: str | None = None,
     posting_phrase: str | None = None,
@@ -923,6 +967,27 @@ def printed_ids(result: object) -> tuple[str, ...]:
     return tuple(out)
 
 
+def shown_entry_ids(result: object) -> tuple[str, ...]:
+    """The master entry ids a stored job resume shows: every role, project and school whose heading cites one.
+
+    The candidate set numbers each entry heading with its entry id (``tailor_master``), so a role with bullets, an
+    earlier role shown as a heading alone and a school all carry it on their first heading line.  A heading without
+    a ref (a resume stored before entry ids) names nothing.  What :func:`check_selection` takes as ``entries``.
+    """
+
+    from .tailored_resume import replaced_line
+
+    out: list[str] = []
+    for section in result.sections:  # type: ignore[attr-defined]
+        for entry in section.entries:
+            for line in entry.heading:
+                for ref in (*line.refs, *replaced_line(line).refs):
+                    item_id = getattr(ref, "item_id", None)
+                    if ref.kind == "resume" and item_id is not None and item_id not in out:
+                        out.append(item_id)
+    return tuple(out)
+
+
 def _markdown_digest(markdown: str) -> str:
     return digest_imported_bytes(markdown.encode("utf-8"))
 
@@ -1106,7 +1171,10 @@ def store_assessed(
             sibling.unlink(missing_ok=True)  # a proposal of an earlier assessment goes with it
         # What the job resume prints NOW: the new selection when it was written, else the stored resume as it is.
         conflicts = getattr(settled, "conflicts", ()) if settled is not None and proposed is None else ()
-        check = check_selection(rows, printed_ids(stored.result) if stored is not None else (), conflicts=conflicts) if stored is not None else None  # type: ignore[attr-defined]
+        check = (
+            check_selection(rows, printed_ids(stored.result), entries=shown_entry_ids(stored.result), conflicts=conflicts)  # type: ignore[attr-defined]
+            if stored is not None else None
+        )
         if repick and previous is not None:
             if check is not None:
                 record = with_selection(previous, now=now, check=check, selection=selection, proposed=proposed, selection_error=selection_error)
@@ -1155,7 +1223,7 @@ def use_proposed(home_root: Path, target: Path, profile_id: str | None, job_iden
         rows = [RequirementRow(row.id, row.requirement_class, row.status, row.sources) for row in record.requirements]
         printed = printed_ids(response.result)
         taken, conflicts = live_selection(taken, printed)  # type: ignore[assignment]
-        check = check_selection(rows, printed, conflicts=conflicts)
+        check = check_selection(rows, printed, entries=shown_entry_ids(response.result), conflicts=conflicts)
         record = with_selection(record, now=now, check=check, selection=taken, proposed=None)
         save_record(record)
         sibling.unlink(missing_ok=True)
@@ -1229,12 +1297,14 @@ __all__ = [
     "read_record",
     "read_suggestions",
     "record_write_lock",
+    "recheck_stored",
     "recorded_marks",
     "requirement_rows",
     "resolve_suggestion",
     "result_digest",
     "revision_of",
     "save_record",
+    "shown_entry_ids",
     "stale",
     "stale_for",
     "stale_view",

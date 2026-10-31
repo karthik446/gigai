@@ -20,6 +20,7 @@ from gigai.scout.find_jobs.contracts import MatrixStatus, RequirementClass, Requ
 DIGEST = "sha256:" + "a" * 64
 NOW, LATER = "2026-10-05T10:00:00Z", "2026-10-06T09:00:00Z"
 GO, KAFKA, HELM, CLOUD, MONGO, OPEN = (f"req-00000{number}" for number in range(1, 7))
+LEAD, DEGREE, SHIPPED, MIXED = (f"req-0000{number}" for number in range(11, 15))
 
 
 def _row(row_id: str, klass: str, status: str, *sources: str) -> sg.RequirementRow:
@@ -79,6 +80,136 @@ def test_the_resume_is_ready_when_every_mandatory_row_keeps_a_line_and_nothing_c
         {"code": "selection_conflict", "requirement": GO}, {"code": "selection_conflict", "requirement": None},
     ]
     assert sg.check_selection((), ()).ready  # nothing to lose
+
+
+# A stored job resume as the pick writes it: a role with bullets, an earlier role as a heading alone, a school.
+def _ref(line: int, item: str, body: str) -> dict:
+    return {"kind": "resume", "line": line, "text": body, "item_id": item}
+
+
+def _line(item: str, body: str, line: int, **more: object) -> dict:
+    return {"kind": "copy", "text": body, "refs": [_ref(line, item, body)], **more}
+
+
+ENTRY_ROWS = (
+    _row(LEAD, "hard", "met", "r-lead01", "r-lead02"),
+    _row(DEGREE, "askable", "met", "e-school"),
+    _row(SHIPPED, "hard", "met", "p-ship01"),
+    _row(MIXED, "askable", "met", "b-kafka", "p-ship01"),
+)
+SHOWN = {
+    "schema_version": "scout-tailored-resume:1", "header": [],
+    "sections": [
+        {"heading": "summary", "lines": [_line("sum-4c1d2e", "Staff engineer.", 1)]},
+        {"heading": "experience", "entries": [
+            {"heading": [_line("r-lead01", "### Mossbank", 3), {"kind": "copy", "text": "2019 - 2024", "refs": []}], "bullets": [_line("b-go1", "- Built Go services.", 5)]},
+            {"heading": [_line("r-lead02", "### Earlier role", 7)], "bullets": []},
+            {"heading": [{"kind": "copy", "text": "### A role of a resume stored before ids", "refs": []}], "bullets": [_line("b-old", "- Old line.", 9)]},
+        ]},
+        {"heading": "education", "entries": [{"heading": [_line("e-school", "### BSc", 11)], "bullets": []}]},
+    ],
+}
+
+
+def test_a_row_that_cites_a_role_a_project_or_a_school_is_kept_when_the_resume_shows_that_entry() -> None:
+    """COVER-01 (0.1.11.13): the evidence view names roles, projects and schools by their ENTRY ids and the model
+    cites them as sources.  An entry id is never a printed line: the row is kept when the stored resume shows the
+    entry (a role with bullets, an earlier role as a heading alone, a school), lost only when no source is shown."""
+
+    check = sg.check_selection(ENTRY_ROWS, ["b-go1"], entries=["r-lead01", "e-school"])
+    by_id = {row.id: row for row in check.rows}
+    assert (by_id[LEAD].coverage, by_id[LEAD].in_resume) == ("kept", ("r-lead01",))
+    assert (by_id[DEGREE].coverage, by_id[DEGREE].in_resume) == ("kept", ("e-school",))
+    assert (by_id[SHIPPED].coverage, by_id[SHIPPED].in_resume) == ("lost", ())
+    assert (by_id[MIXED].coverage, by_id[MIXED].in_resume) == ("lost", ())
+    assert not check.ready and check.lost() == (SHIPPED, MIXED)
+    assert [reason.to_json() for reason in check.reasons] == [{"code": "lost_mandatory_evidence", "requirement": SHIPPED}, {"code": "lost_mandatory_evidence", "requirement": MIXED}]
+    # The row's record keeps the keys of 0.1.11.12: a stored record loads as before.
+    assert by_id[LEAD].to_json() == {"id": LEAD, "class": "hard", "status": "met", "sources": ["r-lead01", "r-lead02"], "in_resume": ["r-lead01"], "coverage": "kept"}
+    assert sg.CoverageRow.from_json(by_id[LEAD].to_json()) == by_id[LEAD]
+    # A line among the sources still counts on its own, and every shown source is `in_resume`.
+    again = {row.id: row for row in sg.check_selection(ENTRY_ROWS, ["b-kafka"], entries=["r-lead01", "r-lead02", "p-ship01"]).rows}
+    assert (again[MIXED].coverage, again[MIXED].in_resume) == ("kept", ("b-kafka", "p-ship01"))
+    assert (again[LEAD].coverage, again[LEAD].in_resume) == ("kept", ("r-lead01", "r-lead02")) and again[DEGREE].coverage == "lost"
+    # Without the shown entries, the check reads as in 0.1.11.12 (every caller passes them).
+    assert {row.id: row.coverage for row in sg.check_selection(ENTRY_ROWS, ["b-go1"]).rows} == {LEAD: "lost", DEGREE: "lost", SHIPPED: "lost", MIXED: "lost"}
+
+
+def test_the_shown_entries_are_read_from_every_entry_heading_and_the_printed_lines_stay_lines() -> None:
+    from gigai.scout.tailored_resume import TailoredResume
+
+    result = TailoredResume.from_json(SHOWN)
+    assert sg.shown_entry_ids(result) == ("r-lead01", "r-lead02", "e-school")
+    assert sg.printed_ids(result) == ("sum-4c1d2e", "b-go1", "b-old")  # an entry heading is no printed line
+    check = sg.check_selection(ENTRY_ROWS, sg.printed_ids(result), entries=sg.shown_entry_ids(result))
+    assert {row.id: row.coverage for row in check.rows} == {LEAD: "kept", DEGREE: "kept", SHIPPED: "lost", MIXED: "lost"}
+
+
+def test_a_record_of_0_1_11_12_that_lost_an_entry_is_kept_again_by_the_next_check_of_the_stored_resume(tmp_path) -> None:
+    """The hand-back path (``job_actions.after_handback``) re-checks the record against the stored resume: a row
+    0.1.11.12 recorded as lost because its sources are entry ids comes out kept, and the resume is ready."""
+
+    from gigai.scout import job_actions
+    from gigai.scout.tailored_resume import TailoredResume
+
+    from tests.support.scout_profile_fixtures import build_gig_with_resume
+
+    fx = build_gig_with_resume(tmp_path)
+    home_root, target = fx.home_root, fx.target
+    identity = "https://jobs.example.test/entries"
+    path = sg.suggestions_write_path(home_root, target, "profile_1", identity)
+    old_rows = [
+        {"id": LEAD, "class": "hard", "status": "met", "sources": ["r-lead01", "r-lead02"], "in_resume": [], "coverage": "lost"},
+        {"id": DEGREE, "class": "askable", "status": "met", "sources": ["e-school"], "in_resume": [], "coverage": "lost"},
+        {"id": MIXED, "class": "askable", "status": "met", "sources": ["b-kafka", "p-ship01"], "in_resume": [], "coverage": "lost"},
+    ]
+    gate = {"decision": "suggest", "ready": False, "reasons": [{"code": "lost_mandatory_evidence", "requirement": row["id"]} for row in old_rows]}
+    record = _record(
+        job_identity=identity, stored_path=str(path), gate=gate, requirements=tuple(sg.CoverageRow.from_json(row) for row in old_rows), suggested=(),
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sg.save_record(record)
+    response = SimpleNamespace(resume=SimpleNamespace(profile_id="profile_1"), job=SimpleNamespace(job_identity=identity), result=TailoredResume.from_json(SHOWN))
+    answer = job_actions.after_handback(home_root, target, response, now=LATER)
+    assert answer is not None and answer["gate"] == {"decision": "suggest", "ready": False, "reasons": [{"code": "lost_mandatory_evidence", "requirement": MIXED}]}
+    again = sg.read_record(path)
+    assert again is not None and {row.id: (row.coverage, row.in_resume) for row in again.requirements} == {
+        LEAD: ("kept", ("r-lead01", "r-lead02")), DEGREE: ("kept", ("e-school",)), MIXED: ("lost", ()),
+    }
+
+
+def test_reading_a_record_of_0_1_11_12_checks_its_rows_against_the_stored_resume_as_it_is() -> None:
+    """COVER-01 part 2: the page reads the STORED record, so the view re-checks it in memory (``recheck_stored``):
+    rows cited by entries the resume shows come out kept; a row whose entry is absent stays lost with its reason;
+    every other gate reason stays; ``ready`` follows. Nothing is written: the function is pure."""
+
+    from gigai.scout.tailored_resume import TailoredResume
+
+    old_rows = [
+        {"id": LEAD, "class": "hard", "status": "met", "sources": ["r-lead01", "r-lead02"], "in_resume": [], "coverage": "lost"},
+        {"id": DEGREE, "class": "askable", "status": "met", "sources": ["e-school"], "in_resume": [], "coverage": "lost"},
+        {"id": SHIPPED, "class": "hard", "status": "met", "sources": ["p-ship01"], "in_resume": [], "coverage": "lost"},
+        {"id": GO, "class": "askable", "status": "unclear", "sources": [], "in_resume": [], "coverage": None},
+    ]
+    others = [{"code": "question_open", "requirement": GO}, {"code": "answered", "requirement": None}]
+    lost = [{"code": "lost_mandatory_evidence", "requirement": LEAD}, {"code": "lost_mandatory_evidence", "requirement": SHIPPED}]
+    record = {"gate": {"decision": "suggest", "ready": False, "reasons": [others[0], *lost, others[1]]}, "requirements": old_rows, "selection": SELECTION}
+    result = TailoredResume.from_json(SHOWN)
+    rows, gate = sg.recheck_stored(record, result)
+    assert [(row["id"], row["coverage"], row["in_resume"]) for row in rows] == [(LEAD, "kept", ["r-lead01", "r-lead02"]), (DEGREE, "kept", ["e-school"]), (SHIPPED, "lost", []), (GO, None, [])]
+    assert gate == {"decision": "suggest", "ready": False, "reasons": [*others, {"code": "lost_mandatory_evidence", "requirement": SHIPPED}]}
+    # The entry the last row cites is shown too: nothing is lost, and the resume is ready.
+    shown = {**record, "requirements": old_rows[:2] + old_rows[3:]}
+    rows, gate = sg.recheck_stored(shown, result)
+    assert [row["coverage"] for row in rows] == ["kept", "kept", None] and gate == {"decision": "suggest", "ready": True, "reasons": others}
+    # A stored conflict is not checked again: it stays, and keeps the resume not ready.
+    conflicted = {**shown, "gate": {**shown["gate"], "reasons": [{"code": "selection_conflict", "requirement": None}, *lost]}}
+    assert sg.recheck_stored(conflicted, result)[1] == {"decision": "suggest", "ready": False, "reasons": [{"code": "selection_conflict", "requirement": None}]}
+    # Without a selection nothing is ready; without a stored resume or rows the record's own come back as they are.
+    assert sg.recheck_stored({**shown, "selection": None}, result)[1]["ready"] is False
+    assert sg.recheck_stored(record, None) == (old_rows, record["gate"])
+    assert sg.recheck_stored({"gate": record["gate"], "requirements": []}, result) == ([], record["gate"])
+    assert record["gate"]["reasons"] == [others[0], *lost, others[1]] and old_rows[0]["coverage"] == "lost"  # the input is untouched
 
 
 def test_the_page_count_is_never_a_reason_a_stored_page_driven_conflict_leaves_the_resume_ready() -> None:
