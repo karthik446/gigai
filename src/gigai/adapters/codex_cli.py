@@ -12,7 +12,18 @@ from typing import Mapping
 from .capabilities import require_capabilities
 from .cli_probe import CodexLockdown, codex_feature_flags, codex_lockdown, codex_mcp_flags
 from .cli_workspace import cli_workspace
-from .port import InvocationRequest, InvocationResult, ModelInvocationError, NormalizedUsage
+from .port import (
+    TEXT_ONLY_REQUEST_FIELDS,
+    InvocationRequest,
+    InvocationResult,
+    ModelInvocationError,
+    NormalizedUsage,
+    check_json_output,
+    finish_result,
+    start_clock,
+    text_only_prompt,
+    unsupported_settings,
+)
 from .process import run_json_process
 
 
@@ -63,6 +74,10 @@ class CodexCLIAdapter:
 
     executable_name = "codex"
     adapter_name = "codex_cli"
+    adapter_version = "codex_cli:2"
+    #: ``codex exec`` takes no sampling knobs: temperature, top_p, seed and retry_policy are recorded as
+    #: unsupported; messages, logprobs and tools are refused before anything is spawned.
+    request_fields = TEXT_ONLY_REQUEST_FIELDS
 
     def __init__(
         self, *, executable: str | None = None, timeout_seconds: float = 120.0, honours_reasoning_effort: bool = False
@@ -111,7 +126,9 @@ class CodexCLIAdapter:
         return tuple(argv)
 
     def invoke(self, request: InvocationRequest) -> InvocationResult:
+        clock = start_clock()
         require_capabilities(("text",), request.required_capabilities, target_name=request.target_name)
+        unsupported = unsupported_settings(request, self.adapter_name, self.request_fields)
         assert self._executable is not None
         lockdown = codex_lockdown(self._executable)
         with cli_workspace("codex") as directory:
@@ -128,7 +145,7 @@ class CodexCLIAdapter:
             try:
                 output = run_json_process(
                     self.argv(request, directory, lockdown),
-                    prompt=request.prompt,
+                    prompt=text_only_prompt(request),
                     cwd=Path(directory),
                     timeout_seconds=request.timeout_seconds if request.timeout_seconds is not None else self._timeout_seconds,
                 )
@@ -140,13 +157,21 @@ class CodexCLIAdapter:
                     ) from exc
                 raise
         text, model, usage = _parse_codex_jsonl(output.stdout, request.model)
-        return InvocationResult(
+        check_json_output(request, text)
+        result = InvocationResult(
             status="success",
             output_text=text,
             resolved_model=model,
             raw_usage=usage,
             normalized_usage=_normalize_usage(usage),
             cost_status="unavailable",
+        )
+        return finish_result(
+            result,
+            clock=clock,
+            adapter_version=self.adapter_version,
+            request_fields=self.request_fields,
+            unsupported=unsupported,
         )
 
 

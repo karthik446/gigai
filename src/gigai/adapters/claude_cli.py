@@ -11,7 +11,18 @@ from typing import Any, Mapping
 from .capabilities import require_capabilities
 from .cli_probe import require_claude_capabilities
 from .cli_workspace import cli_workspace
-from .port import InvocationRequest, InvocationResult, ModelInvocationError, NormalizedUsage
+from .port import (
+    TEXT_ONLY_REQUEST_FIELDS,
+    InvocationRequest,
+    InvocationResult,
+    ModelInvocationError,
+    NormalizedUsage,
+    check_json_output,
+    finish_result,
+    start_clock,
+    text_only_prompt,
+    unsupported_settings,
+)
 from .process import run_json_process
 
 
@@ -44,6 +55,10 @@ class ClaudeCLIAdapter:
 
     executable_name = "claude"
     adapter_name = "claude_cli"
+    adapter_version = "claude_cli:2"
+    #: ``claude -p`` takes no sampling knobs: temperature, top_p, seed and retry_policy are recorded as
+    #: unsupported; messages, logprobs and tools are refused before anything is spawned.
+    request_fields = TEXT_ONLY_REQUEST_FIELDS
 
     def __init__(
         self,
@@ -91,14 +106,16 @@ class ClaudeCLIAdapter:
         return tuple(argv)
 
     def invoke(self, request: InvocationRequest) -> InvocationResult:
+        clock = start_clock()
         require_capabilities(("text",), request.required_capabilities, target_name=request.target_name)
+        unsupported = unsupported_settings(request, self.adapter_name, self.request_fields)
         assert self._executable is not None
         require_claude_capabilities(self._executable)
         with cli_workspace("claude") as directory:
             try:
                 output = run_json_process(
                     self.argv(request),
-                    prompt=request.prompt,
+                    prompt=text_only_prompt(request),
                     cwd=Path(directory),
                     timeout_seconds=request.timeout_seconds if request.timeout_seconds is not None else self._timeout_seconds,
                     extra_environment_names=(
@@ -117,7 +134,8 @@ class ClaudeCLIAdapter:
                 raise
         # MODELPIN: every mode names the model that answered from ``modelUsage`` (an assessment is stored with it).
         text, model, usage = _parse_claude_json(output.stdout, request.model, model_usage_fallback=True, joined=self._lean)
-        return InvocationResult(
+        check_json_output(request, text)
+        result = InvocationResult(
             status="success",
             output_text=text,
             resolved_model=model,
@@ -125,6 +143,13 @@ class ClaudeCLIAdapter:
             normalized_usage=_normalize_usage(usage),
             cost_status="provider_reported" if usage else "unavailable",
             cost_usd=_reported_cost(output.stdout),
+        )
+        return finish_result(
+            result,
+            clock=clock,
+            adapter_version=self.adapter_version,
+            request_fields=self.request_fields,
+            unsupported=unsupported,
         )
 
 

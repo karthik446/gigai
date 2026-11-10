@@ -22,6 +22,9 @@ from .port import (
     InvocationResult,
     ModelInvocationCancelled,
     ModelInvocationError,
+    finish_result,
+    start_clock,
+    unsupported_settings,
 )
 
 
@@ -129,6 +132,10 @@ class OllamaLocalAdapter:
     """Invoke one explicitly selected model through a numeric-loopback Ollama API."""
 
     name = "ollama_local"
+    adapter_version = "ollama_local:2"
+    #: Sampling knobs go into ``options``, the JSON modes into ``format``, system and earlier turns
+    #: into ``messages``. No retry here (recorded as unsupported); tools and logprobs are refused.
+    request_fields = frozenset({"temperature", "top_p", "seed", "output_mode", "schema", "system", "messages"})
 
     def __init__(
         self,
@@ -189,9 +196,11 @@ class OllamaLocalAdapter:
     def invoke(self, request: InvocationRequest) -> InvocationResult:
         """Run one bounded, non-streaming chat request after identity checks."""
 
+        clock = start_clock()
         require_capabilities(
             ("text",), request.required_capabilities, target_name=request.target_name
         )
+        unsupported = unsupported_settings(request, self.name, self.request_fields)
         if request.model != self.model:
             raise OllamaLocalIdentityError(
                 "invocation model does not match the selected local model"
@@ -209,14 +218,23 @@ class OllamaLocalAdapter:
             runtime_version, digest = self._verify_identity()
             payload = {
                 "model": self.model,
-                "messages": [{"role": "user", "content": request.prompt}],
+                "messages": _chat_messages(request),
                 "stream": False,
                 "think": False,
                 "options": {
                     "num_ctx": self.context_tokens,
                     "num_predict": request.max_output_tokens,
+                    **{
+                        name: getattr(request, name)
+                        for name in ("temperature", "top_p", "seed")
+                        if getattr(request, name) is not None
+                    },
                 },
             }
+            if request.output_mode == "json":
+                payload["format"] = "json"
+            elif request.output_mode == "schema":
+                payload["format"] = dict(request.schema or {})
             response = self._request_json("POST", "/api/chat", payload=payload)
             result = self._result_from_response(
                 response,
@@ -234,7 +252,13 @@ class OllamaLocalAdapter:
                 raise OllamaLocalIdentityError(
                     "local Ollama identity changed during invocation"
                 )
-            return result
+            return finish_result(
+                result,
+                clock=clock,
+                adapter_version=self.adapter_version,
+                request_fields=self.request_fields,
+                unsupported=unsupported,
+            )
         except KeyboardInterrupt as exc:
             raise ModelInvocationCancelled("local Ollama invocation cancelled") from exc
 
@@ -417,6 +441,12 @@ class OllamaLocalAdapter:
             normalized_usage=normalize_usage(usage),
             cost_status="unavailable",
         )
+
+
+def _chat_messages(request: InvocationRequest) -> list[dict[str, str]]:
+    system = [{"role": "system", "content": request.system}] if request.system is not None else []
+    earlier = [{"role": turn["role"], "content": turn["content"]} for turn in request.messages or ()]
+    return [*system, *earlier, {"role": "user", "content": request.prompt}]
 
 
 __all__ = [

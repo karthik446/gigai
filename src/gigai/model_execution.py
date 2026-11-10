@@ -8,7 +8,7 @@ invocation record through the existing G06 journal.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 import json
 import re
@@ -17,7 +17,13 @@ from typing import Any, Mapping
 import uuid
 
 from .adapters.factory import AdapterFactoryError, resolve_model_adapter
-from .adapters.port import InvocationResult, ModelInvocationCancelled, ModelInvocationError
+from .adapters.port import (
+    REQUEST_SETTINGS,
+    InvocationResult,
+    ModelInvocationCancelled,
+    ModelInvocationError,
+    RetryPolicy,
+)
 from .canonical import (
     EntityPrefix,
     canonical_json_bytes,
@@ -43,6 +49,9 @@ _REFERENCE_ID = re.compile(
     r"^ref_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
 CHECK_ORDER_VERSION = "s18-05-1"
+#: Request settings that carry prompt-like text. The G18 seam redacts only ``prompt``, so these stay
+#: out of it: text reaches a model here through the redacted prompt alone.
+_TEXT_SETTINGS = frozenset({"system", "messages", "tools", "tool_choice"})
 DEFAULT_REDACTION_POLICY = "g18-explicit-redaction-1"
 # The descriptor is an additive binding for every host-selected Scout source,
 # including an imported G45 record. It carries only an identity digest; the
@@ -143,12 +152,16 @@ def run_model_invocation(
     budget: InvocationBudget | None = None,
     uuid_factory: Any = uuid.uuid4,
     commit_goal_transition: bool = True,
+    request_settings: Mapping[str, object] | None = None,
 ) -> ModelInvocationExecution:
     """Invoke one configured target after the explicit G18 boundary gate.
 
     ``references`` are caller-owned exact bytes.  Only IDs in
     ``selected_reference_ids`` are decoded and included in the provider input;
     all other bytes remain outside this function's adapter request.
+    ``request_settings`` are the 0.2 sampling/output fields of ``InvocationRequest``
+    (temperature, seed, output_mode, ...): set ones are recorded in ``request.json``
+    and so change ``request_sha256``; unset ones leave both as before.
     """
 
     validate_entity_id(run_id, expected_prefix=EntityPrefix.RUN)
@@ -157,6 +170,12 @@ def run_model_invocation(
         raise ModelExecutionError("invocation role and prompt must be non-empty and NUL-free")
     if not selected_reference_ids:
         raise ModelExecutionError("at least one explicitly selected reference is required")
+    settings = {name: value for name, value in (request_settings or {}).items() if value is not None}
+    unknown = sorted(set(settings) - set(REQUEST_SETTINGS))
+    if unknown:
+        raise ModelExecutionError(f"unknown request settings: {', '.join(unknown)}")
+    if _TEXT_SETTINGS & set(settings):
+        raise ModelExecutionError("request settings that carry text are not accepted; put text in the prompt")
 
     source_descriptors = tuple(policy.selected_source_descriptors)
     if source_descriptors:
@@ -255,6 +274,8 @@ def run_model_invocation(
     }
     if source_descriptors:
         request_payload["selected_source_descriptors"] = [dict(item) for item in source_descriptors]
+    if settings:
+        request_payload["settings"] = _settings_record(settings)
     request_bytes = canonical_json_bytes(request_payload)
     request_path = f"runs/{run_id}/model-invocations/{invocation_id}/request.json"
     request_ref = _artifact_ref(request_path, request_bytes, "application/json")
@@ -277,6 +298,8 @@ def run_model_invocation(
             try:
                 try:
                     request = binding.request(role=role, prompt=provider_input or "")
+                    if settings:
+                        request = replace(request, **settings)
                     result = binding.port.invoke(request)
                 finally:
                     # Local adapters own an HTTP client; this also gives
@@ -327,6 +350,8 @@ def run_model_invocation(
             "output_text": result.output_text,
             "resolved_model": result.resolved_model,
             "raw_usage": _canonical_safe(result.raw_usage),
+            **({"latency_ms": result.latency_ms} if result.latency_ms is not None else {}),
+            **({"adapter_version": result.adapter_version} if result.adapter_version is not None else {}),
         }
         response_bytes = canonical_json_bytes(response_payload)
         response_path = f"runs/{run_id}/model-invocations/{invocation_id}/response.json"
@@ -637,6 +662,23 @@ def _canonical_safe(value: object) -> object:
     if isinstance(value, (list, tuple)):
         return [_canonical_safe(item) for item in value]
     return str(value)
+
+
+def _settings_record(settings: Mapping[str, object]) -> dict[str, object]:
+    """The set request settings as ``request.json`` holds them: floats as text, the schema as its digest."""
+
+    record: dict[str, object] = {}
+    for name in REQUEST_SETTINGS:
+        if name not in settings:
+            continue
+        value = settings[name]
+        if name == "schema":
+            record["schema_sha256"] = canonical_json_digest(_canonical_safe(value))
+        elif isinstance(value, RetryPolicy):
+            record[name] = _canonical_safe(asdict(value))
+        else:
+            record[name] = _canonical_safe(value)
+    return record
 
 
 def _new_id(prefix: EntityPrefix, uuid_factory: Any) -> str:
