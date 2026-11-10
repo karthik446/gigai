@@ -1,0 +1,16 @@
+# Test-only gig (P4s store tests): never opens a store. Never published.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gigai-test-gig-nostoregig"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["click>=8"]
+
+[project.entry-points."gigai.gigs"]
+nostoregig = "gig_nostoregig:nostoregig"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gig_nostoregig"]

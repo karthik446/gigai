@@ -1,0 +1,9 @@
+[gig]
+manifest_format = 1
+name = "nostoregig"
+description = "Test-only gig: never opens a store"
+core = ">=0.2.0a1"
+
+[commands]
+group = "gig_nostoregig:nostoregig"
+provides = ["ping"]

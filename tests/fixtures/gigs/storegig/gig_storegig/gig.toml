@@ -1,0 +1,13 @@
+[gig]
+manifest_format = 1
+name = "storegig"
+description = "Test-only gig: keeps notes in one SQLite store"
+core = ">=0.2.0a1"
+
+[commands]
+group = "gig_storegig:storegig"
+provides = ["open", "migrate", "add"]
+
+[[data.stores]]
+name = "notes"
+engine = "sqlite"

@@ -18,7 +18,7 @@ import os
 import sys
 import tomllib
 from importlib.metadata import EntryPoint, entry_points
-from typing import Any
+from typing import Any, NoReturn
 
 import click
 
@@ -148,7 +148,25 @@ class LazyGig(click.Group):
                 return super().make_context(info_name, args, parent=parent, **extra)
             click.echo(f"gigai {self.name}: cannot load ({exc})", err=True)
             raise click.exceptions.Exit(1) from exc
-        return target.make_context(info_name, args, parent=parent, **extra)
+        context = target.make_context(info_name, args, parent=parent, **extra)
+        # Reached only once the gig's own parse succeeded: `--help`, no-args help and completion build nothing.
+        if self.executable is None and not extra.get("resilient_parsing"):
+            context.obj = self._gig_context()
+        return context
+
+    def _gig_context(self) -> Any:
+        """The ``GigContext`` the gig's commands get as ``ctx.obj``; building it creates the gig folder."""
+
+        import logging
+
+        from ..sdk.context import GigContext
+        from ..setup import default_home_root
+
+        name = self.name or ""
+        try:
+            return GigContext(default_home_root(), name, self.manifest or {}, logging.getLogger(f"gigai.gig.{name}"))
+        except (OSError, ValueError) as exc:
+            _cannot_create_gig_folder(name, exc)
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         target = self._loaded_or_none()
@@ -178,6 +196,13 @@ def _forwarding_command(name: str, executable: str) -> click.Command:
     def forward(args: tuple[str, ...]) -> None:
         import subprocess
 
+        from ..setup import default_home_root
+        from .home import resolve_gig_folder
+
+        try:
+            resolve_gig_folder(default_home_root(), name)  # an executable gig gets its gig folder, not a GigContext
+        except (OSError, ValueError) as exc:
+            _cannot_create_gig_folder(name, exc)
         raise click.exceptions.Exit(subprocess.call([path, *args]))
 
     return click.Command(
@@ -199,7 +224,9 @@ def _describe_description(executable: str) -> str | None:
     if path is None:
         return None
     try:
-        completed = subprocess.run([path, "describe"], capture_output=True, text=True, timeout=10, check=False)
+        completed = subprocess.run(
+            [path, "describe"], capture_output=True, text=True, timeout=10, check=False, shell=False
+        )
         document = json.loads(completed.stdout) if completed.returncode == 0 else None
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
@@ -232,6 +259,11 @@ def _table(manifest: dict[str, Any] | None, key: str) -> dict[str, Any]:
 def _dist_label(entry_point: EntryPoint) -> str:
     dist = entry_point.dist
     return f"{dist.name} {dist.version}" if dist is not None else entry_point.value
+
+
+def _cannot_create_gig_folder(name: str, exc: BaseException) -> NoReturn:
+    click.echo(f"gigai {name}: cannot create its gig folder ({_reason(exc)})", err=True)
+    raise click.exceptions.Exit(1) from exc
 
 
 def _reason(exc: BaseException) -> str:

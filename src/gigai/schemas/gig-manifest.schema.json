@@ -314,7 +314,7 @@
             "type": "string",
             "pattern": "^[A-Za-z0-9_./-]+$"
           },
-          "description": "Created under `<home>/gigs/<name>/data/` at install."
+          "description": "Folder names under the gig folder `<home>/gigs/<name>/`. Nothing is created at install; the gig folder itself is created on the gig's first run."
         },
         "stores": {
           "type": "array",
@@ -336,15 +336,15 @@
                   "dolt",
                   "files"
                 ],
-                "description": "sqlite = core hands the gig an opened connection to `<data>/<file>` with `user_version` migrations; dolt = [C: pending]; files = plain directory."
+                "description": "sqlite = `ctx.store.db(gig, name)` opens the store at `<home>/gigs/<gig>/<name>.sqlite` (created on first open, nothing at install); the gig steps its `user_version` with `gigai.sdk.store.migrate`; dolt = [C: pending]; files = plain directory."
               },
               "file": {
                 "type": "string",
-                "description": "Relative to the gig's data dir."
+                "description": "Not used by core: a sqlite store always lives at `<home>/gigs/<gig>/<name>.sqlite`."
               },
               "migrations": {
                 "type": "string",
-                "description": "Package-relative directory of `NNNN_*.sql` files applied in order by `user_version` at install/update."
+                "description": "Not applied by core at install: the gig applies its migrations at run time, on first open, with `gigai.sdk.store.migrate` (one `user_version` step per transaction)."
               },
               "rebuildable": {
                 "type": "boolean",
