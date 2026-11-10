@@ -145,7 +145,7 @@ def _no_import_item(gig: InstalledGig) -> Result:
     try:
         completed = subprocess.run(
             [sys.executable, "-c", _READ_WITHOUT_IMPORT, gig.name, gig.entry_point.value, package],
-            capture_output=True, text=True, env=_child_env(), timeout=120, check=False,
+            capture_output=True, text=True, env=_child_env(), timeout=120, check=False, shell=False,
         )
         report = json.loads(completed.stdout) if completed.returncode == 0 else None
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
@@ -260,7 +260,7 @@ def _executable_items(name: str, executable: str, manifest: dict[str, Any], resu
         return provides, False
     failures = []
     for argv in ([], *([verb] for verb in provides)):
-        code, _ = _run([path, *argv, "--help"])
+        code, _ = _run(path, *argv, "--help")
         if code != 0:
             failures.append(f"`{executable} {' '.join([*argv, '--help'])}` exited {code}")
     results += [Result(FAIL, "4", failure) for failure in failures]
@@ -270,14 +270,16 @@ def _executable_items(name: str, executable: str, manifest: dict[str, Any], resu
     results += core_listed
     if not core_listed:
         results.append(Result(PASS, "5", "no core verb listed in [commands] provides"))
-    code, output = _run([path, "describe"])
+    code, output = _run(path, "describe")
     results.append(_compare_described(code, output, manifest))
     return provides, True
 
 
-def _run(argv: list[str]) -> tuple[int, str]:
+def _run(path: str, *args: str) -> tuple[int, str]:
     try:
-        completed = subprocess.run(argv, capture_output=True, text=True, timeout=60, check=False)
+        completed = subprocess.run(
+            [path, *args], capture_output=True, text=True, timeout=60, check=False, shell=False
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         return -1, str(exc)
     return completed.returncode, completed.stdout
@@ -373,7 +375,7 @@ def _tests_item(gig: InstalledGig, package_dir: Path | None) -> Result:
     try:
         completed = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "tests"],
-            cwd=project, capture_output=True, text=True, env=_child_env(), timeout=900, check=False,
+            cwd=project, capture_output=True, text=True, env=_child_env(), timeout=900, check=False, shell=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return Result(FAIL, "13", f"pytest in {project} did not finish: {exc}")

@@ -229,7 +229,7 @@ def cli(context: click.Context) -> None:
     if context.invoked_subcommand is None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', "
-            "'approve', 'reject', 'gig', 'proposals', 'status', 'show', 'history', "
+            "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
             "'plan', 'graph-set', 'run-plan', 'run', 'proposal', 'tailor', 'comparison', 'scout-interview', 'scout-transfer', 'scout-documents', 'scout-answer', 'run-details', 'occurrence', 'workpad', 'capability', 'check', 'models', 'invoke', or 'open'; "
             "use --help for details."
         )
