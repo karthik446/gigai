@@ -520,7 +520,13 @@ def _assessment_model_checks(config: GigAIConfig) -> list[DiagnosticCheck]:
     refuses); a model set in the target's configuration is asked as set. ``evaluated_models`` decides the rest.
     """
 
-    from .scout.evaluated_models import ASKED_BY_DEFAULT, RESULTS_PAGE, asked_model, evaluated_for, model_notice
+    from .sdk import hooks
+
+    ASKED_BY_DEFAULT = hooks.get("assessment_asked_by_default")
+    RESULTS_PAGE = hooks.get("assessment_results_page")
+    asked_model = hooks.get("assessment_asked_model")
+    evaluated_for = hooks.get("assessment_evaluated_for")
+    model_notice = hooks.get("assessment_model_notice")
 
     endpoints = {endpoint.name: endpoint.adapter for endpoint in config.endpoints}
     found: list[DiagnosticCheck] = []

@@ -29,9 +29,11 @@ def _normalized_external_ref(data):
     ref = data.get("external_ref") if isinstance(data, dict) else None
     if not isinstance(ref, str) or not ref.lower().startswith(("http://", "https://")):
         return data
-    # Imported here: the posting URL rule is Scout's, and only this command
-    # needs it.
-    from .scout.find_jobs.contracts import normalize_url
+    # Looked up here: the posting URL rule is Scout's (a hook), and only this
+    # command needs it.
+    from .sdk import hooks
+
+    normalize_url = hooks.get("normalize_posting_url")
 
     try:
         normalized = normalize_url(ref)

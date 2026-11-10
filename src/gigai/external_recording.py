@@ -34,13 +34,7 @@ from .journal import (
 )
 from .private_records import _resolved
 from .run import RunError, _resolve_authority, resolve_selected_graph_authority
-from .scout.inputs import (
-    ScoutInputError,
-    assert_single_override_context,
-    resolve_external_input,
-    revalidate_external_input,
-)
-from .scout.tailoring import validate_tailoring_request
+from .sdk import hooks
 from .validators import validate_serialized_contract
 
 
@@ -91,7 +85,7 @@ class ExternalRecordingError(RuntimeError):
 def _fixed_research_validator(**kwargs: object) -> None:
     """Dispatch only to the reviewed packaged research bridge by fixed name."""
     try:
-        from .scout.research import validate_research_domain
+        validate_research_domain = hooks.get("research_domain_validator")
     except ModuleNotFoundError as exc:
         if exc.name != "gigai.scout.research":
             raise
@@ -116,7 +110,7 @@ def _fixed_research_validator(**kwargs: object) -> None:
 def _fixed_research_v3_validator(**kwargs: object) -> None:
     """Dispatch only to the reviewed packaged v3 research bridge."""
     try:
-        from .scout.research_v3 import validate_research_domain
+        validate_research_domain = hooks.get("research_v3_domain_validator")
     except ModuleNotFoundError as exc:
         if exc.name != "gigai.scout.research_v3":
             raise
@@ -139,7 +133,7 @@ def _fixed_research_v3_validator(**kwargs: object) -> None:
 def _fixed_discovery_validator(**kwargs: object) -> None:
     """Dispatch only to the reviewed packaged discovery bridge by fixed name."""
     try:
-        from .scout.discovery import validate_discovery_domain
+        validate_discovery_domain = hooks.get("discovery_domain_validator")
     except ModuleNotFoundError as exc:
         if exc.name != "gigai.scout.discovery":
             raise
@@ -164,7 +158,7 @@ def _fixed_discovery_validator(**kwargs: object) -> None:
 def _fixed_tailoring_validator(**kwargs: object) -> None:
     """Dispatch only to the reviewed packaged tailoring bridge by fixed name."""
     try:
-        from .scout.tailoring import validate_tailoring_domain
+        validate_tailoring_domain = hooks.get("tailoring_domain_validator")
     except ModuleNotFoundError as exc:
         if exc.name != "gigai.scout.tailoring":
             raise
@@ -519,7 +513,7 @@ def _input_ref(
     writer=None,
 ) -> dict[str, object]:
     try:
-        return resolve_external_input(
+        return hooks.get("resolve_external_input")(
             resolved,
             snapshot,
             item,
@@ -528,7 +522,7 @@ def _input_ref(
             allow_discovery_posting=allow_discovery_posting,
             writer=writer,
         )
-    except ScoutInputError as exc:
+    except hooks.get("input_error") as exc:
         raise ExternalRecordingError(
             "external_record_not_found", "selected input is absent, foreign, or changed"
         ) from exc
@@ -545,7 +539,7 @@ def _revalidate_input(
     writer=None,
 ) -> None:
     try:
-        revalidate_external_input(
+        hooks.get("revalidate_external_input")(
             resolved,
             snapshot,
             sealed,
@@ -554,7 +548,7 @@ def _revalidate_input(
             allow_discovery_posting=allow_discovery_posting,
             writer=writer,
         )
-    except ScoutInputError as exc:
+    except hooks.get("input_error") as exc:
         raise ExternalRecordingError(
             "external_input_mismatch", "sealed input changed or is unavailable"
         ) from exc
@@ -860,8 +854,8 @@ def plan(
             for item in typed["input_refs"]
         ]
         try:
-            assert_single_override_context(inputs)
-        except ScoutInputError as exc:
+            hooks.get("assert_single_override_context")(inputs)
+        except hooks.get("input_error") as exc:
             raise ExternalRecordingError(
                 "external_input_mismatch", "native override inputs are not isolated"
             ) from exc
@@ -1525,6 +1519,7 @@ def _seal_tailoring_request(
         seen_run_inputs.add(run_input_id)
         ref = selected.get("snapshot_ref")
         _checked, data = _safe_ref(snapshot, ref, code="external_input_mismatch")
+        validate_tailoring_request = hooks.get("validate_tailoring_request")
         try:
             request = validate_tailoring_request(data)
         except Exception as exc:
@@ -1613,6 +1608,7 @@ def _tailoring_request_bytes(
         raise ExternalRecordingError(
             "external_input_mismatch", "sealed tailoring request snapshot changed"
         )
+    validate_tailoring_request = hooks.get("validate_tailoring_request")
     try:
         validate_tailoring_request(data)
     except Exception as exc:
@@ -1658,13 +1654,13 @@ def _validate_domain_binding(
             "v2 domain binding does not name packaged resources",
         )
     if domain.get("schema_id") == RESEARCH_DOMAIN_SCHEMA_ID:
-        from .scout.research import FIXED_DOMAIN_RESOURCES
+        FIXED_DOMAIN_RESOURCES = hooks.get("research_domain_resources")
     elif domain.get("schema_id") == RESEARCH_V3_DOMAIN_SCHEMA_ID:
-        from .scout.research_v3 import FIXED_DOMAIN_RESOURCES
+        FIXED_DOMAIN_RESOURCES = hooks.get("research_v3_domain_resources")
     elif domain.get("schema_id") == DISCOVERY_DOMAIN_SCHEMA_ID:
-        from .scout.discovery import FIXED_DOMAIN_RESOURCES
+        FIXED_DOMAIN_RESOURCES = hooks.get("discovery_domain_resources")
     elif domain.get("schema_id") == TAILORING_DOMAIN_SCHEMA_ID:
-        from .scout.tailoring import FIXED_DOMAIN_RESOURCES
+        FIXED_DOMAIN_RESOURCES = hooks.get("tailoring_domain_resources")
     else:  # pragma: no cover - specs guard above
         raise ExternalRecordingError(
             "external_domain_validator_unavailable",

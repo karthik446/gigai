@@ -348,7 +348,9 @@ def _publish(*, resolved: ResolvedWorkpad, operation_name: str, operation_key: s
             # This is intentionally resolved by the shared publisher, not by a
             # caller-provided callback.  A direct caller can supply bytes but
             # cannot mint a binding that does not match committed authority.
-            from .scout.tools import revalidate_tool_binding_at_publication
+            from .sdk import hooks
+
+            revalidate_tool_binding_at_publication = hooks.get("revalidate_tool_binding_at_publication")
 
             verified_binding = dict(
                 revalidate_tool_binding_at_publication(

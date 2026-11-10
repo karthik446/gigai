@@ -1,0 +1,16 @@
+# Test-only gig (P3a hook tests): declares one hook in gig_hookgig/gig.toml. Never published.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gigai-test-gig-hookgig"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["click>=8"]
+
+[project.entry-points."gigai.gigs"]
+hookgig = "gig_hookgig:hookgig"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gig_hookgig"]

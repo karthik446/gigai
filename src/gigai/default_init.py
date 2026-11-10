@@ -25,12 +25,7 @@ from .journal import (
 )
 from .package import PackageInitResult, initialize_project_package
 from .private_records import PrivateRecordError, migrate_workpad_layout
-from .scout.materialization import (
-    ScoutMaterializationError,
-    is_scout_candidate,
-    materialize_scout_candidate,
-    repair_prepared_scout_capability_manifest,
-)
+from .sdk import hooks
 from .validators import validate_serialized_contract
 from .project_binding import MissingProjectBindingError, ProjectBindingError, load_project_binding
 from .lifecycle import allocate_gig_id
@@ -44,6 +39,20 @@ from .registry import (
 )
 from .target_binding import TargetInitLock, resolve_target
 from .workpad import provision_workpad
+
+
+# Scout's default-instance material, looked up through hooks at each call. They stay module-level names
+# so that whatever replaces one of them here (a test does) is what the code below calls.
+def is_scout_candidate(entry: CatalogEntry) -> bool:
+    return hooks.get("is_materialization_candidate")(entry)
+
+
+def materialize_scout_candidate(**kwargs):
+    return hooks.get("materialize_candidate")(**kwargs)
+
+
+def repair_prepared_scout_capability_manifest(**kwargs):
+    return hooks.get("repair_prepared_capability_manifest")(**kwargs)
 
 
 class DefaultInitError(RuntimeError):
@@ -755,7 +764,7 @@ def initialize_defaults(
                             inventory_ref=binding_payload["software_inventory"],
                             source_digest=str(authority.source_digest),
                         )
-                    except ScoutMaterializationError as exc:
+                    except hooks.get("materialization_error") as exc:
                         raise DefaultInitError("template_reconciliation_required", str(exc)) from exc
                 instances.append(
                     DefaultInstanceResult(
@@ -825,7 +834,7 @@ def initialize_defaults(
                         uuid_factory=uuid_factory,
                         observer=observer,
                     )
-                except ScoutMaterializationError as exc:
+                except hooks.get("materialization_error") as exc:
                     raise DefaultInitError("template_reconciliation_required", str(exc)) from exc
                 binding = {
                     "schema_version": "2.0",

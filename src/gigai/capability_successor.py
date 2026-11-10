@@ -38,7 +38,7 @@ from .journal import (
     read_committed_artifact,
     run_with_journal_writer,
 )
-from .scout.tools import ScoutToolError, _inventory
+from .sdk import hooks
 from .validators import validate_serialized_contract
 
 
@@ -305,8 +305,8 @@ def _review_authority(
         raise CapabilitySuccessorError("reviewed capability is not passed and available", code="capability_successor_review_invalid")
     source = _source_binding(capability, capability_id)
     try:
-        actual_inventory = _inventory(workpad, capability_id, capability["tool_binding"])
-    except (ScoutToolError, KeyError, TypeError) as exc:
+        actual_inventory = hooks.get("tool_inventory")(workpad, capability_id, capability["tool_binding"])
+    except (hooks.get("tool_error"), KeyError, TypeError) as exc:
         raise CapabilitySuccessorError("reviewed capability source is unavailable", code="capability_successor_source_changed") from exc
     if actual_inventory != source["inventory"] or digest_imported_bytes(canonical_json_bytes(actual_inventory)) != source["inventory_sha256"]:
         raise CapabilitySuccessorError("reviewed capability source changed", code="capability_successor_source_changed")

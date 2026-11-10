@@ -32,7 +32,7 @@ from .journal import (
     JournalTransition,
     run_with_journal_writer,
 )
-from .scout.tools import ScoutToolError, _inventory
+from .sdk import hooks
 from .validators import validate_serialized_contract
 
 
@@ -406,8 +406,8 @@ def review_local_tool(
         if capability.get("security_review", {}).get("status") != "pending":
             raise CapabilityReviewError("parent capability is not pending review", code="capability_review_parent_not_pending")
         try:
-            actual_inventory = _inventory(workpad, capability_id, binding)
-        except ScoutToolError as exc:
+            actual_inventory = hooks.get("tool_inventory")(workpad, capability_id, binding)
+        except hooks.get("tool_error") as exc:
             raise CapabilityReviewError(str(exc), code=f"capability_review_{exc.code}") from exc
         if actual_inventory != inventory or digest_imported_bytes(canonical_json_bytes(actual_inventory)) != binding.get("inventory_sha256"):
             raise CapabilityReviewError("source inventory changed", code="capability_review_source_changed")
@@ -537,8 +537,8 @@ def review_local_tool(
             base_proposal_id,
         )
         try:
-            final_inventory = _inventory(workpad, capability_id, binding)
-        except ScoutToolError as exc:
+            final_inventory = hooks.get("tool_inventory")(workpad, capability_id, binding)
+        except hooks.get("tool_error") as exc:
             raise CapabilityReviewError(str(exc), code="capability_review_source_changed") from exc
         if final_inventory != actual_inventory:
             raise CapabilityReviewError("source inventory changed during review", code="capability_review_source_changed")

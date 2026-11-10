@@ -679,8 +679,9 @@ def record_application(
             snap = writer.snapshot(("records/", "runs/", "run-plans/", "references/", "run-inputs/", "manifests/"))
             resolver = opportunity_reader
             if resolver is None and any(path.startswith("runs/") and "/receipts/" in path for path in snap.artifacts):
-                from .scout.report_readers import opportunity_reader as make_opportunity_reader
-                resolver = make_opportunity_reader(resolved)
+                from .sdk import hooks
+
+                resolver = hooks.get("opportunity_reader")(resolved)
             if resolver is not None:
                 try:
                     validate_application_links(

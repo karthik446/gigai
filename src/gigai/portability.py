@@ -95,7 +95,9 @@ def bind_restored_private(*, restored: Path, home_root: Path, requested_target: 
 
 def read_scout_source_snapshot(*, workpad: Path, project_id: str, gig_id: str, inventory_ref: Mapping[str, object]):
     """Read inert Scout source members from one authenticated journal head."""
-    from .scout.materialization import read_scout_source_snapshot as _read_scout_source_snapshot
+    from .sdk import hooks
+
+    _read_scout_source_snapshot = hooks.get("read_source_snapshot")
 
     return _read_scout_source_snapshot(
         workpad=workpad,

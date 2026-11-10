@@ -1,0 +1,12 @@
+[gig]
+manifest_format = 1
+name = "hookgig"
+description = "Test-only gig: declares a doctor hook"
+core = ">=0.2.0a1"
+
+[commands]
+group = "gig_hookgig:hookgig"
+provides = ["ping"]
+
+[hooks]
+doctor = "gig_hookgig.checks:doctor"

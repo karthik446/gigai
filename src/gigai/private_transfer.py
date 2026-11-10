@@ -28,7 +28,7 @@ from .journal import JournalConflictError, run_with_journal_writer
 from .journal import JournalArtifact, record_transition
 from .private_records import migrate_workpad_layout
 from .project_binding import load_project_binding
-from .scout.template import scout_source_files
+from .sdk import hooks
 from .workpad import provision_workpad, resolve_bound_project
 
 
@@ -300,7 +300,7 @@ def export_definition(*, workpad: Path, destination: Path) -> TransferResult:
     root = workpad.expanduser()
     if root.is_symlink() or not root.is_dir():
         _reject("source_unsafe", "workpad is not a regular directory")
-    bundled = dict(scout_source_files())
+    bundled = dict(hooks.get("definition_source_files")())
     files: dict[str, bytes] = {}
     for relative in sorted(bundled):
         if relative == "definition/scout-source.json":
