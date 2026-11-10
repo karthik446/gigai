@@ -1,0 +1,16 @@
+# Test-only gig (P1 loader tests) whose module raises ImportError on import. Never published.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gigai-test-gig-broken"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.entry-points."gigai.gigs"]
+broken = "gig_broken:broken"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gig_broken"]

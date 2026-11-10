@@ -1,0 +1,10 @@
+[gig]
+manifest_format = 1
+name = "broken"
+description = "Test-only gig whose import fails"
+core = ">=0.2.0a1"
+workpad = false
+
+[commands]
+group = "gig_broken:broken"
+provides = []

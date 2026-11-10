@@ -1,0 +1,10 @@
+[gig]
+manifest_format = 1
+name = "hello"
+description = "Test-only gig: says hello"
+core = ">=0.2.0a1"
+workpad = false
+
+[commands]
+group = "gig_hello:hello"
+provides = ["greet"]

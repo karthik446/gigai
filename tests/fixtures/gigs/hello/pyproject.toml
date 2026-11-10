@@ -1,0 +1,17 @@
+# Test-only gig (P1 loader tests), adapted from research/gigai-framework/B/toy/gig_hello. Never published.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gigai-test-gig-hello"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["click>=8"]
+
+# `gigai hello ...`: core reads gig_hello/gig.toml from this dist and imports gig_hello only on use.
+[project.entry-points."gigai.gigs"]
+hello = "gig_hello:hello"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gig_hello"]

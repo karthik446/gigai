@@ -4345,3 +4345,7 @@ cli.add_command(agent_permissions_command)
 # Registering this independently named group as "record" would silently replace
 # the existing Click group and break its accepted command surface.
 record_group.add_command(native_record_group, name="native")
+# Installed gigs (`gigai.gigs` entry points) mount last, so a gig named like a core verb is skipped: core wins.
+# Each mount is lazy: no gig module is imported until `gigai <gig> ...` runs.
+from .gigs.loader import mount_gigs  # noqa: E402 - the gigs mount after every core verb is registered
+mount_gigs(cli)
