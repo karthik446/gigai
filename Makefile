@@ -6,7 +6,7 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-macos-smoke test-operator-home test-operator-writes test-core-flow test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests test-changed api-e2e eval-live learning-link-check lint
+.PHONY: test test-macos-smoke test-operator-home test-operator-writes test-core-flow test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests test-changed api-e2e fixture-home compat-sweep eval-live learning-link-check lint
 
 # 0110-10-08: names the package uses and never defines. 0.1.10.9 shipped `time.monotonic()` in a module with no
 # `import time`, on a line only a large store reaches: no test ran it, and nothing read the code for it. Every PR
@@ -38,6 +38,18 @@ test: test-source test-behavior test-wheel
 # coordinator's plan.
 api-e2e:
 	$(UV) run --locked --extra test pytest tests/api_e2e -q
+
+# H1: the 0.1.11.13 baseline fixture home (tests/fixtures/homes/0.1.11.13.{tar.zst,counts}), built by the
+# RELEASED 0.1.11.13 via uvx in a scratch HOME (never ~/.gigai), and the compatibility sweep (PLAN §1.1): every
+# commands.yaml entry's --help on OLD and NEW, then the journeys on NEW against that home. Allow-list:
+# tools/compat_sweep.allow.
+OLD ?= uvx --from gigai==0.1.11.13 gigai
+NEW ?= $(UV) run --locked gigai
+fixture-home:
+	h=$$(mktemp -d "$${TMPDIR:-/tmp}/gigai-fixture-home.XXXXXX") && HOME="$$h" bash tools/build_fixture_home.sh && rm -rf "$$h"
+
+compat-sweep:
+	bash tools/compat_sweep.sh "$(OLD)" "$(NEW)" tests/fixtures/homes/0.1.11.13.tar.zst
 
 # Fast inner-loop lane: only tests tests/conftest.py's AST classifier marks
 # fast_unit (no filesystem, process, network, or mutable-workpad seam,
