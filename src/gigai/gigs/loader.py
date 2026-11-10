@@ -10,6 +10,9 @@ rendered). A gig that fails to load answers ``gigai <gig>: cannot load (<error>)
 ``[commands] executable`` (without ``group``) gigs run out of process: ``gigai <gig> ARGS`` forwards ARGS to
 that executable, and when ``gig.toml`` carries no description, ``<executable> describe`` (the manifest as
 JSON) supplies it. No schema validation beyond the TOML parse happens here.
+
+A gig whose manifest says ``[server] mode = "process"`` (and whose commands are a Click group) also gets core's ``run``,
+``stop`` and ``status`` (``gigai.sdk.process``, the supervisor); a command of the same name in the gig's own group wins.
 """
 
 from __future__ import annotations
@@ -130,6 +133,8 @@ class LazyGig(click.Group):
                 raise GigLoadError(_reason(exc)) from exc
             if not isinstance(target, click.Command):
                 raise GigLoadError(f"{self.entry_point.value} is not a Click command")
+            if executable is None and isinstance(target, click.Group) and _process_server(self.manifest):
+                target = _with_server_verbs(target, self)
             self._target = target
         return self._target
 
@@ -212,6 +217,119 @@ def _forwarding_command(name: str, executable: str) -> click.Command:
         context_settings={"ignore_unknown_options": True, "allow_interspersed_args": False},
         add_help_option=False,
     )
+
+
+def _process_server(manifest: dict[str, Any] | None) -> bool:
+    from ..sdk.process import is_process_server
+
+    return is_process_server(manifest)
+
+
+def _with_server_verbs(group: click.Group, gig: LazyGig) -> click.Group:
+    """A copy of ``group`` that falls back to core's ``run``/``stop``/``status``; the gig's group object is not changed."""
+
+    import copy
+
+    verbs = _server_verbs(gig)
+
+    class ProcessGig(type(group)):  # type: ignore[misc] - the gig's own Group class, so its lookup stays first
+        def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+            command = super().get_command(ctx, cmd_name)
+            return command if command is not None else verbs.get(cmd_name)
+
+        def list_commands(self, ctx: click.Context) -> list[str]:
+            own = super().list_commands(ctx)
+            return [*own, *sorted(set(verbs) - set(own))]
+
+    wrapped = copy.copy(group)
+    wrapped.__class__ = ProcessGig
+    return wrapped
+
+
+def _server_verbs(gig: LazyGig) -> dict[str, click.Command]:
+    """Core's ``run``/``stop``/``status`` for a process-mode gig (``gigai.sdk.process``); ``ctx.obj`` is its ``GigContext``."""
+
+    name = gig.name or ""
+
+    def spec_and_home() -> tuple[Any, Any]:
+        from ..sdk.process import ProcessServerError, ServerSpec
+
+        context = click.get_current_context().obj
+        dist = gig.entry_point.dist
+        try:
+            return ServerSpec.from_manifest(name, context.manifest, dist.version if dist is not None else "unknown"), context.home
+        except (ProcessServerError, ValueError) as exc:
+            _server_failed(name, exc)
+
+    def echo_server(status: Any, label: str) -> None:
+        state = status.state
+        click.echo(f"{label}: pid {state.pid}, port {state.port}, health {status.health}, version {state.version}")
+        click.echo(f"url: http://127.0.0.1:{state.port}/")
+
+    def echo_restart(status: Any) -> None:
+        if status.restarted_from is not None:
+            click.echo(f"restarted: version {status.restarted_from} -> {status.state.version}")
+
+    @click.command("run")
+    def run() -> None:
+        """Start this gig's server on 127.0.0.1 and wait until it is healthy."""
+
+        from ..sdk import process
+
+        spec, home = spec_and_home()
+        try:
+            status = process.start(home, spec)
+        except (process.ProcessServerError, OSError, ValueError) as exc:
+            _server_failed(name, exc)
+        echo_restart(status)
+        echo_server(status, "already running" if status.reused else "running")
+
+    @click.command("status")
+    @click.option("--json", "as_json", is_flag=True, help="Print the status as one JSON object.")
+    def status(as_json: bool) -> None:
+        """Show this gig's server: pid, port, health, version."""
+
+        import json
+
+        from ..sdk import process
+
+        spec, home = spec_and_home()
+        try:
+            result = process.status(home, spec)
+        except (process.ProcessServerError, OSError, ValueError) as exc:
+            _server_failed(name, exc)
+        if as_json:
+            click.echo(json.dumps(result.to_json(), indent=2, sort_keys=True))
+        elif result.state is None:
+            click.echo("stopped (removed a stale state file)" if result.cleaned_stale else "stopped")
+        else:
+            echo_restart(result)
+            echo_server(result, "running")
+
+    @click.command("stop")
+    def stop() -> None:
+        """Stop this gig's server and every process it started."""
+
+        from ..sdk import process
+
+        home = click.get_current_context().obj.home
+        try:
+            result = process.stop(home, name)
+        except (OSError, ValueError) as exc:
+            _server_failed(name, exc)
+        if result.stopped is not None:
+            click.echo(f"stopped: pid {result.stopped.pid}")
+        else:
+            click.echo("not running (removed a stale state file)" if result.cleaned_stale else "not running")
+
+    return {"run": run, "status": status, "stop": stop}
+
+
+def _server_failed(name: str, exc: BaseException) -> NoReturn:
+    from ..sdk.process import ProcessServerError
+
+    click.echo(f"gigai {name}: {exc if isinstance(exc, ProcessServerError) else _reason(exc)}", err=True)
+    raise click.exceptions.Exit(1) from exc
 
 
 def _describe_description(executable: str) -> str | None:

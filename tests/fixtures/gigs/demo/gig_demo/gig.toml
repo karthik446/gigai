@@ -1,0 +1,15 @@
+[gig]
+manifest_format = 1
+name = "demo"
+description = "Test-only gig: a tiny HTTP server core supervises"
+core = ">=0.2.0a1"
+
+[commands]
+group = "gig_demo:demo"
+provides = ["hello"]
+
+[server]
+mode = "process"
+start = ["python", "-m", "gig_demo.server", "--port", "{port}", "--data", "{data}"]
+health = "/health"
+mount_path = "/gigs/demo/"
