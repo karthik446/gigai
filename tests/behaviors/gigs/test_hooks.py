@@ -178,9 +178,8 @@ def test_the_bridge_imports_scout_only_when_a_hook_is_asked_for():
 def test_the_ten_core_modules_no_longer_import_scout_at_import_time():
     """Every import statement executed while the ten modules load, attributed to the module that ran it.
 
-    `gigai.scout` still ends up in `sys.modules`: `external_recording` imports `gigai.run`, and `gigai.run`
-    imports `gigai.scout.find_jobs.contracts` (P3b's part). The claim tested is that the ten files cause no
-    Scout import themselves.
+    `external_recording` imports `gigai.run`; since P3b `gigai.run` imports no Scout module either (see the
+    gigai.run tests below). The claim tested here is that the ten files cause no Scout import themselves.
     """
 
     code = f"""
@@ -210,21 +209,88 @@ print(json.dumps(seen))
     assert ["control", "gigai.scout"] in seen
 
 
+def _scout_import_statements(module: str) -> list[str]:
+    """`file:line` of every Scout import statement in `module`'s source, function bodies included."""
+
+    path = SRC / f"{module.removeprefix('gigai.')}.py"
+    found = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            base = "gigai." * bool(node.level) + (node.module or "")
+            names = [base, *(f"{base.rstrip('.')}.{alias.name}" for alias in node.names)]
+        else:
+            continue
+        if any(name == "gigai.scout" or name.startswith("gigai.scout.") for name in names):
+            found.append(f"{path.name}:{node.lineno}")
+    return found
+
+
 def test_the_ten_core_modules_have_no_scout_import_statement_anywhere():
     """Also the imports inside functions, which run only on use."""
 
-    found = []
-    for module in CORE_MODULES:
-        path = SRC / f"{module.removeprefix('gigai.')}.py"
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                base = "gigai." * bool(node.level) + (node.module or "")
-                names = [base, *(f"{base.rstrip('.')}.{alias.name}" for alias in node.names)]
-            else:
-                continue
-            if any(name == "gigai.scout" or name.startswith("gigai.scout.") for name in names):
-                found.append(f"{path.name}:{node.lineno}")
+    assert [line for module in CORE_MODULES for line in _scout_import_statements(module)] == []
 
-    assert found == []
+
+# P3b: gigai.run reaches Scout's find-jobs contract and its proposal/interview/Tailor services the same way.
+
+
+def _is_hook_get(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "hooks"
+    )
+
+
+def test_gigai_run_has_no_scout_import_statement_anywhere():
+    """The eager contract import and the lazy imports inside the seven Run functions are all gone."""
+
+    assert _scout_import_statements("gigai.run") == []
+
+
+def test_every_hook_gigai_run_asks_for_is_the_bridge_row_of_the_same_scout_name():
+    """`Name = hooks.get("row")` in run.py binds exactly the Scout object `Name` the old import statement bound."""
+
+    path = SRC / "run.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    calls = [node for node in ast.walk(tree) if _is_hook_get(node)]
+    assigned: dict[str, set[str]] = {}
+    count = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and _is_hook_get(node.value):
+            (target,) = node.targets
+            (row,) = node.value.args
+            assigned.setdefault(row.value, set()).add(target.id)
+            count += 1
+
+    assert calls and count == len(calls), "every hook run.py asks for is bound to a local name"
+    assert set(assigned) <= set(hooks._BRIDGE), sorted(set(assigned) - set(hooks._BRIDGE))
+    for row, names in assigned.items():
+        assert names == {hooks._BRIDGE[row].partition(":")[2]}, row
+    # The 14 import statements named 40 Scout objects, 38 distinct: the 21 contract names of the eager import, plus
+    # 17 from the 13 lazy ones (both Run publishers imported `_committed_run_bytes` and `_validate_active_goal_bytes`).
+    assert len(assigned) == 38
+
+
+def test_importing_gigai_run_loads_no_scout_module():
+    """Before P3b `import gigai.run` loaded `gigai.scout.find_jobs.contracts` (and so did the ten modules, via
+    `external_recording`); now neither loads a `gigai.scout` module until a Run function asks for a hook."""
+
+    result = _python(
+        "import importlib, json, sys\n"
+        "scout = lambda: sorted(m for m in sys.modules if m == 'gigai.scout' or m.startswith('gigai.scout.'))\n"
+        "import gigai.run\n"
+        "alone = scout()\n"
+        f"for module in {list(CORE_MODULES)!r}:\n"
+        "    importlib.import_module(module)\n"
+        "with_ten = scout()\n"
+        "status = gigai.run._terminal_status({'g': {'status': 'complete'}})\n"
+        "print(json.dumps([alone, with_ten, 'gigai.scout.find_jobs.contracts' in sys.modules]))\n"
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [[], [], True]

@@ -53,29 +53,7 @@ from .graph_set import (
     validate_selection_record,
 )
 from .graph_node_registry import lookup as lookup_graph_node
-from .scout.find_jobs.contracts import (
-    ASSESS_LOCAL_EFFECTS,
-    AcquireInput,
-    AcquireOutput,
-    ArtifactRef,
-    AssessInput,
-    FindJobsConfig,
-    FindJobsRunInput,
-    GoalError,
-    ModelTarget,
-    NodeContext,
-    NodeFailure,
-    NodeReceipt,
-    NodeStatus,
-    PresentInput,
-    Producer,
-    PinnedResume,
-    ProfileRef,
-    RunRequest,
-    SelectionReasonCode,
-    UsageBlock,
-    aggregate_status,
-)
+from .sdk import hooks
 from .workpad import ResolvedWorkpad, resolve_workpad, workpad_head_without_git
 
 
@@ -158,10 +136,10 @@ class InterviewRunRequest:
 class _FindJobsRunExecution:
     """Validated find-jobs inputs handed to the common Run sealing path."""
 
-    request: RunRequest
-    config: FindJobsConfig
+    request: RunRequest  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
+    config: FindJobsConfig  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
     config_bytes: bytes
-    pinned_resume: PinnedResume
+    pinned_resume: PinnedResume  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
     input_bytes: bytes
 
 
@@ -177,7 +155,7 @@ class ResumeDetails:
     fields, never part of the sealed run input.
     """
 
-    pinned: PinnedResume
+    pinned: PinnedResume  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
     label: str | None
     created_at: str | None
 
@@ -232,7 +210,8 @@ def resolve_newest_resume_details(
     """
 
     from . import private_records
-    from .scout.inputs import _record_revision
+    _record_revision = hooks.get("resume_record_revision")
+    PinnedResume = hooks.get("find_jobs_pinned_resume")
 
     try:
         resolved = resolve_workpad(
@@ -372,7 +351,7 @@ def resolve_newest_resume_details(
 
 def resolve_newest_resume(
     home_root: Path, target: Path | None
-) -> PinnedResume:
+) -> PinnedResume:  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
     """Resolve the newest committed ``resume`` record and exact revision."""
 
     return resolve_newest_resume_details(home_root, target).pinned
@@ -380,7 +359,7 @@ def resolve_newest_resume(
 
 def resolve_profile_resume(
     resolved: ResolvedWorkpad, record_id: str, revision_id: str, *, home_root: Path, target: Path | None
-) -> PinnedResume:
+) -> PinnedResume:  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
     """Pin the EXACT resume revision a caller already resolved (S25 F1-b).
 
     Unlike ``resolve_newest_resume_details``, this never re-derives
@@ -399,6 +378,7 @@ def resolve_profile_resume(
     """
 
     from . import private_records
+    PinnedResume = hooks.get("find_jobs_pinned_resume")
 
     try:
         selected = private_records.read_record(
@@ -708,7 +688,7 @@ def launch_run(
                 parent_handoff_id=started.handoff_id,
             )
             try:
-                from .scout.proposal_execution import execute_local_proposal
+                execute_local_proposal = hooks.get("execute_local_proposal")
 
                 proposal_result = execute_local_proposal(
                     resolved=resolved,
@@ -734,7 +714,7 @@ def launch_run(
                     # the exact sealed selectors/configuration are in scope.
                     # This association is separate from Tailor and is never
                     # derived from model-returned lineage.
-                    from .scout.proposal_records import record_proposal_revision
+                    record_proposal_revision = hooks.get("record_proposal_revision")
 
                     target = resolve_model_target(
                         proposal_config, str(sealed_proposal_request["model_target"])
@@ -1065,7 +1045,7 @@ def launch_find_jobs_run(
     *,
     home_root: Path,
     target: Path | None,
-    run_request: RunRequest,
+    run_request: RunRequest,  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
     config_bytes: bytes,
     ui_loopback_verified: bool,
     profile_ref: Mapping[str, object] | None = None,
@@ -1082,7 +1062,7 @@ def launch_find_jobs_run(
     S25 F1-b: ``profile_ref``/``pinned_resume_ref`` are additive, plain-value,
     keyword-only parameters -- CORE STAYS PROFILE-UNAWARE, this module never
     imports ``gigai.scout.profile_records`` or anything else from ``scout``
-    beyond the existing data-contract import above. The ONLY caller that
+    (the data contract is reached through ``gigai.sdk.hooks``). The ONLY caller that
     resolves a profile is Scout's own ``ScoutFindJobsBackend.start_run``
     (``scout/find_jobs/api/server.py``), which passes plain mappings here.
     When both are given (a profile-aware caller): ``pinned_resume_ref``
@@ -1095,6 +1075,10 @@ def launch_find_jobs_run(
     so an old caller's digest is unaffected.
     """
 
+    RunRequest = hooks.get("find_jobs_run_request")
+    FindJobsConfig = hooks.get("find_jobs_config")
+    ProfileRef = hooks.get("find_jobs_profile_ref")
+    FindJobsRunInput = hooks.get("find_jobs_run_input")
     if not isinstance(run_request, RunRequest):
         raise RunError("find_jobs_run_input_invalid: run_request is not a RunRequest")
     if type(config_bytes) is not bytes:
@@ -1587,7 +1571,7 @@ def _execute_interview_run(
         graph=graph, manifest_digest=manifest_digest, parent_handoff_id=started.handoff_id,
     )
     try:
-        from .scout.interview_records import prepare_interview
+        prepare_interview = hooks.get("prepare_interview")
         result = prepare_interview(
             home_root=home_root,
             requested_target=requested_target,
@@ -1649,7 +1633,8 @@ def _publish_interview_result(
             (JournalArtifact(result_path, result_data), JournalArtifact(f"runs/{run_id}/run-details.json", details_data)),
             _goal_front_matter(gig_version, run_id, next(item for item in graph["goals"] if item.get("goal_id") == goal_id), digest_imported_bytes(graph_bytes), manifest_digest, parent_handoff_id, "COMPLETE", [evidence]),
         ), allow_artifact_replacement=True)
-    from .scout.proposal_execution import _committed_run_bytes, _validate_active_goal_bytes
+    _committed_run_bytes = hooks.get("committed_run_bytes")
+    _validate_active_goal_bytes = hooks.get("validate_active_goal_bytes")
     return run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=operation)
 
 
@@ -1669,12 +1654,16 @@ def _execute_tailor_run(
     started_goal = _mark_proposal_goal_started(resolved=resolved, run_id=run_id, gig_version=authority["version"], graph=graph, manifest_digest=manifest_digest, parent_handoff_id=started.handoff_id)
     holder: dict[str, object] = {}
     try:
-        from .scout.proposal_execution import _resolve_sources
-        from .scout.tailor_selection import TailorAnswer, TailorProposal, TailorSelection, TailorSource, build_tailoring_request
-        from .scout.tailor_execution import execute_tailor
-        from .scout.document_records import record_document_revision
-        from .scout.documents import prepare_document_revision
-        from .scout.tailoring import decode_tailoring_bundle
+        _resolve_sources = hooks.get("resolve_proposal_sources")
+        TailorAnswer = hooks.get("tailor_answer")
+        TailorProposal = hooks.get("tailor_proposal")
+        TailorSelection = hooks.get("tailor_selection")
+        TailorSource = hooks.get("tailor_source")
+        build_tailoring_request = hooks.get("build_tailoring_request")
+        execute_tailor = hooks.get("execute_tailor")
+        record_document_revision = hooks.get("record_document_revision")
+        prepare_document_revision = hooks.get("prepare_document_revision")
+        decode_tailoring_bundle = hooks.get("decode_tailoring_bundle")
         from .adapters.port import InvocationResult
 
         private_selectors = tuple(dict(item) for item in sealed.get("private_selectors", []))
@@ -1790,7 +1779,7 @@ def _execute_tailor_run(
 
 
 def _tailor_saved_proposal(resolved: ResolvedWorkpad, selector: Mapping[str, object]) -> dict[str, object]:
-    from .scout.tailor_selection import hydrate_saved_proposal
+    hydrate_saved_proposal = hooks.get("hydrate_saved_proposal")
     proposal = hydrate_saved_proposal(resolved=resolved, record_id=str(selector["record_id"]), revision_id=str(selector["revision_id"]))
     return {"record_id": proposal.record_id, "revision_id": proposal.revision_id, "content": proposal.content, "content_sha256": proposal.content_sha256, "identity": proposal.identity}
 
@@ -1803,7 +1792,8 @@ def _publish_tailor_invocation_attempt(resolved: ResolvedWorkpad, run_id: str, g
 
 
 def _publish_tailor_result(*, resolved: ResolvedWorkpad, run_id: str, goal_id: str, graph: Mapping[str, object], gig_version: int, manifest_digest: str, result: Mapping[str, object], parent_handoff_id: str, uuid_factory: Callable[[], uuid.UUID]) -> JournalEntry:
-    from .scout.proposal_execution import _committed_run_bytes, _validate_active_goal_bytes
+    _committed_run_bytes = hooks.get("committed_run_bytes")
+    _validate_active_goal_bytes = hooks.get("validate_active_goal_bytes")
     result_data = canonical_json_bytes(dict(result))
     result_path = f"runs/{run_id}/scout-tailor/result.json"
     def operation(writer: JournalWriter) -> JournalEntry:
@@ -2664,6 +2654,8 @@ def _prepare_records(
     operation_request_kind: str = "proposal",
     find_jobs_execution: _FindJobsRunExecution | None = None,
 ) -> dict[str, bytes]:
+    ModelTarget = hooks.get("find_jobs_model_target")
+    ASSESS_LOCAL_EFFECTS = hooks.get("find_jobs_assess_local_effects")
     run_dir = f"runs/{run_id}"
     goals = [item for item in graph["goals"] if isinstance(item, dict)]
     graph_bytes = canonical_json_bytes(graph)
@@ -3798,6 +3790,7 @@ def _execute_deterministic(
     manifest_digest: str,
 ) -> JournalEntry:
     """Run the sealed graph with one deterministic Goal at a time."""
+    NodeStatus = hooks.get("find_jobs_node_status")
     run_dir = resolved.path / "runs" / run_id
     details_path = run_dir / "run-details.json"
     details = parse_json_bytes(details_path.read_bytes())
@@ -4053,7 +4046,8 @@ def _node_receipt_exists(
 
 def _read_registered_receipt(
     resolved: ResolvedWorkpad, run_id: str, goal: Mapping[str, object]
-) -> tuple[NodeReceipt, dict[str, object]]:
+) -> tuple[NodeReceipt, dict[str, object]]:  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
+    NodeReceipt = hooks.get("find_jobs_node_receipt")
     _output_path, receipt_path = _registered_node_paths(resolved, run_id, goal)
     if receipt_path.is_symlink() or not receipt_path.is_file():
         raise RunError("registered node receipt is unavailable")
@@ -4116,6 +4110,8 @@ def _effective_goal_effects(
 ) -> frozenset[str]:
     """Return the effects admitted for this invocation of one Goal."""
 
+    ModelTarget = hooks.get("find_jobs_model_target")
+    ASSESS_LOCAL_EFFECTS = hooks.get("find_jobs_assess_local_effects")
     effects = goal.get("effects", ())
     if not isinstance(effects, (list, tuple, set, frozenset)):
         raise _PreScheduleFailure("Goal effect set is malformed")
@@ -4206,6 +4202,7 @@ def _ready_goals(
 
 
 def _terminal_status(details: dict[str, dict[str, object]]) -> str:
+    aggregate_status = hooks.get("find_jobs_aggregate_status")
     return aggregate_status(item.get("status", "pending") for item in details.values())
 
 
@@ -4271,7 +4268,8 @@ def _read_find_jobs_run_input(
     return payload
 
 
-def _node_model_target(run_input: Mapping[str, object] | None) -> ModelTarget:
+def _node_model_target(run_input: Mapping[str, object] | None) -> ModelTarget:  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
+    ModelTarget = hooks.get("find_jobs_model_target")
     value = run_input.get("model_target") if run_input is not None else None
     try:
         return ModelTarget(str(value))
@@ -4288,7 +4286,8 @@ def _build_node_context(
     target_before: Mapping[str, object],
     manifest_digest: str,
     run_input: Mapping[str, object] | None,
-) -> NodeContext:
+) -> NodeContext:  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
+    NodeContext = hooks.get("find_jobs_node_context")
     graph_id = graph.get("graph_id")
     graph_version = graph.get("graph_version")
     goal_slug = goal.get("slug")
@@ -4338,6 +4337,13 @@ def _sealed_node_input(
     from the prior sealed node output and the immutable Run input.
     """
 
+    AcquireInput = hooks.get("find_jobs_acquire_input")
+    AcquireOutput = hooks.get("find_jobs_acquire_output")
+    AssessInput = hooks.get("find_jobs_assess_input")
+    PresentInput = hooks.get("find_jobs_present_input")
+    PinnedResume = hooks.get("find_jobs_pinned_resume")
+    SelectionReasonCode = hooks.get("find_jobs_selection_reason_code")
+    NodeReceipt = hooks.get("find_jobs_node_receipt")
     slug = goal.get("slug")
     explicit = goal.get("input")
     if isinstance(explicit, Mapping):
@@ -4441,8 +4447,9 @@ def _node_output_bytes(output: object) -> bytes:
 
 
 def _registered_producer(
-    binding: object, context: NodeContext
-) -> Producer:
+    binding: object, context: NodeContext  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
+) -> Producer:  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
+    Producer = hooks.get("find_jobs_producer")
     capability = getattr(binding, "capability", None)
     if not isinstance(capability, str) or not capability:
         raise RunError("registered node capability is invalid")
@@ -4505,11 +4512,15 @@ def _write_registered_failure_receipt(
     resolved: ResolvedWorkpad,
     run_id: str,
     goal: Mapping[str, object],
-    context: NodeContext,
+    context: NodeContext,  # noqa: F821 - Scout contract type; annotation only, runtime uses gigai.sdk.hooks
     binding: object,
     started_at: str,
     exc: BaseException | None = None,
 ) -> None:
+    NodeReceipt = hooks.get("find_jobs_node_receipt")
+    NodeStatus = hooks.get("find_jobs_node_status")
+    GoalError = hooks.get("find_jobs_goal_error")
+    NodeFailure = hooks.get("find_jobs_node_failure")
     _output_path, receipt_path = _registered_node_paths(resolved, run_id, goal)
     message = _redacted_failure_message(exc) if exc is not None else "registered node execution failed"
     receipt = NodeReceipt(
@@ -4546,6 +4557,11 @@ def _execute_goal(
 ) -> dict[str, object]:
     """Execute one Goal, dispatching only an explicitly registered binding."""
 
+    UsageBlock = hooks.get("find_jobs_usage_block")
+    Producer = hooks.get("find_jobs_producer")
+    NodeReceipt = hooks.get("find_jobs_node_receipt")
+    NodeStatus = hooks.get("find_jobs_node_status")
+    ArtifactRef = hooks.get("find_jobs_artifact_ref")
     if goal is None or graph is None:
         run_dir = resolved.path / "runs" / run_id
         evidence_path = run_dir / "evidence" / f"{goal_id}.txt"
