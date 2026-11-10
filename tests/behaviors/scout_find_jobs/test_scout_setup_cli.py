@@ -1,4 +1,4 @@
-"""``gigai scout install`` / ``gigai scout resume add`` / ``gigai gig use``.
+"""``gigai scout install`` / ``gigai scout resume add`` / ``gigai workpad use``.
 
 Covers U6 (install Scout with no Python helper), U14 (activate Scout with no
 manual TOML edit), and U15 (a one-step resume + record wrapper), all through
@@ -106,7 +106,7 @@ def test_scout_install_binds_approves_and_activates_from_a_clean_project(
     assert payload["changed"] is True
     gig_id = payload["gig_id"]
 
-    gigs_result = runner.invoke(cli, ["gigs", "--home", str(home), "--target", str(target), "--json"])
+    gigs_result = runner.invoke(cli, ["workpad", "list", "--home", str(home), "--target", str(target), "--json"])
     assert gigs_result.exit_code == 0, gigs_result.output
     gigs_payload = json.loads(gigs_result.output)
     entry = next(item for item in gigs_payload["entries"] if item["gig_id"] == gig_id)
@@ -160,7 +160,7 @@ def test_gig_use_errors_for_an_unknown_gig_and_names_the_fix(tmp_path: Path) -> 
 
     result = runner.invoke(
         cli,
-        ["gig", "use", "gig_00000000-0000-4000-8000-000000000000", "--home", str(home), "--target", str(target), "--json"],
+        ["workpad", "use", "gig_00000000-0000-4000-8000-000000000000", "--home", str(home), "--target", str(target), "--json"],
     )
     assert result.exit_code != 0
     payload = json.loads(result.output)
@@ -176,7 +176,7 @@ def test_gig_use_selects_an_installed_approved_gig(tmp_path: Path, git: bool) ->
     gig_id = installed["gig_id"]
 
     result = runner.invoke(
-        cli, ["gig", "use", gig_id, "--home", str(home), "--target", str(target), "--json"]
+        cli, ["workpad", "use", gig_id, "--home", str(home), "--target", str(target), "--json"]
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
@@ -199,8 +199,8 @@ def test_resolve_workpad_names_gig_use_when_no_active_gig_is_selected(
         inventory=scout_candidate_inventory(),
     )
     # Bound but not yet approved/active: resolving with no explicit --gig
-    # must fail with a message naming `gigai gig use`, not a bare code.
-    with pytest.raises(NoActiveGigError, match=r"gigai gig use <gig_id>"):
+    # must fail with a message naming `gigai workpad use`, not a bare code.
+    with pytest.raises(NoActiveGigError, match=r"gigai workpad use <gig_id>"):
         resolve_workpad(home_root=home, requested_target=target, gig_id=None)
 
 
@@ -327,7 +327,7 @@ def test_scout_resume_add_installs_scout_when_not_yet_installed(tmp_path: Path, 
     gig_id = payload["gig_id"]
 
     # Scout is now installed/approved/active, same as `scout install` would leave it.
-    gigs_result = runner.invoke(cli, ["gigs", "--home", str(home), "--target", str(target), "--json"])
+    gigs_result = runner.invoke(cli, ["workpad", "list", "--home", str(home), "--target", str(target), "--json"])
     assert gigs_result.exit_code == 0, gigs_result.output
     gigs_payload = json.loads(gigs_result.output)
     scout_entry = next(item for item in gigs_payload["entries"] if item["gig_id"] == gig_id)

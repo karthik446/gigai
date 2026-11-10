@@ -229,7 +229,7 @@ def cli(context: click.Context) -> None:
     if context.invoked_subcommand is None:
         raise click.UsageError(
             "Choose 'setup', 'doctor', 'init', 'create', 'feedback', 'revise', "
-            "'approve', 'reject', 'gigs', 'proposals', 'status', 'show', 'history', "
+            "'approve', 'reject', 'gig', 'proposals', 'status', 'show', 'history', "
             "'plan', 'graph-set', 'run-plan', 'run', 'proposal', 'tailor', 'comparison', 'scout-interview', 'scout-transfer', 'scout-documents', 'scout-answer', 'run-details', 'occurrence', 'workpad', 'capability', 'check', 'models', 'invoke', or 'open'; "
             "use --help for details."
         )
@@ -3692,8 +3692,8 @@ def _friendly_workflow_message(exc: BaseException) -> tuple[str, str]:
     if "no_active_gig" in message:
         return (
             "no_active_gig",
-            "no_active_gig: This project has no selected active Gig. Run `gigai gigs` to inspect "
-            "registered Gigs or provide a Gig ID.",
+            "no_active_gig: This project has no selected active Gig. Run `gigai workpad list` to inspect "
+            "registered workpads or provide a workpad ID.",
         )
     if "no committed proposal" in message:
         return (
@@ -3726,11 +3726,41 @@ def _projection_options(command):
     return click.option("--json", "as_json", is_flag=True)(command)
 
 
-@cli.command("gigs")
-@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
-@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
-@click.option("--json", "as_json", is_flag=True)
-@click.option("--all", "all_projects", is_flag=True, help="List Gigs from all registered projects.")
+def _workpad_list_options(command):
+    command = click.option(
+        "--all", "all_projects", is_flag=True, help="List workpads from all registered projects."
+    )(command)
+    command = click.option("--json", "as_json", is_flag=True)(command)
+    command = click.option(
+        "--home", "home_value", type=click.Path(path_type=Path, file_okay=False)
+    )(command)
+    return click.option(
+        "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
+    )(command)
+
+
+def _deprecated_alias(old: str, new: str, *, as_json: bool) -> None:
+    """One line for an old spelling kept until the legacy verbs go (the meta-drop release): stdout, or stderr under --json."""
+
+    click.echo(f"`gigai {old}` is deprecated; use `gigai {new}`.", err=as_json)
+
+
+@click.command("list")
+@_workpad_list_options
+@_reads_committed
+def workpad_list_command(
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+    all_projects: bool,
+) -> None:
+    """List registered workpads for the bound project without writing workpad state."""
+
+    _list_workpads(target_value, home_value, as_json, all_projects)
+
+
+@cli.command("gigs", hidden=True)
+@_workpad_list_options
 @_reads_committed
 def gigs_command(
     target_value: Path | None,
@@ -3738,8 +3768,18 @@ def gigs_command(
     as_json: bool,
     all_projects: bool,
 ) -> None:
-    """List registered Gigs for the bound project without writing workpad state."""
+    """Deprecated alias of `gigai workpad list`."""
 
+    _deprecated_alias("gigs", "workpad list", as_json=as_json)
+    _list_workpads(target_value, home_value, as_json, all_projects)
+
+
+def _list_workpads(
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+    all_projects: bool,
+) -> None:
     _require_supported_platform()
     try:
         result = list_gigs(
@@ -3791,24 +3831,53 @@ def gigs_command(
         )
 
 
-@cli.group("gig")
-def gig_group() -> None:
-    """Select which registered Gig is active for the bound project."""
+from .gigs.cli import gig_group  # noqa: E402 - `gigai gig` lives with the gig loader; registered below with the gigs
 
 
-@gig_group.command("use")
-@click.argument("gig_id")
-@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
-@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
-@click.option("--json", "as_json", is_flag=True)
+def _workpad_use_options(command):
+    command = click.option("--json", "as_json", is_flag=True)(command)
+    command = click.option(
+        "--home", "home_value", type=click.Path(path_type=Path, file_okay=False)
+    )(command)
+    command = click.option(
+        "--target", "target_value", type=click.Path(path_type=Path, file_okay=False)
+    )(command)
+    return click.argument("gig_id")(command)
+
+
+@click.command("use")
+@_workpad_use_options
+def workpad_use_command(
+    gig_id: str,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
+    """Make one registered, approved workpad the active one for this project."""
+
+    _use_workpad(gig_id, target_value, home_value, as_json)
+
+
+@gig_group.command("use", hidden=True)
+@_workpad_use_options
 def gig_use_command(
     gig_id: str,
     target_value: Path | None,
     home_value: Path | None,
     as_json: bool,
 ) -> None:
-    """Make one already-installed, approved Gig the active Gig for this project."""
+    """Deprecated alias of `gigai workpad use`."""
 
+    _deprecated_alias("gig use", "workpad use", as_json=as_json)
+    _use_workpad(gig_id, target_value, home_value, as_json)
+
+
+def _use_workpad(
+    gig_id: str,
+    target_value: Path | None,
+    home_value: Path | None,
+    as_json: bool,
+) -> None:
     _require_supported_platform()
     home_root = home_value or default_home_root()
     try:
@@ -4015,7 +4084,11 @@ def plan_command(
 
 @cli.group("workpad")
 def workpad_group() -> None:
-    """Inspect an existing registered workpad."""
+    """List, select and locate registered workpads."""
+
+
+workpad_group.add_command(workpad_list_command)
+workpad_group.add_command(workpad_use_command)
 
 
 @workpad_group.command("path")
@@ -4345,6 +4418,7 @@ cli.add_command(agent_permissions_command)
 # Registering this independently named group as "record" would silently replace
 # the existing Click group and break its accepted command surface.
 record_group.add_command(native_record_group, name="native")
+cli.add_command(gig_group)  # `gigai gig list | info | check` (and the deprecated `gig use` alias above)
 # Installed gigs (`gigai.gigs` entry points) mount last, so a gig named like a core verb is skipped: core wins.
 # Each mount is lazy: no gig module is imported until `gigai <gig> ...` runs.
 from .gigs.loader import mount_gigs  # noqa: E402 - the gigs mount after every core verb is registered

@@ -1,0 +1,482 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gigai.dev/schemas/gig-manifest/1.json",
+  "title": "gigai gig manifest (gig.toml), manifest format 1",
+  "description": "Static manifest shipped as package data at <package>/gig.toml. Read by core through importlib.metadata distribution files; never requires importing the gig.",
+  "type": "object",
+  "required": [
+    "gig",
+    "commands"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "gig": {
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "core",
+        "manifest_format"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "manifest_format": {
+          "type": "integer",
+          "const": 1,
+          "description": "Format of this file. Core refuses unknown formats."
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,31}$",
+          "description": "Command name: `gigai <name> ...`. Must equal the entry point name in group `gigai.gigs` and the `gigai-<name>` executable name, if any."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)*([abrc]+[0-9]+)?(\\.post[0-9]+)?(\\.dev[0-9]+)?$",
+          "description": "Optional. The distribution version (PEP 440) is the version of record; if present here `gigai gig check` requires equality."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "One line, shown by `gigai gig list`."
+        },
+        "core": {
+          "type": "string",
+          "pattern": "^[<>=!~,.0-9a-zA-Z* ]+$",
+          "description": "PEP 440 specifier of the gigai core versions this gig runs on, e.g. \">=2,<3\". Must agree with the `gigai` pin in the distribution's dependencies."
+        },
+        "homepage": {
+          "type": "string",
+          "format": "uri"
+        },
+        "license": {
+          "type": "string"
+        }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "`module:attr` of the Click group mounted as `gigai <name>`. Same value as the entry point. Required unless `executable` is given."
+        },
+        "executable": {
+          "type": "string",
+          "pattern": "^gigai-[a-z][a-z0-9-]{1,31}$",
+          "description": "Out-of-process fallback: an executable on PATH that answers `describe` with this manifest as JSON and forwards every other verb."
+        },
+        "provides": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "uniqueItems": true,
+          "description": "Verbs the gig implements itself, listed so `gigai gig info` can show them without importing. Core-provided verbs (status, doctor, config, export, import, eval) must not be listed; a gig may override them in code, which `gigai gig check` reports."
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "group"
+          ]
+        },
+        {
+          "required": [
+            "executable"
+          ]
+        }
+      ]
+    },
+    "server": {
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "mount",
+            "process"
+          ],
+          "description": "mount = core imports `app` (WSGI/ASGI callable) and serves it under `mount_path` on the one gigai server. process = core supervises a child process started by `start` and reverse-proxies `mount_path` to it."
+        },
+        "app": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "mount mode: `module:attr` of the app callable."
+        },
+        "start": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "process mode: argv run by core; `{port}`, `{home}`, `{data}` are substituted."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "process mode: preferred port; 0 = core picks a free one and passes it as {port}."
+        },
+        "health": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Path that returns 2xx when ready, relative to the gig's root (`/api/health` today for Scout)."
+        },
+        "mount_path": {
+          "type": "string",
+          "pattern": "^/gigs/[a-z][a-z0-9-]{1,31}/$",
+          "description": "Where the gig's routes and UI appear on the core server."
+        },
+        "ui": {
+          "type": "string",
+          "description": "Package-relative directory of a built static UI served at `mount_path` (today `scout/ui/dist`)."
+        },
+        "bind": {
+          "type": "string",
+          "enum": [
+            "loopback",
+            "any"
+          ],
+          "default": "loopback",
+          "description": "Declared need. `any` is what a container deploy needs; core policy decides whether to honour it."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "mount"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "app",
+              "mount_path"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "process"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "start",
+              "health",
+              "mount_path"
+            ]
+          }
+        }
+      ]
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "python": {
+          "type": "string",
+          "description": "Mirror of `requires-python`; `gigai gig check` requires equality."
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Executable looked up on PATH by `doctor` and at install."
+              },
+              "required": {
+                "type": "boolean",
+                "default": true
+              },
+              "check": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "argv that must exit 0 (default: `<name> --version`)."
+              },
+              "hint": {
+                "type": "string",
+                "description": "What to tell the user when missing, e.g. `brew install typst`."
+              }
+            }
+          }
+        },
+        "gigs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,31}([<>=!~][^ ]*)?$"
+          },
+          "description": "Other gigs that must be installed, with optional version specifier."
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "type": "string",
+          "description": "Package-relative JSON Schema file validated against `<home>/gigs/<name>/config.toml` at install and before every command (B §4 item 7: jsonschema is already a core dependency)."
+        },
+        "defaults": {
+          "type": "object",
+          "description": "Written to `<home>/gigs/<name>/config.toml` at install when the file is missing."
+        }
+      }
+    },
+    "keys": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "service"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "service": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "description": "Key name in core's secrets catalog (today exa, openrouter, openai: `secrets_catalog.py:13-17`). Unknown names are added to the catalog by install, with `env`."
+          },
+          "env": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "description": "Environment variable the key is injected as for this gig's commands and server."
+          },
+          "required": {
+            "type": "boolean",
+            "default": true,
+            "description": "Required keys block `gigai <gig> run`; optional keys only show in `status`."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Informational: what the key is used for (`chat`, `web-search`, `embeddings`)."
+          },
+          "alias": {
+            "type": "string",
+            "description": "Per-gig key alias: core resolves `<service>.<alias>` (e.g. a dedicated OpenRouter key with its own limit) before the shared `<service>` key."
+          },
+          "spend_cap": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "usd_per_day": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "usd_per_run": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "calls_per_day": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "description": "A request. Core enforces what it can (call counters today, USD via a per-gig OpenRouter key limit per B §4 item 4); the effective cap is shown by `status`."
+          }
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dirs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_./-]+$"
+          },
+          "description": "Created under `<home>/gigs/<name>/data/` at install."
+        },
+        "stores": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "engine"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "engine": {
+                "type": "string",
+                "enum": [
+                  "sqlite",
+                  "dolt",
+                  "files"
+                ],
+                "description": "sqlite = core hands the gig an opened connection to `<data>/<file>` with `user_version` migrations; dolt = [C: pending]; files = plain directory."
+              },
+              "file": {
+                "type": "string",
+                "description": "Relative to the gig's data dir."
+              },
+              "migrations": {
+                "type": "string",
+                "description": "Package-relative directory of `NNNN_*.sql` files applied in order by `user_version` at install/update."
+              },
+              "rebuildable": {
+                "type": "boolean",
+                "default": false,
+                "description": "True = a cache; excluded from export and from `doctor` integrity checks."
+              }
+            }
+          }
+        },
+        "export": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Globs (relative to the gig's data dir) included by `gigai <gig> export`; default = everything not `rebuildable`."
+        },
+        "outside_home": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Paths outside `<home>` the gig writes (declared for review; today Scout: `~/Documents/GigAI/{jobs,resumes}`)."
+        }
+      }
+    },
+    "docs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "page": {
+          "type": "string",
+          "description": "Package-relative Markdown page shown by `gigai docs <name>` and listed in the hub UI."
+        },
+        "cli_manual": {
+          "type": "string",
+          "description": "Package-relative YAML/JSON with per-command prose in core's `commands.yaml` shape (A2 §1.3), merged by path prefix `<name>`."
+        },
+        "skill": {
+          "type": "string",
+          "description": "Package-relative SKILL.md emitted by `gigai agent-skill --gig <name>`."
+        }
+      }
+    },
+    "evals": {
+      "type": "object",
+      "description": "HOOK ONLY. Design: gigai-jhf (research/gigai-evals). Declares the gig's model-call steps so core can record traces and run `gigai <gig> eval ...`.",
+      "additionalProperties": false,
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "model_target"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]*$",
+                "description": "Stable step id used in traces and labels."
+              },
+              "input_schema": {
+                "type": "string",
+                "description": "Package-relative JSON Schema of the step input."
+              },
+              "output_schema": {
+                "type": "string",
+                "description": "Package-relative JSON Schema of the step output."
+              },
+              "model_target": {
+                "type": "string",
+                "description": "Name of the model target/role in config the step calls through core adapters."
+              },
+              "dataset": {
+                "type": "string",
+                "description": "Package- or data-relative reference to the gold/replay dataset (JSONL) for this step."
+              }
+            }
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "description": "Declared for review and for `gigai gig info`; not enforced by core (B finding 6: no plugin ecosystem isolates; a container does).",
+      "additionalProperties": false,
+      "properties": {
+        "network": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Egress hosts or patterns the gig contacts."
+        },
+        "subprocess": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Executables the gig spawns."
+        },
+        "filesystem": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Paths outside `<home>/gigs/<name>` the gig reads or writes."
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "description": "Optional Python callables imported only when the lifecycle step runs.",
+      "additionalProperties": false,
+      "properties": {
+        "install": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "Run after core provisioned dirs/config/keys (Scout: today's `install_scout`, `scout/template.py:279-360`)."
+        },
+        "uninstall": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "doctor": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "Returns extra doctor checks merged into `gigai <name> doctor`."
+        }
+      }
+    }
+  }
+}

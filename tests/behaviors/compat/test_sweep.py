@@ -22,7 +22,10 @@ CLI = str(Path(sys.executable).with_name("gigai"))
 
 
 def test_the_sweep_with_the_same_cli_on_both_sides_is_clean(tmp_path: Path) -> None:
-    env = {**os.environ, "TMPDIR": str(tmp_path), "COMPAT_SWEEP_PYTHON": sys.executable}
+    # OLD == NEW, so every row of the real allow file would be "stale": run with an empty one.
+    no_rows = tmp_path.parent / f"{tmp_path.name}-no-allow-rows"
+    no_rows.write_text("", encoding="utf-8")
+    env = {**os.environ, "TMPDIR": str(tmp_path), "COMPAT_SWEEP_PYTHON": sys.executable, "COMPAT_SWEEP_ALLOW": str(no_rows)}
     result = subprocess.run(
         ["bash", str(ROOT / "tools" / "compat_sweep.sh"), CLI, CLI, str(BASELINE_TARBALL)],
         cwd=ROOT, env=env, capture_output=True, text=True, timeout=1200, check=False,

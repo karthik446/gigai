@@ -257,23 +257,56 @@
         "gigai feedback prop-1 --text \"Make the summary shorter\""
       ]
     },
+    "gig check": {
+      "summary": "Check an installed gig (or a gig.toml file) against the gig contract; exits 1 on any FAIL.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text: one PASS/FAIL/WARN/SKIP line per check, then the counts.",
+      "examples": [
+        "gigai gig check hello",
+        "gigai gig check path/to/gig.toml"
+      ],
+      "notes": "A gig.toml that is not an installed gig's gets the schema and core-range checks only. An installed gig is loaded to check its commands, and its project's tests run when its source checkout is next to the package."
+    },
+    "gig info": {
+      "summary": "Show one installed gig (or a gig.toml file): status, core range, verbs, keys, data dirs and docs.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text.",
+      "examples": [
+        "gigai gig info hello"
+      ]
+    },
+    "gig list": {
+      "summary": "List installed gigs (gigai.gigs entry points) with their status, without importing any of them.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai gig list --json"
+      ]
+    },
     "gig use": {
-      "summary": "Make one already-installed, approved Gig the active Gig for this project.",
+      "summary": "Deprecated alias of gigai workpad use.",
       "effect": "write",
       "external": "none",
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai gig use scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0: renamed to gigai workpad use; prints a deprecation line and is removed with the legacy verbs."
     },
     "gigs": {
-      "summary": "List registered Gigs for the bound project without writing workpad state.",
+      "summary": "Deprecated alias of gigai workpad list.",
       "effect": "read",
       "external": "none",
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai gigs --json"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0: renamed to gigai workpad list; prints a deprecation line and is removed with the legacy verbs."
     },
     "graph-set propose": {
       "summary": "Atomically stage a v2 Graph Set from a definition file; never approves or runs it.",
@@ -1883,6 +1916,15 @@
         "gigai upgrade --confirm"
       ]
     },
+    "workpad list": {
+      "summary": "List registered workpads for the bound project without writing workpad state.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai workpad list --json"
+      ]
+    },
     "workpad path": {
       "summary": "Print the canonical path of one already-registered Gig workpad.",
       "effect": "read",
@@ -1890,6 +1932,15 @@
       "output": "Human-readable text.",
       "examples": [
         "gigai workpad path scout"
+      ]
+    },
+    "workpad use": {
+      "summary": "Make one registered, approved workpad the active one for this project.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai workpad use scout"
       ]
     },
     "agent-context": {

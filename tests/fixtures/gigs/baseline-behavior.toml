@@ -1,0 +1,68 @@
+# Fixture for `gigai gig check`: research packet gigai-hs0-D1's example, minus `workpad` (dropped in 0.2.0), core range for 0.2.
+# gig.toml for the "baseline-behavior" gig: establish the baseline behaviour of a system under test
+# (HTTP API, CLI, service, model — any software). It captures the system's current behaviour into a
+# versioned local dataset, has an LLM draft characterization tests from the captures, runs those tests
+# against the system with pytest, diffs a new capture against the baseline, and reports.
+# Several external tools, one optional key, no server, no UI, no workpad.
+
+[gig]
+manifest_format = 1
+name = "baseline-behavior"
+description = "Capture a system's current behaviour, draft characterization tests from it, run and diff them"
+core = ">=0.2,<0.3"
+
+[commands]
+group = "gigai_baseline_behavior.cli:baseline_behavior"
+provides = ["init", "capture", "generate-tests", "run", "diff", "report"]
+
+[dependencies]
+python = ">=3.11"
+tools = [
+  { name = "curl",     check = ["curl", "--version"],     required = true,  hint = "capture: HTTP targets (brew install curl)" },
+  { name = "pytest",   check = ["pytest", "--version"],   required = true,  hint = "run: executes the generated tests (uv pip install pytest)" },
+  { name = "mitmdump", check = ["mitmdump", "--version"], required = false, hint = "capture --via-proxy: record/replay for targets the CLI drives (uv tool install mitmproxy)" },
+  { name = "git",      check = ["git", "--version"],      required = false, hint = "diff --unified: `git diff --no-index` rendering; difflib otherwise" },
+]
+
+[config]
+schema = "config.schema.json"
+[config.defaults]
+model_target = "assessment"        # core target used only by generate-tests; the gig never names a provider
+[config.defaults.target]
+kind = "http"                      # http | cli | service
+base_url = "http://127.0.0.1:8000" # http: where to capture; cli: `command` instead
+timeout_s = 10
+[config.defaults.capture]
+tool = "curl"                      # curl | httpx (in-process) | proxy (mitmdump)
+redact_headers = ["authorization", "cookie"]
+
+[[keys]]
+service = "openrouter"
+env = "OPENROUTER_API_KEY"
+required = false                   # only generate-tests calls a model; capture/run/diff work without it
+scopes = ["chat"]
+spend_cap = { usd_per_run = 1.0, calls_per_day = 200 }
+
+[data]
+dirs = ["snapshots", "tests", "runs", "reports"]
+stores = [
+  { name = "baseline", engine = "sqlite", file = "baseline.sqlite", migrations = "migrations", rebuildable = false },
+]
+export = ["snapshots/**", "tests/**", "reports/**", "baseline.sqlite"]
+
+[docs]
+page = "docs/index.md"
+cli_manual = "docs/commands.yaml"
+skill = "docs/SKILL.md"            # the method (what to capture, how to write a characterization test)
+
+[evals]                            # hook only; design: gigai-jhf
+[[evals.steps]]
+id = "draft-tests"
+input_schema = "schemas/draft-tests-input.json"    # a capture group (request/response pairs)
+output_schema = "schemas/draft-tests-output.json"  # pytest source + rationale per test
+model_target = "assessment"
+dataset = "datasets/draft-tests-gold.jsonl"        # operator-labelled good/bad drafts
+
+[permissions]
+network = ["openrouter.ai", "<target.base_url>"]
+subprocess = ["curl", "pytest", "mitmdump", "git"]

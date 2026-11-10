@@ -1,0 +1,11 @@
+# Fixture for `gigai gig check` / `gig list` / `gig info`: a valid manifest no gigai 0.x satisfies.
+# `gig check` exits 0 (the range is a WARN line); an installed copy lists as "incompatible".
+[gig]
+manifest_format = 1
+name = "far-future"
+description = "Test-only gig: needs gigai 3"
+core = ">=3"
+
+[commands]
+group = "far_future.cli:far_future"
+provides = ["run"]

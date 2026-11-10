@@ -305,7 +305,7 @@ def test_read_commands_return_stable_json_without_a_target_delta(
     }
     gigs = runner.invoke(
         cli,
-        ["gigs", "--target", str(target), "--home", str(home), "--json"],
+        ["workpad", "list", "--target", str(target), "--home", str(home), "--json"],
     )
     failures = {
         name: result.output

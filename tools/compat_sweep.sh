@@ -37,7 +37,7 @@ fi
 OLD=$1 NEW=$2 FIX=$3
 case "$FIX" in /*) ;; *) FIX=$PWD/$FIX ;; esac
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-ALLOW=$ROOT/tools/compat_sweep.allow
+ALLOW=${COMPAT_SWEEP_ALLOW:-$ROOT/tools/compat_sweep.allow}
 PYTHON=${COMPAT_SWEEP_PYTHON:-python3}
 JOBS=${COMPAT_SWEEP_JOBS:-4}
 TIMEOUT=${COMPAT_SWEEP_TIMEOUT:-180}

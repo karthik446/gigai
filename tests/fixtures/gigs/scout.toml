@@ -1,0 +1,98 @@
+# Fixture for `gigai gig check`: research packet gigai-hs0-D1's example, minus `workpad` (dropped in 0.2.0), core range for 0.2.
+# gig.toml for Scout as it would ship once extracted from core (package `gigai-scout`).
+# Every value traces to today's code (A1/A2 anchors in D1-contract-and-creation.md §2.2);
+# fields Scout cannot fill today because core is coupled are marked "2.0 only".
+
+[gig]
+manifest_format = 1
+name = "scout"
+description = "Job search: find, assess, tailor, track applications; local server + UI"
+core = ">=0.2,<0.3"
+
+[commands]
+group = "gigai_scout.cli:scout"   # today: gigai.scout.scout_cli (22 subcommands, scout_cli.py:203)
+provides = [                      # the 22 verbs registered on scout_group (scout_cli.py:203-3800, EXECUTED grep in D1/raw/scout_verbs.txt)
+  "install", "resume", "jobs-folder", "migrate-job-stores", "run", "stop", "privacy", "discover",
+  "prep", "assess", "answer", "answers", "story", "watchlist", "profile", "sources", "metrics",
+  "new", "jobs", "snapshot", "pipeline",
+]   # `status` is omitted: it is a core-provided verb that Scout overrides in code (gig check reports it)
+
+[server]
+mode = "process"                  # today: run_supervisor.py:800-812 Popen `present_api`; 2.0 only: a core supervisor
+start = ["gigai-scout", "present-api", "--port", "{port}", "--home", "{home}"]
+port = 8765                       # contracts.py:2778
+health = "/api/health"            # run_supervisor.py:355
+mount_path = "/gigs/scout/"       # 2.0 only: today no mount seam (A1 §2.3)
+ui = "ui/dist"                    # today: scout/ui/dist (A2 §8)
+bind = "loopback"                 # today: loopback-only, config.py:588-601
+
+[dependencies]
+python = ">=3.11"
+tools = [
+  { name = "git", required = true, hint = "needed for the workpad journal" },
+  { name = "typst", required = false, hint = "PDF resumes; `pip install typst` ships a wheel (A2 §8: 63 MB)" },
+]
+
+[config]
+schema = "config.schema.json"     # 2.0 only: today Scout settings live in core config.toml (config.py:124)
+[config.defaults]
+assess_model_tag = "assessment"
+background_daily_call_cap = 200   # today: background_settings.py:16-17
+
+[[keys]]
+service = "openrouter"            # secrets_catalog.py:13-17
+env = "OPENROUTER_API_KEY"
+required = true
+scopes = ["chat"]
+alias = "scout"                   # 2.0 only: per-gig key with its own OpenRouter limit (B §4 item 4)
+spend_cap = { usd_per_day = 2.0, usd_per_run = 0.50 }   # today: $0.50/run discovery/prefs.py:90-102; per-day call caps only
+
+[[keys]]
+service = "exa"
+env = "EXA_API_KEY"
+required = false
+scopes = ["web-search"]
+
+[[keys]]
+service = "openai"
+env = "OPENAI_API_KEY"
+required = false
+scopes = ["chat", "discovery"]
+
+[data]
+dirs = ["jobs", "resumes", "cache", "learning"]      # today: <home>/scout/<pid>/..., <home>/cache/scout (A1 §3.2)
+stores = [
+  { name = "pipeline", engine = "sqlite", file = "pipeline.sqlite", migrations = "migrations/pipeline" },
+  { name = "postings", engine = "sqlite", file = "postings.sqlite", migrations = "migrations/postings", rebuildable = true },  # postings read model, A2 §5.2
+]
+export = ["jobs/**", "resumes/**", "pipeline.sqlite"]
+outside_home = ["~/Documents/GigAI/jobs", "~/Documents/GigAI/resumes"]   # A1 §3.2 / private_transfer.py:313-315
+
+[docs]
+page = "docs/index.md"            # today: gigai-docs Starlight group "scout" (astro.config.mjs:28-38)
+cli_manual = "docs/commands.yaml" # today: core data/cli/commands.yaml holds Scout prose (agent_context.py:135-177)
+skill = "docs/SKILL.md"           # today: agent_skill.py:20 hard-codes gigai-scout
+
+[evals]                           # hook only; design: gigai-jhf
+[[evals.steps]]
+id = "assess"
+input_schema = "schemas/assess-input.json"
+output_schema = "schemas/assess-output.json"
+model_target = "assessment"
+dataset = "evals/assess-gold.jsonl"
+
+[[evals.steps]]
+id = "tailor"
+input_schema = "schemas/tailor-input.json"
+output_schema = "schemas/tailor-output.json"
+model_target = "assessment"
+dataset = "evals/tailor-gold.jsonl"
+
+[permissions]
+network = ["openrouter.ai", "api.openai.com", "api.exa.ai", "*.greenhouse.io", "*.lever.co", "github.com"]   # A2 §6 outbound table
+subprocess = ["git", "typst"]
+filesystem = ["~/Documents/GigAI"]
+
+[hooks]
+install = "gigai_scout.template:install_scout"     # today: scout/template.py:279-360
+doctor = "gigai_scout.doctor:checks"

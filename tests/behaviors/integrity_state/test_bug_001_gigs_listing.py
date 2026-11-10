@@ -35,10 +35,10 @@ def test_gigs_implicit_scope_matches_explicit_target(tmp_path: Path, monkeypatch
     )
     monkeypatch.chdir(target)
 
-    implicit = CliRunner().invoke(cli, ["gigs", "--home", str(home), "--json"])
+    implicit = CliRunner().invoke(cli, ["workpad", "list", "--home", str(home), "--json"])
     explicit = CliRunner().invoke(
         cli,
-        ["gigs", "--target", str(target), "--home", str(home), "--json"],
+        ["workpad", "list", "--target", str(target), "--home", str(home), "--json"],
     )
 
     assert implicit.exit_code == 0, implicit.output
@@ -55,11 +55,11 @@ def test_gigs_rejects_unbound_target_and_scope_conflict(tmp_path: Path) -> None:
 
     refusal = runner.invoke(
         cli,
-        ["gigs", "--target", str(unbound), "--home", str(home), "--json"],
+        ["workpad", "list", "--target", str(unbound), "--home", str(home), "--json"],
     )
     conflict = runner.invoke(
         cli,
-        ["gigs", "--all", "--target", str(unbound), "--home", str(home), "--json"],
+        ["workpad", "list", "--all", "--target", str(unbound), "--home", str(home), "--json"],
     )
 
     assert refusal.exit_code == 1
@@ -94,7 +94,7 @@ def test_gigs_isolates_malformed_registry_row(tmp_path: Path) -> None:
 
     result = CliRunner().invoke(
         cli,
-        ["gigs", "--target", str(target), "--home", str(home), "--json"],
+        ["workpad", "list", "--target", str(target), "--home", str(home), "--json"],
     )
     payload = json.loads(result.output)
     assert result.exit_code == 0, result.output
@@ -128,7 +128,7 @@ def test_gigs_keeps_registry_row_as_degraded_on_project_marker_mismatch(
 
     result = CliRunner().invoke(
         cli,
-        ["gigs", "--target", str(target), "--home", str(home), "--json"],
+        ["workpad", "list", "--target", str(target), "--home", str(home), "--json"],
     )
     payload = json.loads(result.output)
     assert result.exit_code == 0, result.output
@@ -172,7 +172,7 @@ def test_gigs_rejects_schema_valid_proposal_for_another_identity(tmp_path: Path)
 
     result = CliRunner().invoke(
         cli,
-        ["gigs", "--target", str(target), "--home", str(home), "--json"],
+        ["workpad", "list", "--target", str(target), "--home", str(home), "--json"],
     )
     payload = json.loads(result.output)
     assert result.exit_code == 0, result.output
@@ -200,7 +200,7 @@ def test_gigs_does_not_repair_stale_projection(tmp_path: Path) -> None:
 
     result = CliRunner().invoke(
         cli,
-        ["gigs", "--target", str(target), "--home", str(home), "--json"],
+        ["workpad", "list", "--target", str(target), "--home", str(home), "--json"],
     )
 
     assert result.exit_code == 0, result.output
@@ -237,7 +237,7 @@ def test_gigs_all_uses_safe_project_labels_and_approved_version(tmp_path: Path) 
         uuid_factory=_uuids_from(100),
     )
 
-    result = CliRunner().invoke(cli, ["gigs", "--all", "--home", str(home), "--json"])
+    result = CliRunner().invoke(cli, ["workpad", "list", "--all", "--home", str(home), "--json"])
     payload = json.loads(result.output)
     assert result.exit_code == 0, result.output
     assert payload["scope"] == {"kind": "all"}

@@ -28,7 +28,7 @@ def bound_project(tmp_path: Path) -> tuple[Path, Path]:
     home, target, gig_id = _fixture(tmp_path)
     # run_discovery's frozen interface takes no gig_id (S2-A/S2-B contract);
     # it relies on the target's own "active Gig" binding, the same as any
-    # other Scout CLI command run after `gigai gig use <gig_id>`.
+    # other Scout CLI command run after `gigai workpad use <gig_id>`.
     select_active_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
     return home, target
 

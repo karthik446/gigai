@@ -1,0 +1,66 @@
+# Fixture for `gigai gig check`: research packet gigai-hs0-D1's example, minus `workpad` (dropped in 0.2.0), core range for 0.2.
+# gig.toml for gigai-eval-book (bead gigai-5ml): a marimo notebook gig served behind core's
+# server. Numbers and the marimo facts come from B (B-packaging-portability.md §3.2, §4 item 5).
+
+[gig]
+manifest_format = 1
+name = "eval-book"
+description = "Interactive eval notebook (marimo) over Scout assessment runs and labels"
+core = ">=0.2,<0.3"
+
+[commands]
+group = "gigai_eval_book.cli:eval_book"
+provides = ["serve", "export", "label"]
+
+[server]
+mode = "process"                  # marimo is its own process; core reverse-proxies it (B §4 item 5)
+start = ["marimo", "run", "{data}/book.py", "--host", "127.0.0.1", "--port", "{port}", "--headless", "--no-token", "--base-url", "/gigs/eval-book"]
+port = 0                          # core picks a free port and substitutes {port}
+health = "/"
+mount_path = "/gigs/eval-book/"
+bind = "loopback"
+
+[dependencies]
+python = ">=3.11"
+gigs = ["scout>=2"]               # reads Scout's assessment runs; declared so install orders and `doctor` checks it
+tools = [
+  { name = "marimo", required = true, check = ["marimo", "--version"], hint = "installed with the gig (B: 189 MB with pandas/polars)" },
+]
+
+[config]
+schema = "config.schema.json"
+[config.defaults]
+source_gig = "scout"
+labels_store = "labels.sqlite"
+
+[[keys]]
+service = "openrouter"
+env = "OPENROUTER_API_KEY"
+required = false                  # only for the judge cells
+scopes = ["chat"]
+alias = "eval-book"
+spend_cap = { usd_per_day = 1.0 }
+
+[data]
+dirs = ["notebooks", "exports"]
+stores = [
+  { name = "labels", engine = "sqlite", file = "labels.sqlite", migrations = "migrations" },
+  { name = "traces", engine = "files", file = "traces" },   # [C: pending] whether runs/traces move to the storage C recommends
+]
+export = ["labels.sqlite", "notebooks/**", "exports/**"]
+
+[docs]
+page = "docs/index.md"
+cli_manual = "docs/commands.yaml"
+
+[evals]                           # hook only; design: gigai-jhf. The eval book *consumes* other gigs' steps; it declares one of its own: the LLM judge.
+[[evals.steps]]
+id = "judge"
+input_schema = "schemas/judge-input.json"
+output_schema = "schemas/judge-output.json"
+model_target = "judge"
+dataset = "datasets/judge-calibration.jsonl"
+
+[permissions]
+network = ["openrouter.ai"]
+subprocess = ["marimo"]

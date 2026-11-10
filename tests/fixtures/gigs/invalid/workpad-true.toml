@@ -1,0 +1,12 @@
+# Negative fixture for `gigai gig check`: `[gig] workpad` was dropped from the manifest in 0.2.0
+# (`gigai workpad` owns the registered thing), so the schema rejects it and the check exits 1.
+[gig]
+manifest_format = 1
+name = "old-style"
+description = "Test-only gig: still declares a workpad"
+core = ">=0.2,<0.3"
+workpad = true
+
+[commands]
+group = "old_style.cli:old_style"
+provides = ["run"]
