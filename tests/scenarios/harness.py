@@ -216,6 +216,8 @@ class InstalledGigAI:
                             Path(sys.prefix).resolve(),
                             Path(sys.base_prefix).resolve(),
                             package_root,
+                            # gig discovery (importlib.metadata) lists the sys.path entry holding the package
+                            package_root.parent,
                         )
                     )
                 ),
