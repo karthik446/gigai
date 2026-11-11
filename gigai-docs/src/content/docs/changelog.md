@@ -22,6 +22,52 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.2.0a2
+
+This is the second pre-release of GigAI 2. Install it by name: `uv tool install gigai==0.2.0a2`
+(a plain `uv tool upgrade gigai` stays on the last stable release unless you pass `--prerelease allow`).
+
+#### Added
+
+- **Evaluations for gigs.** A gig that declares its steps can now measure them. `gigai <gig> eval list` shows the
+  steps and their suites, `eval run` runs a step on a dataset and stores every call, `eval rescore` scores stored
+  answers again with no model call, `eval compare` compares two runs (paired tests, confidence intervals and the
+  smallest difference the data could have shown), and `eval gate` checks a run against the gig's gates (`ci`,
+  `release`, `upgrade`) and exits 1 naming the row that failed. A paid run is refused unless it has a call cap.
+  The results live in the gig folder (`<home>/gigs/<gig>/evals.sqlite`) next to the gig's own data; nothing else moves.
+- **Blind labelling.** `eval label` shows one stored answer at a time without the model or the arm, records
+  met / not met / unknown with a critique, and moves batches to and from files (`--export`, `--from`) so a person
+  or another gig can label them. Labels are stored with who, when and the rubric used.
+- **Reports.** `eval report` summarises a run with intervals and gate verdicts (`--json` for another tool; inputs are
+  left out unless you ask for them). `eval report --export inspect` writes an Inspect log file you can browse with
+  `inspect view`; Inspect is an optional extra (`uv tool install "gigai[inspect]==0.2.0a2"`) and is never loaded
+  otherwise.
+- **Public datasets.** Eleven small loaders for public evaluation sets, each with its licence and a tiny committed
+  slice for offline checks; Concepts, "Eval datasets" lists what each one needs.
+- **A base run.** `gigai <gig> eval base` assembles a fixed suite, runs it across a ladder of models from a free local
+  one to paid ones, and checks that the measurement itself behaves: the ladder orders models the way published
+  leaderboards do, repeating a run barely moves the score, three deliberately broken setups are noticed, and a
+  replay of stored answers gives the same numbers. `--plan` prints the calls and the estimated cost without making
+  any call, and a run without a cap on its calls is refused.
+- **One model per step.** A gig can bind each step to its own model target (`gigai <gig> steps`), and the gig's code
+  asks for the model by step name.
+
+#### Changed
+
+- **The gig checker is stricter about datasets.** A dataset shipped inside a gig with a bare package-relative path
+  (`dataset = "x.jsonl"`) now fails `gig check` with "no licence on a shipped dataset"; add a licence to the dataset
+  entry.
+- **Pre-releases are marked as pre-releases.** Publishing a version with letters (such as `0.2.0a2`) now marks the
+  GitHub release as a pre-release.
+
+#### Upgrade notes
+
+- Nothing in your data changes: this release is additive and your existing home is read as it is. Evaluation files
+  appear only under `<home>/gigs/<gig>/` of a gig that uses them.
+- To go back: `uv tool install --reinstall gigai==0.2.0a1` or `uv tool install --reinstall gigai==0.1.11.13`.
+- Reproduce the headline check offline with `gigai eval-fixture eval base --deterministic --tier gate --max-calls 0`
+  from a source checkout; the live base run is a separate step that needs model access and a call cap.
+
 ### 0.2.0a1
 
 This is a pre-release of GigAI 2. Install it by name: `uv tool install gigai==0.2.0a1`

@@ -53,7 +53,7 @@ def test_bad_version_is_rejected() -> None:
 
 
 def test_pre_release_versions_are_accepted() -> None:
-    for version in ("0.2.0a1", "0.2.0b2", "0.2.0rc10", "0.2.0", "0.1.11.13"):
+    for version in ("0.2.0a1", "0.2.0a2", "0.2.0b2", "0.2.0rc10", "0.2.0", "0.1.11.13"):
         facts = replace(
             GOOD,
             pyproject=f'[project]\nname = "gigai"\nversion = "{version}"\n',
