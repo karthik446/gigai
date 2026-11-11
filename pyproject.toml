@@ -68,6 +68,7 @@ where = ["src"]
 "gigai.scout" = ["gig.toml", "data/*.md", "data/*.json", "data/*.json.gz", "data/goalgraphs/*.md", "data/instructions/*.md", "data/resume/*.typ", "data/resume/*.ttf", "data/resume/*.txt", "data/ui/*.html", "data/ui/*.css", "data/tools/*/*.json", "data/learning/assets/*", "data/learning/assets/*/*", "data/learning/assets/*/*/*", "data/learning/shipped/*/*", "data/learning/shipped/*/*/*", "ui/dist/*", "ui/dist/assets/*"]
 "gigai.evals._vendor.inspect_ai" = ["LICENSE", "DIFF.md"]
 "gigai.evals" = ["migrations/*.sql"]
+"gigai.evals.datasets" = ["NOTICES.md"]
 "gigai" = ["static/*.css", "data/cli/*.yaml", "data/agent/*.md"]
 
 [tool.pytest.ini_options]
