@@ -119,5 +119,5 @@ Scout declares three optional keys (`openrouter` with alias `scout`, `openai`,
 are — `budget_usd_per_session` per discovery run and the daily call caps of the
 background settings (at most 1000) — and read `ctx.budget` when one is given:
 a Gig cap below them lowers what Scout allows, never raises it. See
-[Model targets](./model-targets/) for how Scout picks the model a key is used
+[Model targets](../model-targets/) for how Scout picks the model a key is used
 with.
