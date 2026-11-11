@@ -170,7 +170,7 @@ def test_eval_is_mounted_only_on_a_gig_with_an_evals_table(tmp_path: Path, site:
 
     evals_help = _gigai(tmp_path, site, home, GIG, "eval", "--help")
     assert evals_help.returncode == 0
-    assert "list     List this gig's eval steps" in evals_help.stdout
+    assert "list            List this gig's eval steps" in evals_help.stdout
     assert "eval " in _gigai(tmp_path, site, home, GIG, "--help").stdout
     assert "eval " not in _gigai(tmp_path, site, home, "storegig", "--help").stdout
     assert _gigai(tmp_path, site, home, "storegig", "eval", "list").returncode == 2

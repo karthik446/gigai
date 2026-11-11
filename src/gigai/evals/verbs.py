@@ -17,6 +17,7 @@ EVAL_VERBS: dict[str, str] = {
     "list": "gigai.evals.list:list_command",
     "run": "gigai.evals.run:run_command",
     "rescore": "gigai.evals.run:rescore_command",
+    "validate-judge": "gigai.evals.judge:validate_judge_command",
     "compare": "gigai.evals.compare:compare_command",
     "gate": "gigai.evals.gates:gate_command",
     "label": "gigai.evals.label:label_command",

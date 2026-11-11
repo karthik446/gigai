@@ -27,7 +27,7 @@ export default defineConfig({
       ],
       sidebar: [
         'roadmap',
-        { label: 'GigAI', items: ['index', 'install', 'concepts/architecture', 'concepts/gigs', 'concepts/gig-install', 'concepts/runs', 'concepts/model-targets', 'concepts/usd-caps', 'concepts/review', 'concepts/eval-statistics', 'concepts/eval-datasets', 'concepts/eval-run', 'concepts/eval-compare', 'concepts/eval-label', 'concepts/eval-report', 'concepts/eval-base', 'agents', 'development', 'reference/cli'] },
+        { label: 'GigAI', items: ['index', 'install', 'concepts/architecture', 'concepts/gigs', 'concepts/gig-install', 'concepts/runs', 'concepts/model-targets', 'concepts/usd-caps', 'concepts/review', 'concepts/eval-statistics', 'concepts/eval-datasets', 'concepts/eval-run', 'concepts/eval-compare', 'concepts/eval-label', 'concepts/eval-report', 'concepts/eval-base', 'evals/judges', 'agents', 'development', 'reference/cli'] },
         // One group per Gig: its own folder, its own sidebar entry, nothing else to move.
         {
           label: 'Scout',

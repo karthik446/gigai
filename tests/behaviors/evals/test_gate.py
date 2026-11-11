@@ -396,5 +396,5 @@ def test_the_gate_cli_lists_its_suites_in_help(tmp_path: Path, home: Path) -> No
 
     assert done.returncode == 0
     assert "Compare two runs of one step item by item" in done.stdout
-    assert "Apply a suite's gate: exit 0 pass, 1 fail, 2 cannot compare." in done.stdout
+    assert "gate            Apply a suite's gate: exit 0 pass, 1 fail, 2 cannot" in done.stdout
     assert "select" not in done.stdout.lower()

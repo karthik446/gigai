@@ -124,7 +124,7 @@ ORDER BY last_at, t.run_id
 """
 
 _VALIDATIONS = """
-SELECT scorer_id, scorer_version, judge_model, dataset_id, n_items, metric, value, recorded_at
+SELECT scorer_id, scorer_version, judge_model, dataset_id, n_items, metric, value, details, recorded_at
 FROM judge_validations
 ORDER BY recorded_at, validation_id
 """
@@ -156,10 +156,12 @@ def _store_state(gig: str, home: Path) -> tuple[dict[str, Any], dict[str, Any], 
                 "last_trace_at": last_at,
             }
         validations: dict[str, dict[str, Any]] = {}
-        for scorer_id, version, judge_model, dataset_id, n_items, metric, value, recorded_at in connection.execute(_VALIDATIONS):
-            latest = validations.setdefault(scorer_id, {"metrics": {}})
+        for scorer_id, version, judge_model, dataset_id, n_items, metric, value, details, recorded_at in connection.execute(_VALIDATIONS):
+            latest = validations.setdefault(scorer_id, {"metrics": {}, "validated": None})
             latest.update(scorer_version=version, judge_model=judge_model, dataset_id=dataset_id, n_items=n_items, recorded_at=recorded_at)
             latest["metrics"][metric] = value
+            if metric == "kappa":
+                latest["validated"] = _validated(details)
     except sqlite3.Error as exc:
         return {}, {}, str(exc)
     finally:
@@ -199,6 +201,22 @@ def _text(listing: dict[str, Any]) -> list[str]:
             lines.append(f"  last run {run['run_id']}  {run['last_trace_at']}  {run['traces']} trace(s), {run['failed']} failed")
         validation = step["last_validation"]
         if step["grades"] and validation is not None:
-            metrics = ", ".join(f"{name} {value:g}" for name, value in sorted(validation["metrics"].items()))
-            lines.append(f"  last validation {validation['recorded_at']}  n={validation['n_items']}  {metrics}")
+            metrics = ", ".join(f"{name} {_metric(value)}" for name, value in sorted(validation["metrics"].items()))
+            validated = {True: "  validated yes", False: "  validated no"}.get(validation["validated"], "")
+            lines.append(f"  last validation {validation['recorded_at']}  n={validation['n_items']}  {metrics}{validated}")
     return lines
+
+
+def _validated(details: str | None) -> bool | None:
+    """``details.pass`` of a ``judge_validations`` kappa row (``eval validate-judge`` writes it); ``None`` for a row
+    without a recorded pass rule."""
+
+    try:
+        recorded = json.loads(details) if details else None
+    except json.JSONDecodeError:
+        return None
+    return bool(recorded["pass"]) if isinstance(recorded, dict) and isinstance(recorded.get("pass"), bool) else None
+
+
+def _metric(value: float | None) -> str:
+    return "undefined" if value is None else f"{value:g}"

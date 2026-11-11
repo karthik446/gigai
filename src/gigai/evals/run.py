@@ -401,7 +401,8 @@ def resolve_scorer(name: str) -> ScorerSpec:
 
 
 def check_judge(connection: sqlite3.Connection, gig: GigContext, spec: ScorerSpec, judge_model: str) -> None:
-    """Refuse judge scorer ``spec`` unless the latest kappa validation of its model and prompt passes its step's bar."""
+    """Refuse judge scorer ``spec`` unless the latest kappa validation of its model and prompt passes its step's bar
+    and, when the row records one (``eval validate-judge``), its own pass rule."""
 
     entry = _entry(gig, spec.judge_step or "")
     validation = entry.get("validation") if isinstance(entry.get("validation"), dict) else None
@@ -409,16 +410,44 @@ def check_judge(connection: sqlite3.Connection, gig: GigContext, spec: ScorerSpe
         raise JudgeNotValidatedError(f"scorer {spec.id}: judge step {spec.judge_step!r} declares no validation")
     min_n, min_kappa = int(validation.get("min_n", 1)), float(validation.get("min_kappa", 0.0))
     latest = connection.execute(
-        "SELECT n_items, value FROM judge_validations WHERE scorer_id = ? AND judge_model = ?"
+        "SELECT n_items, value, details FROM judge_validations WHERE scorer_id = ? AND judge_model = ?"
         " AND judge_prompt_sha256 = ? AND metric = 'kappa' ORDER BY recorded_at DESC, rowid DESC LIMIT 1",
         (spec.id, judge_model, contracts.JUDGE_PROMPT_SHA256),
     ).fetchone()
-    if latest is None or latest[0] < min_n or latest[1] < min_kappa:
-        found = "none" if latest is None else f"kappa {latest[1]:.3f} over {latest[0]} items"
+    reasons = [] if latest is None else _validation_failures(latest[0], latest[1], latest[2], min_n, min_kappa)
+    if latest is None or reasons:
+        found = "none" if latest is None else f"kappa {_number(latest[1])} over {latest[0]} items"
+        why = f", which fails: {', '.join(reasons)}" if reasons else ""
         raise JudgeNotValidatedError(
             f"scorer {spec.id} refused: judge {judge_model} with prompt {contracts.JUDGE_PROMPT_SHA256} needs a"
-            f" validation of kappa >= {min_kappa} over >= {min_n} items (latest: {found}); validate the judge first"
+            f" validation of kappa >= {min_kappa} over >= {min_n} items (latest: {found}){why}; validate the judge first"
         )
+
+
+def _validation_failures(n_items: int, kappa: float | None, details: str | None, min_n: int, min_kappa: float) -> list[str]:
+    """Why a ``judge_validations`` kappa row does not unlock its scorer: the step's bar, then the row's own recorded
+    rule (``details.pass`` with ``details.reasons``, written by ``eval validate-judge``; a row without details has
+    none)."""
+
+    reasons: list[str] = []
+    if n_items < min_n:
+        reasons.append(f"n < {min_n}")
+    if kappa is None or kappa < min_kappa:
+        reasons.append(f"kappa < {min_kappa}")
+    try:
+        recorded = json.loads(details) if details else None
+    except json.JSONDecodeError:
+        recorded = None
+    if isinstance(recorded, dict) and recorded.get("pass") is False:
+        rule = recorded.get("reasons") if isinstance(recorded.get("reasons"), list) else []
+        reasons.extend(str(reason) for reason in rule if str(reason) not in reasons)
+        if not rule:
+            reasons.append("recorded pass rule not met")
+    return reasons
+
+
+def _number(value: float | None) -> str:
+    return "undefined" if value is None else f"{value:.3f}"
 
 
 def load_suite(gig: GigContext, entry: Mapping[str, Any], suite: str, *, expect_sha256: str | None = None) -> Suite:
