@@ -1,0 +1,20 @@
+"""The {{name}} gig's web app: a stdlib WSGI callable for core to mount under `/gigs/{{name}}/`.
+
+`[server] mode = "mount"` declares `app`; gigai core does not serve mount-mode gigs yet, so nothing calls this
+until it does. `--server process` is the mode core runs today.
+"""
+
+from importlib import metadata
+
+
+def app(environ, start_response):
+    path = environ.get("PATH_INFO") or "/"
+    if path == "/health":
+        body = b"ok\n"
+    elif path == "/":
+        body = f"{{name}} {metadata.version('{{dist}}')}\n".encode()
+    else:
+        start_response("404 Not Found", [("Content-Type", "text/plain; charset=utf-8")])
+        return [b"not found\n"]
+    start_response("200 OK", [("Content-Type", "text/plain; charset=utf-8"), ("Content-Length", str(len(body)))])
+    return [body]

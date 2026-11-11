@@ -255,12 +255,12 @@ def test_gig_info_names_an_unknown_gig(tmp_path: Path, site: Path) -> None:
 # --- the workpad renames ----------------------------------------------------------------------------------
 
 
-def test_gig_help_lists_only_list_info_and_check() -> None:
+def test_gig_help_lists_its_verbs() -> None:
     result = CliRunner().invoke(cli, ["gig", "--help"])
 
     assert result.exit_code == 0, result.output
     commands = result.stdout.split("Commands:\n", 1)[1]
-    assert [line.split()[0] for line in commands.splitlines() if line.strip()] == ["check", "info", "list"]
+    assert [line.split()[0] for line in commands.splitlines() if line.strip()] == ["check", "info", "install", "list", "new", "uninstall", "update"]
 
 
 def test_workpad_owns_list_and_use_and_the_old_spellings_are_hidden() -> None:

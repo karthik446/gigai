@@ -72,3 +72,54 @@ flowchart LR
 
 See [Architecture](../architecture/) for where the pieces live and the
 [CLI reference](../../reference/cli/) for every command.
+
+## Write your first gig
+
+`gigai gig new <name>` writes a new gig project into `./gigai-<name>/` in the
+current directory. It works offline: nothing is installed or fetched. The name
+takes 2-32 lowercase letters, digits and `-`, starting with a letter. The
+command refuses (exit 2) a name that is already a gigai command or an
+installed gig, and a `./gigai-<name>/` that exists and is not empty.
+
+```
+gigai gig new hello
+cd gigai-hello
+gigai gig check .
+gigai gig install .           # into the gigai you run (a `uv tool` install or a venv)
+gigai hello capture --label first
+gigai hello show
+```
+
+The tree it writes, for `hello`:
+
+```
+gigai-hello/
+  pyproject.toml          # dist gigai-hello, depends on gigai>=0.2.0a1,<0.3, entry point gigai.gigs: hello
+  README.md
+  AGENTS.md               # the rules for a coding agent working on the gig
+  src/gigai_hello/
+    __init__.py
+    cli.py                # the Click group mounted as `gigai hello`: capture, show
+    gig.toml              # the manifest: [gig] core = ">=0.2,<0.3", commands, config, data, docs
+    config.schema.json    # validates [config.defaults]
+    docs/index.md         # the gig's page
+    docs/commands.yaml    # the gig's CLI manual (JSON)
+  tests/test_contract.py  # the tests `gigai gig check` runs
+```
+
+`capture` and `show` are examples to replace: `capture` writes a JSON file
+into `snapshots/` in the gig folder `<home>/gigs/hello/`, and `show` lists
+them. `gigai gig check .` checks the installed project against the gig
+contract: the manifest, the entry point, the help text of every verb, the docs
+and the project's own tests.
+
+`--server` adds a web server to the gig, in one of two modes:
+
+- `--server process` adds a `[server]` table and `src/gigai_hello/server.py`, a
+  small HTTP server. Core starts it on `127.0.0.1` with
+  `gigai hello run` (it runs the `start` command with a free `{port}`), waits
+  until `/health` answers, and stops it with `gigai hello stop`;
+  `gigai hello status` shows it.
+- `--server mount` adds a `[server]` table that names a WSGI `app` in
+  `server.py`, for core to serve under `/gigs/hello/`. Core does not serve
+  mount-mode gigs yet, so use `process` for a server that runs today.

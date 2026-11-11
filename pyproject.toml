@@ -72,6 +72,7 @@ where = ["src"]
 "gigai.evals._vendor.inspect_ai" = ["LICENSE", "DIFF.md"]
 "gigai.evals" = ["migrations/*.sql", "ladder.toml"]
 "gigai.evals.datasets" = ["NOTICES.md"]
+"gigai.gigs" = ["templates/**/*.tmpl"]
 "gigai" = ["static/*.css", "data/cli/*.yaml", "data/agent/*.md"]
 
 [tool.pytest.ini_options]

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "{{name}} config",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "show_limit": {"type": "integer", "minimum": 1, "description": "How many snapshots `show` lists by default."}
+  },
+  "required": ["show_limit"]
+}

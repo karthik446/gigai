@@ -1,0 +1,25 @@
+[gig]
+manifest_format = 1
+name = "{{name}}"
+description = "{{description}}"
+core = ">=0.2,<0.3"
+
+[commands]
+group = "{{package}}.cli:{{group}}"
+provides = ["capture", "show"]
+
+[dependencies]
+python = ">=3.11"
+
+[config]
+schema = "config.schema.json"
+[config.defaults]
+show_limit = 10
+
+[data]
+dirs = ["snapshots"]
+
+[docs]
+page = "docs/index.md"
+cli_manual = "docs/commands.yaml"
+{{server}}

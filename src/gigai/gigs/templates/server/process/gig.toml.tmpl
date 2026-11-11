@@ -1,0 +1,6 @@
+
+[server]
+mode = "process"
+start = ["python", "-m", "{{package}}.server", "--port", "{port}", "--data", "{data}"]
+health = "/health"
+mount_path = "/gigs/{{name}}/"

@@ -1,0 +1,66 @@
+"""Click group mounted by core as `gigai {{name}}`.
+
+Heavy imports go inside commands, never at module level (keeps `gigai --help` fast). Core passes each
+command a `gigai.sdk.GigContext` as the Click context object; it is `None` when the group runs outside gigai.
+"""
+
+from __future__ import annotations
+
+import json
+import tomllib
+from importlib import resources
+from typing import TYPE_CHECKING
+
+import click
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from gigai.sdk import GigContext
+
+
+def _manifest() -> dict:
+    return tomllib.loads(resources.files(__package__).joinpath("gig.toml").read_text(encoding="utf-8"))
+
+
+def _snapshots(ctx: GigContext | None) -> Path:
+    if ctx is None:
+        raise click.UsageError("run this through gigai: gigai {{name}} ...")
+    folder = ctx.folder / "snapshots"
+    folder.mkdir(exist_ok=True)
+    return folder
+
+
+@click.group("{{name}}")
+def {{group}}() -> None:
+    """{{description}}"""
+
+
+@{{group}}.command("capture")
+@click.option("--label", default="snapshot", show_default=True, help="Label stored with the snapshot.")
+@click.pass_obj
+def capture(ctx: GigContext | None, label: str) -> None:
+    """Record a new snapshot (a JSON file) in this gig's folder."""
+    from datetime import datetime, timezone
+
+    created = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    path = _snapshots(ctx) / f"{created}.json"
+    path.write_text(json.dumps({"label": label, "created": created}) + "\n", encoding="utf-8")
+    click.echo(f"captured {path.name}")
+
+
+@{{group}}.command("show")
+@click.option("--limit", type=int, default=None, help="How many snapshots to list; default: config show_limit.")
+@click.pass_obj
+def show(ctx: GigContext | None, limit: int | None) -> None:
+    """List the newest snapshots in this gig's folder."""
+    if limit is None:
+        limit = int(_manifest()["config"]["defaults"]["show_limit"])
+    for path in sorted(_snapshots(ctx).glob("*.json"), reverse=True)[:limit]:
+        click.echo(f"{path.stem}  {json.loads(path.read_text(encoding='utf-8'))['label']}")
+
+
+@{{group}}.command("describe", hidden=True)
+def describe() -> None:
+    """Print gig.toml as JSON (the out-of-process contract; same document core reads in-process)."""
+    click.echo(json.dumps(_manifest(), sort_keys=True))

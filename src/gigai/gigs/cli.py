@@ -1,8 +1,10 @@
-"""``gigai gig list | info | check``: inspect installed gigs (``gigai.gigs`` entry points) and gig manifests.
+"""``gigai gig list | info | check | new | install | update | uninstall``: inspect installed gigs (``gigai.gigs`` entry
+points) and gig manifests, scaffold a new gig project (``gigai.gigs.new``) and add, refresh or remove a gig
+(``gigai.gigs.install``).
 
 Nothing here imports a gig except ``gig check <name>`` items 4-6, which must load it, and item 11, which imports the
 ``[evals]`` scorer symbols in a child interpreter. Registered with one
-``cli.add_command(gig_group)`` in ``gigai.cli``; later packets add ``new`` and ``install|update|uninstall``.
+``cli.add_command(gig_group)`` in ``gigai.cli``.
 """
 
 from __future__ import annotations
@@ -15,13 +17,15 @@ import click
 
 from . import manifest as gig_manifest
 from .check import FAIL, Result, check_file, check_installed
+from .install import install_command, uninstall_command, update_command
 from .loader import LazyGig
 from .manifest import InstalledGig, ManifestError, gig_table
+from .new import SERVER_MODES, create
 
 
 @click.group("gig")
 def gig_group() -> None:
-    """Inspect installed gigs and check gig manifests."""
+    """Install, inspect, check and scaffold gigs."""
 
 
 @gig_group.command("list")
@@ -161,6 +165,22 @@ def gig_check_command(gig: str) -> None:
         raise click.exceptions.Exit(1)
 
 
+@gig_group.command("new")
+@click.argument("name")
+@click.option(
+    "--server",
+    type=click.Choice(SERVER_MODES),
+    default=None,
+    help="Add a [server] table and a server.py: process (core starts it with `gigai <name> run`) or mount (a WSGI app).",
+)
+def gig_new_command(name: str, server: str | None) -> None:
+    """Write a new gig project into ./gigai-NAME/: package, gig.toml, docs and contract tests, ready for `gigai gig check .`."""
+
+    target = create(name, server, Path.cwd())
+    click.echo(f"wrote {target}")
+    click.echo(f"next: cd {target.name} && gigai gig check . && gigai gig install .")
+
+
 def _result_line(result: Result) -> str:
     return f"{result.outcome:<4}  {result.item:>4}  {result.message}"
 
@@ -198,3 +218,8 @@ def _project_manifest(directory: Path) -> Path:
         reason = "no gig.toml" if not found else f"{len(found)} gig.toml files ({', '.join(map(str, found))})"
         raise click.ClickException(f"{directory}: {reason} in it, in a package folder below it, or below its src/")
     return found[0]
+
+
+gig_group.add_command(install_command)
+gig_group.add_command(update_command)
+gig_group.add_command(uninstall_command)

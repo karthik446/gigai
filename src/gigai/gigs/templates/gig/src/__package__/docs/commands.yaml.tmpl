@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "commands": {
+    "{{name}} capture": {
+      "summary": "Record a new snapshot (a JSON file) in this gig's folder.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text.",
+      "examples": ["gigai {{name}} capture --label first"]
+    },
+    "{{name}} show": {
+      "summary": "List the newest snapshots in this gig's folder.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text.",
+      "examples": ["gigai {{name}} show --limit 5"]
+    }
+  }
+}
