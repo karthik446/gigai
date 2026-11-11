@@ -21,6 +21,18 @@ ROOT = Path(__file__).resolve().parents[3]
 CLI = str(Path(sys.executable).with_name("gigai"))
 
 
+def _outputs(bad: list[str]) -> str:
+    """The head of each failed journey's output file: the CI log is the only place a runner-only failure can be read."""
+
+    shown = []
+    for line in bad[:3]:
+        _, _, path = line.partition("output in ")
+        out = Path(path)
+        if out.is_file():
+            shown.append(f"--- {out.name}\n{out.read_text(encoding='utf-8', errors='replace')[:1500]}")
+    return "\n".join(shown)
+
+
 def test_the_sweep_with_the_same_cli_on_both_sides_is_clean(tmp_path: Path) -> None:
     # OLD == NEW, so every row of the real allow file would be "stale": run with an empty one.
     no_rows = tmp_path.parent / f"{tmp_path.name}-no-allow-rows"
@@ -35,7 +47,7 @@ def test_the_sweep_with_the_same_cli_on_both_sides_is_clean(tmp_path: Path) -> N
     assert len(yaml_commands) >= 187, "0.1.11.13 shipped 187 public commands; none may disappear"
     assert lines[:1] == [f"commands: {len(yaml_commands)}"], result.stdout[-2000:] + result.stderr[-2000:]
     bad = [line for line in lines if line.startswith(("FAIL", "DIFF"))]
-    assert bad == [], "\n".join(bad) + "\n" + result.stderr[-2000:]
+    assert bad == [], "\n".join(bad) + "\n" + result.stderr[-2000:] + _outputs(bad)
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
     assert list(tmp_path.iterdir()) == [], "a clean sweep deletes its scratch dir"
 
