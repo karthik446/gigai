@@ -22,6 +22,39 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.2.0a1
+
+This is a pre-release of GigAI 2. Install it by name: `uv tool install gigai==0.2.0a1`
+(a plain `uv tool upgrade gigai` stays on the last stable release unless you pass `--prerelease allow`).
+
+#### Added
+
+- **Gigs are a first-class thing.** `gigai gig list`, `gigai gig info <name>` and `gigai gig check <name>` show the
+  gigs installed next to GigAI, whether each works with this GigAI, and what is wrong when one does not. Scout is the
+  first gig to ship this way: it is installed with GigAI and is described by its own `gig.toml`, and `gigai scout ...`
+  behaves exactly as before.
+- **Gigs get their own folder.** A gig that wants to keep state gets `<home>/gigs/<gig>/` with its own small
+  database; a gig that never asks for it never gets a folder. Scout keeps using its existing folders.
+- **Statistics for evaluations.** GigAI carries a small, dependency-free statistics module (paired tests, confidence
+  intervals, cluster-aware intervals, multiple-comparison corrections, equivalence tests, minimum detectable effect).
+  It is documented under Concepts, "Eval statistics".
+
+#### Changed
+
+- **A registered Gig workpad is now called a "workpad" in commands.** `gigai workpad list` and `gigai workpad use`
+  replace `gigai gigs` and `gigai gig use` for listing and selecting; the old two names still work and say so.
+- **The ten top-level Scout command groups** (`external`, `capability`, `application`, `scout-report`,
+  `scout-documents`, `scout-answer`, `scout-acquisition`, `scout-import`, `scout-interview`, `scout-transfer`) are
+  hidden from `gigai --help` and print one deprecation line when used; they behave as before otherwise, and they are
+  removed at 0.4.0 or later. `gigai scout --help` lists the same commands as before.
+
+#### Upgrade notes
+
+- Nothing in your data changes: this release is additive and your existing home is read as it is.
+- To go back: `uv tool install --reinstall gigai==0.1.11.13`.
+- A script that parses stdout of the deprecated aliases with `--json` is unaffected (the deprecation line goes to
+  stderr there); without `--json` the line is the first line of stdout.
+
 ### 0.1.11.13
 
 #### Fixed

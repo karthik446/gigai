@@ -30,7 +30,7 @@ from tools import release_notes
 ALLOWED_BRANCHES = ("main", "karthik446/gigai-v*")
 
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-_VERSION = re.compile(r"^[0-9]+(\.[0-9]+)+$")
+_VERSION = re.compile(r"^[0-9]+(\.[0-9]+)+((a|b|rc)[0-9]+)?$")
 _CATALOG_REVISION = re.compile(r'^CATALOG_REVISION\s*=\s*"(?P<value>[^"]*)"\s*$', re.MULTILINE)
 
 
@@ -95,7 +95,7 @@ def validate_dispatch(
     if not _FULL_SHA.match(sha):
         raise ReleaseDispatchError(f"sha {sha!r} must be a full 40-character lowercase commit id")
     if not _VERSION.match(version):
-        raise ReleaseDispatchError(f"version {version!r} must look like 0.1.9 or 0.1.9.1")
+        raise ReleaseDispatchError(f"version {version!r} must look like 0.1.9, 0.1.9.1 or 0.2.0a1")
     if facts.resolved_commit != sha:
         raise ReleaseDispatchError(f"sha {sha} is not a commit in this repository")
     if not allowed_branches(facts.branches):

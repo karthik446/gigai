@@ -48,6 +48,19 @@ def test_bad_sha_is_rejected() -> None:
 
 def test_bad_version_is_rejected() -> None:
     _rejects("must look like", version="v0.1.9.1")
+    for bad in ("0.2.0a", "0.2.0a1.1", "0.2.0x1", "0.2.0rc", "0.2.0-1", "0.2.0A1"):
+        _rejects("must look like", version=bad)
+
+
+def test_pre_release_versions_are_accepted() -> None:
+    for version in ("0.2.0a1", "0.2.0b2", "0.2.0rc10", "0.2.0", "0.1.11.13"):
+        facts = replace(
+            GOOD,
+            pyproject=f'[project]\nname = "gigai"\nversion = "{version}"\n',
+            catalog=f'CATALOG_REVISION = "v{version}"\n',
+            changelog=f"# Changelog\n\n## Released versions\n\n### {version}\n\n- a change\n",
+        )
+        release_dispatch.validate_dispatch(SHA, version, facts)
 
 
 def test_branch_not_allowed() -> None:

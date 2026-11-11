@@ -12,7 +12,7 @@ DOCS = ROOT / "gigai-docs" / "src" / "content" / "docs"
 
 def test_install_pin_example_is_the_project_version() -> None:
     version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-    pins = re.findall(r"gigai@v([0-9][0-9.]*)", (DOCS / "install.md").read_text(encoding="utf-8"))
+    pins = re.findall(r"gigai@v([0-9][0-9.]*(?:(?:a|b|rc)[0-9]+)?)", (DOCS / "install.md").read_text(encoding="utf-8"))
     assert pins, "install.md has no release-pin example"
     assert set(pins) == {version}, f"install.md pins {pins}, pyproject says {version}"
 

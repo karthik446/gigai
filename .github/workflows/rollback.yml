@@ -54,7 +54,7 @@ jobs:
           VERSION: ${{ inputs.version }}
           RESTORE: ${{ inputs.restore }}
         run: |
-          case "${VERSION}${RESTORE}" in *[!0-9.]*) echo "versions must look like 0.1.10.3" >&2; exit 1;; esac
+          case "${VERSION}${RESTORE}" in *[!0-9.abrc]*) echo "versions must look like 0.1.10.3 or 0.2.0a1" >&2; exit 1;; esac
           gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" --json tagName >/dev/null
           if [ -z "${RESTORE}" ]; then
             # the newest published, not withdrawn release that sorts below <version>
