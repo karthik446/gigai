@@ -1,14 +1,35 @@
-"""Code scorers the eval fixture's ``[evals]`` table names (``gig check`` item 11 imports them).
+"""Code scorers and the ``solve`` postprocess the eval fixture's ``[evals]`` table names (``gig check`` item 11
+imports them).
 
-``exact_match`` takes the step's parsed output and the dataset row; the scorer contract that calls it (what it
-returns, how it is recorded) is V4's ``eval run``.
+A scorer takes the stored trace (``trace.output`` the raw reply, ``trace.parsed`` what the step's postprocess made
+of it) and the dataset row's ``expected``, and returns a ``Score``; ``eval run`` records its value per trace.
 """
 
+import re
 
-def exact_match(output, item):
-    """1.0 when the parsed answer equals the row's ``expected`` (case and surrounding space ignored), else 0.0."""
+from gigai.sdk import CORRECT, INCORRECT, Score, pattern
 
-    answer = output.get("answer") if isinstance(output, dict) else None
+#: ``inspect_ai``'s ``pattern()`` on the ``ANSWER: <digits>`` marker: the captured text must equal the target as
+#: text, so ``"ANSWER: 1,234"`` captures ``"1"`` and is incorrect (``match`` would normalise the number).
+answer_marker = pattern(r"ANSWER:\s*(\d+)")
+
+_NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+
+
+def exact_match(trace, reference):
+    """Correct when the parsed answer equals ``reference`` (case and surrounding space ignored)."""
+
+    answer = trace.parsed.get("answer") if isinstance(trace.parsed, dict) else None
     if not isinstance(answer, str):
-        return 0.0
-    return 1.0 if answer.strip().casefold() == str(item.get("expected", "")).strip().casefold() else 0.0
+        return Score(INCORRECT, explanation=f"parse status {trace.parse_status}")
+    right = answer.strip().casefold() == str(reference).strip().casefold()
+    return Score(CORRECT if right else INCORRECT, answer=answer)
+
+
+def final_number(text):
+    """The ``solve`` step's postprocess: the last number in the reply, commas dropped; ``invalid`` without one."""
+
+    found = _NUMBER.findall(text)
+    if not found:
+        return None, "invalid"
+    return {"answer": found[-1].replace(",", "")}, "ok"

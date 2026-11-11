@@ -55,8 +55,8 @@ def test_list_json_has_every_step_and_dataset_provenance(tmp_path: Path, site: P
     listing = _listing(tmp_path, site, home)
 
     assert (listing["gig"], listing["cluster"], listing["store"]) == (GIG, "fixture", None)
-    assert [step["id"] for step in listing["steps"]] == ["answer", "judge"]
-    answer, judge = listing["steps"]
+    assert [step["id"] for step in listing["steps"]] == ["answer", "judge", "solve"]
+    answer, judge, _solve = listing["steps"]
     for dataset in answer["datasets"].values():
         assert all(dataset[key] for key in ("sha256", "licence", "source")), dataset
     ci, release = answer["datasets"]["ci"], answer["datasets"]["release"]
@@ -93,7 +93,7 @@ def test_list_reports_the_last_run_and_the_latest_judge_validation(tmp_path: Pat
         connection.close()
 
     before = _snapshot(home)
-    answer, judge = _listing(tmp_path, site, home)["steps"]
+    answer, judge, _solve = _listing(tmp_path, site, home)["steps"]
     assert _snapshot(home) == before  # eval list writes nothing, the store included
 
     assert answer["last_run"]["run_id"] == "run_b"
@@ -110,7 +110,7 @@ def test_list_text_names_private_data_and_never_imports_scorers(tmp_path: Path, 
     completed = _gigai(tmp_path, site, home, GIG, "eval", "list")
 
     assert completed.returncode == 0, completed.stderr
-    assert "eval-fixture: 2 eval step(s), cluster fixture" in completed.stdout
+    assert "eval-fixture: 3 eval step(s), cluster fixture" in completed.stdout
     assert "dataset release  {data}/datasets/answer-release.jsonl  absent (private)" in completed.stdout
     assert "last run: none" in completed.stdout
 
@@ -170,7 +170,7 @@ def test_eval_is_mounted_only_on_a_gig_with_an_evals_table(tmp_path: Path, site:
 
     evals_help = _gigai(tmp_path, site, home, GIG, "eval", "--help")
     assert evals_help.returncode == 0
-    assert "list  List this gig's eval steps" in evals_help.stdout
+    assert "list     List this gig's eval steps" in evals_help.stdout
     assert "eval " in _gigai(tmp_path, site, home, GIG, "--help").stdout
     assert "eval " not in _gigai(tmp_path, site, home, "storegig", "--help").stdout
     assert _gigai(tmp_path, site, home, "storegig", "eval", "list").returncode == 2

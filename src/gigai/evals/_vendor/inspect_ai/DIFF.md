@@ -50,6 +50,10 @@ Unchanged (same result in both): NaN in `var()` (`nan`); NaN or one-signed inf i
 
 The bootstrap draws from Python's `random` module (`random.choices`) instead of `numpy.random`, so a seeded run gives different, equally distributed resamples and `random.seed` replaces `numpy.random.seed`. Bit-for-bit reproduction of a seeded value relies on CPython keeping the `random.choices` algorithm; Python's reproducibility guarantee covers only `random()`.
 
+## Scorers (`scorers/`)
+
+The `match`, `includes` and `pattern` scorer bodies, their helpers and the model-graded judge template are vendored from the same commit into the `scorers/` subpackage, under the same `LICENSE` (above). Their hash table, change counts, behaviour differences and diff are in `scorers/DIFF.md`, checked by `tests/behaviors/evals/test_scorers_lifted.py`; this file covers the top-level statistics files only.
+
 ## Diff against upstream (`diff -u`, generated, not hand-edited)
 
 ```diff

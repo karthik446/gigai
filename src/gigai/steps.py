@@ -44,7 +44,7 @@ from .gigs.home import ensure_gig_folder, gig_folder
 if TYPE_CHECKING:
     from .adapters.port import InvocationResult
     from .config import GigAIConfig
-    from .evals.records import ItemRef, PromptRef, RunRecord
+    from .evals.records import ItemRef, Postprocess, PromptRef, RunRecord
     from .model_targets import ResolvedModelTarget
     from .sdk.context import GigContext
 
@@ -274,7 +274,15 @@ def _adhoc_run(ctx: GigContext, input: str) -> RunRecord:
 
 
 def call(
-    ctx: GigContext, step_id: str, input: str, *, run: RunRecord | None, item: ItemRef | None, settings: Mapping[str, Any]
+    ctx: GigContext,
+    step_id: str,
+    input: str,
+    *,
+    run: RunRecord | None,
+    item: ItemRef | None,
+    settings: Mapping[str, Any],
+    repeat_index: int = 0,
+    postprocess: Postprocess | None = None,
 ) -> InvocationResult:
     """``ctx.model``: resolve, refuse what the target cannot carry, call, and trace when ``evals.sqlite`` exists."""
 
@@ -304,6 +312,7 @@ def call(
     finally:
         binding.close()
     if records.evals_db_path(ctx.name, ctx.home).is_file():
+        parsed, status = postprocess(result.output_text) if postprocess is not None else (None, "not_parsed")
         ctx.trace(
             step_id,
             input,
@@ -312,6 +321,9 @@ def call(
             item=item or records.ItemRef("adhoc", "1"),
             prompt=_prompt(ctx.manifest, step_id),
             model=records.model_call(binding, request, result),
+            repeat_index=repeat_index,
+            output_parsed=parsed,
+            parse_status=status,
         )
     return result
 

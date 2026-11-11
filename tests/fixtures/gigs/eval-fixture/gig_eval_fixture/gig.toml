@@ -23,6 +23,10 @@ prompt = "prompts/judge.txt"
 target = "deterministic-b"
 settings = { temperature = 0.0 }
 
+[steps.solve]
+prompt = "prompts/solve.txt"
+target = "deterministic-a"
+
 [evals]
 cluster = "fixture"
 
@@ -43,3 +47,13 @@ prompt = { id = "judge", version = "1", file = "prompts/judge.txt" }
 grades = "answer"
 dimension = "correctness"
 validation = { against = "dataset.jsonl", min_n = 3, min_kappa = 0.6, report = ["tpr", "tnr", "kappa"] }
+
+# `eval run --step solve --suite ci`: the committed 10-item tinyGSM8k ci slice, answered from responses.json with
+# the canned completions of the evals re-spike's scoring check (every 10th source row wrong).
+[[evals.steps]]
+id = "solve"
+model_target = "offline-default"
+prompt = { id = "solve", version = "1", file = "prompts/solve.txt" }
+postprocess = "gig_eval_fixture.scorers:final_number"
+scorers = ["gigai.evals.contracts:match", "gig_eval_fixture.scorers:answer_marker"]
+datasets.ci = { path = "tinygsm8k.jsonl", source = "tinyBenchmarks/tinyGSM8k @ b870449ed96ee3e308748b550908332450ec4098 (ci slice of 10 rows)", licence = "MIT", sha256 = "d75f87e7d63bfcff9c5db621a4d67a751b2d652e778b2fa28c0554d20b6bc81d" }

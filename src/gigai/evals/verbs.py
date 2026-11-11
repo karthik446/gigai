@@ -2,8 +2,8 @@
 
 ``loader.LazyGig.load`` adds the group next to core's ``export`` (``eval_verbs``). Each subverb is one line of
 ``EVAL_VERBS``: its name and the ``module:attr`` of its Click command, imported only when the subverb is looked up,
-so mounting the group imports none of them. ``list`` is here; ``run``, ``compare``, ``label``, ``report`` and
-``gate`` (jhf section 9.3) each add their line.
+so mounting the group imports none of them. ``list``, ``run`` and ``rescore`` are here; ``compare``, ``label``,
+``report`` and ``gate`` (jhf section 9.3) each add their line.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ import click
 
 EVAL_VERBS: dict[str, str] = {
     "list": "gigai.evals.list:list_command",
+    "run": "gigai.evals.run:run_command",
+    "rescore": "gigai.evals.run:rescore_command",
 }
 
 

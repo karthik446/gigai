@@ -14,6 +14,12 @@ CREATE TABLE runs (
     dataset_slice_recipe TEXT NOT NULL,  -- JSON: filter + stratification + count
     dataset_seed INTEGER,  -- the sampling seed; NULL when the slice is not sampled
     prereg TEXT,  -- JSON {primary_metric, guard_metric, pass_rule, margin, n_planned, registered_at}; NULL when none
+    step_id TEXT,  -- the step `eval run` ran; NULL for ctx.trace / ctx.model outside `eval run`
+    suite TEXT,  -- 'ci', 'release' or 'upgrade' for `eval run`; NULL otherwise
+    tag TEXT,  -- the operator's `--tag`
+    k INTEGER CHECK (k >= 1),  -- repeats per item
+    replay_of TEXT REFERENCES runs (run_id),  -- the run whose traces this run re-scored (`eval run --from-traces`)
+    calls_made INTEGER CHECK (calls_made >= 0),  -- adapter calls the run made; set when `eval run` finishes or stops
     created_at TEXT NOT NULL
 );
 

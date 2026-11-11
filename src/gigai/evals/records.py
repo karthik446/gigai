@@ -95,6 +95,13 @@ class RunRecord:
     manifest_digest: str
     dataset: Dataset
     prereg: Prereg | None = None
+    #: ``eval run``'s step, suite, ``--tag`` and repeats per item; ``None`` for a run ``ctx.trace`` made up.
+    step_id: str | None = None
+    suite: str | None = None
+    tag: str | None = None
+    k: int | None = None
+    #: The run whose traces this run re-scored with no model call (``eval run --from-traces``).
+    replay_of: str | None = None
     schema_version: int = SCHEMA_VERSION
     created_at: str = field(default_factory=lambda: _now())
 
@@ -342,6 +349,16 @@ def write_trace(connection: sqlite3.Connection, trace: TraceRecord) -> None:
         _put_trace(connection, trace)
 
 
+def finish_run(connection: sqlite3.Connection, run_id: str, calls_made: int) -> None:
+    """Record how many adapter calls run ``run_id`` made (``eval run`` sets it when it finishes or stops)."""
+
+    if type(calls_made) is not int or calls_made < 0:
+        raise EvalsError(f"calls_made must be a non-negative integer, not {calls_made!r}")
+    with _transaction(connection):
+        if connection.execute("UPDATE runs SET calls_made = ? WHERE run_id = ?", (calls_made, run_id)).rowcount != 1:
+            raise EvalsError(f"run {run_id} is not recorded")
+
+
 def write_score(connection: sqlite3.Connection, score: ScoreRecord) -> None:
     """Record ``score``; its trace must be recorded already."""
 
@@ -447,6 +464,44 @@ def replay(home: Path, gig: str, run_id: str, postprocess: Postprocess, *, step_
     return replayed
 
 
+def copy_traces(
+    connection: sqlite3.Connection, source_run_id: str, run: RunRecord, step_id: str, postprocess: Postprocess | None
+) -> int:
+    """Record ``run`` and copy run ``source_run_id``'s traces of ``step_id`` into it; no model call; returns the count.
+
+    Each copy keeps the original's input, output and model columns (they describe the call that produced the output)
+    under a fresh trace id, with the output parsed again by ``postprocess`` (``None``: not parsed). A trace whose
+    stored input or output no longer matches its SHA-256 is refused and nothing is written.
+    """
+
+    columns = [row[1] for row in connection.execute("PRAGMA table_info(traces)")]
+    with _transaction(connection):
+        _put_run(connection, run)
+        rows = connection.execute(
+            f"SELECT {', '.join(columns)} FROM traces WHERE run_id = ? AND step_id = ?"
+            " ORDER BY item_id, repeat_index, attempt_index, trace_id",
+            (source_run_id, step_id),
+        ).fetchall()
+        for values in rows:
+            row = dict(zip(columns, values, strict=True))
+            if _sha256(row["input"]) != row["input_sha256"] or _sha256(row["output_raw_text"]) != row["output_sha256"]:
+                raise EvalsError(f"trace {row['trace_id']}: the stored input or output does not match its sha256")
+            parsed, status = postprocess(row["output_raw_text"]) if postprocess is not None else (None, "not_parsed")
+            if status not in PARSE_STATUSES:
+                raise EvalsError(f"postprocess returned parse status {status!r}; use one of {sorted(PARSE_STATUSES)}")
+            row.update(
+                trace_id=new_id("trace"),
+                run_id=run.run_id,
+                output_parsed=None if parsed is None else _json(parsed),
+                parse_status=status,
+                recorded_at=_now(),
+            )
+            connection.execute(
+                f"INSERT INTO traces ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", tuple(row.values())
+            )
+    return len(rows)
+
+
 # --- internals -------------------------------------------------------------------------------------------------
 
 
@@ -537,6 +592,11 @@ _RUN_FACTS = (
     "dataset_slice_recipe",
     "dataset_seed",
     "prereg",
+    "step_id",
+    "suite",
+    "tag",
+    "k",
+    "replay_of",
 )
 
 
@@ -551,6 +611,11 @@ def _put_run(connection: sqlite3.Connection, run: RunRecord) -> None:
         _json(run.dataset.slice_recipe),
         run.dataset.seed,
         None if run.prereg is None else _json(run.prereg),
+        run.step_id,
+        run.suite,
+        run.tag,
+        run.k,
+        run.replay_of,
     )
     stored = connection.execute(f"SELECT {', '.join(_RUN_FACTS)} FROM runs WHERE run_id = ?", (run.run_id,)).fetchone()
     if stored is None:
@@ -665,7 +730,9 @@ __all__ = [
     "ScoreRecord",
     "Settings",
     "TraceRecord",
+    "copy_traces",
     "evals_db_path",
+    "finish_run",
     "model_call",
     "new_id",
     "open_evals_db",

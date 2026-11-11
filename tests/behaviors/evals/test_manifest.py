@@ -151,7 +151,7 @@ def test_gig_check_passes_the_eval_fixture_project(tmp_path: Path, home: Path) -
     assert any("evals.steps.answer.prompt.file: prompts/answer.txt sha256 " in line for line in item_11)
     assert any("evals.steps.answer.datasets.ci: dataset.jsonl sha256 1900380c" in line for line in item_11)
     assert any(line.startswith("SKIP") and "datasets.release" in line and "absent (private)" in line for line in item_11)
-    assert any(line.startswith("PASS") and "2 scorer/postprocess symbol(s) import" in line for line in item_11)
+    assert any(line.startswith("PASS") and "5 scorer/postprocess symbol(s) import" in line for line in item_11)
 
 
 NEGATIVE = {

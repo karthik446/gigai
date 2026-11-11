@@ -56,6 +56,7 @@ def test_steps_lists_each_step_with_its_target_and_source(tmp_path: Path, site: 
     assert {step: (row["target"], row["source"]) for step, row in rows.items()} == {
         "answer": ("deterministic-a", "manifest"),
         "judge": ("deterministic-b", "manifest"),
+        "solve": ("deterministic-a", "manifest"),
     }
     assert rows["judge"]["settings"] == {"temperature": 0.0}
     text = _gigai(tmp_path, site, home, GIG, "steps").stdout
