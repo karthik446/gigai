@@ -36,6 +36,7 @@ from gigai.evals.records import (
     write_score,
     write_trace,
 )
+from gigai.gigs.home import GigNameError
 from gigai.model_targets import ResolvedModelTarget
 from gigai.sdk import (
     Dataset,
@@ -103,6 +104,17 @@ def _ctx(home: Path) -> GigContext:
 
 def _trace(run_id: str = "run_fixture", item: str = "q1") -> TraceRecord:
     return TraceRecord(new_id("trace"), run_id, "answer", ItemRef(item, "1", "sums"), "in", '{"answer": "4"}')
+
+
+@pytest.mark.parametrize("step", ["answer", "1.2/judge", "3.7/noise", "4.3/judge", "a.b-c_d/e"])
+def test_a_trace_takes_any_step_id_a_manifest_can_declare(step):
+    assert TraceRecord(new_id("trace"), "run_fixture", step, ItemRef("q1", "1", "sums"), "in", "out").step_id == step
+
+
+@pytest.mark.parametrize("step", ["", "/judge", "1.2/", "1.2//judge", "../x", "1.2/../x", ".hidden", "a b", "Ä", None])
+def test_a_trace_refuses_a_step_id_that_could_climb_out_or_is_empty(step):
+    with pytest.raises(GigNameError):
+        TraceRecord(new_id("trace"), "run_fixture", step, ItemRef("q1", "1", "sums"), "in", "out")
 
 
 def test_one_traced_call_writes_one_complete_trace_next_to_the_gigs_stores(tmp_path, site):

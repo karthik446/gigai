@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import stat
 import uuid
@@ -31,13 +32,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..canonical import digest_imported_bytes
-from ..gigs.home import check_name, ensure_gig_folder, gig_folder
+from ..gigs.home import GigNameError, check_name, ensure_gig_folder, gig_folder
 
 if TYPE_CHECKING:
     from ..adapters.factory import ModelAdapterBinding
     from ..adapters.port import InvocationRequest, InvocationResult
 
 EVALS_FILE = "evals.sqlite"
+#: A step id is a value in the store (never a path), so it may be the manifest's ``1.2/judge``: parts of letters, digits,
+#: ``_``, ``-`` and ``.`` joined by ``/``, no empty part and none starting with ``.``.
+_STEP_ID = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_.-]*(?:/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*")
 #: The ``user_version`` this gigai writes: one per file in ``migrations/``.
 SCHEMA_VERSION = 1
 _MIGRATIONS = ("0001_evals.sql",)
@@ -192,7 +196,8 @@ class TraceRecord:
     def __post_init__(self) -> None:
         _require_text("trace_id", self.trace_id)
         _require_text("run_id", self.run_id)
-        check_name("step", self.step_id)
+        if not isinstance(self.step_id, str) or _STEP_ID.fullmatch(self.step_id) is None:
+            raise GigNameError(f"invalid step name {self.step_id!r}: use letters, digits, '_', '-', '.' and '/' between parts")
         if not isinstance(self.input, str) or not isinstance(self.output_raw_text, str):
             raise EvalsError("a trace's input and output are text")
         for name in ("repeat_index", "attempt_index"):
