@@ -23,7 +23,6 @@ Errors name rungs, sets, item ids and SHA-256s, never item text.
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import json
 import math
 import os
@@ -39,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from ..canonical import sha256_hex
 from ..gigs.home import GigNameError, check_name
 from . import records, stats
 from . import datasets as ds
@@ -125,7 +125,7 @@ class Ladder:
 def ladder_sha256(path: Path | None = None) -> str:
     """The bare SHA-256 of the ladder file a gig's ``prereg`` pins."""
 
-    return hashlib.sha256(Path(path or LADDER_PATH).read_bytes()).hexdigest()
+    return sha256_hex(Path(path or LADDER_PATH).read_bytes())
 
 
 def load_ladder(path: Path | None = None) -> Ladder:
@@ -200,7 +200,7 @@ def load_ladder(path: Path | None = None) -> Ladder:
     replay = check.table(data, "replay", "")
     replay_out = {"max_abs_delta": check.number(replay, "max_abs_delta", "replay", low=0.0, open_low=True)}
     return Ladder(
-        sha256=hashlib.sha256(raw).hexdigest(),
+        sha256=sha256_hex(raw),
         registered_at=registered_at,
         rungs=rungs,
         tiers=tier_counts,
@@ -833,7 +833,7 @@ class _Context:
                 binding.port, request, max_wall_time_ms=_WALL_TIME_MS, max_output_tokens=binding.current.target.max_output_tokens
             )
         except Exception as exc:
-            digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
+            digest = sha256_hex(prompt.encode("utf-8"))[:12]
             raise RunFailed(f"rung {rung.name}: call {number} (input sha256 {digest}) failed: {type(exc).__name__}") from exc
         finally:
             binding.close()
@@ -1143,7 +1143,7 @@ def _noise(run: _Context, selected: Sequence[Rung], gated: Sequence[str], values
         return {"status": "not_validated", "reason": "no rung was reachable", "sd": None, "flip_rate": None, "n": 0}
     taken = allocate({name: len(items) for name, items in run.items.items()}, ladder.noise["items"])
     sets = [name for name in run.items if taken[name]]
-    digest = hashlib.sha256("\n".join(f"{name}:{run.items[name][0].sha256}" for name in sets).encode()).hexdigest()
+    digest = sha256_hex("\n".join(f"{name}:{run.items[name][0].sha256}" for name in sets).encode())
     dataset = records.Dataset("base-noise", run.source, dataset_digest(digest), {"base": True, "items": taken}, ds.SEED)
     record = run.run_record(None, f"base:{rung.name}:noise", k=ladder.noise["k"], dataset=dataset)
     records.write_run(run.connection, record)
@@ -1216,7 +1216,7 @@ def _canaries(
             dataset = records.Dataset(
                 f"base-canary-{name.replace('_', '-')}",
                 run.source,
-                dataset_digest(hashlib.sha256("\n".join(f"{s}:{run.items[s][0].sha256}" for s in sets).encode()).hexdigest()),
+                dataset_digest(sha256_hex("\n".join(f"{s}:{run.items[s][0].sha256}" for s in sets).encode())),
                 {"base": True, "canary": name, "sets": sets, "items": taken[name]},
                 ds.SEED,
             )

@@ -9,7 +9,6 @@ batch; :func:`validate_batch` is the format's one validator.
 from __future__ import annotations
 
 import getpass
-import hashlib
 import json
 import math
 import os
@@ -26,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from ..canonical import sha256_hex
 from . import records
 
 if TYPE_CHECKING:
@@ -750,7 +750,7 @@ def _who() -> str:
 
 def _seed(gig_name: str, step_id: str) -> int:
     return int.from_bytes(
-        hashlib.sha256(f"{gig_name}\0{step_id}".encode()).digest()[:8], "big"
+        bytes.fromhex(sha256_hex(f"{gig_name}\0{step_id}".encode()))[:8], "big"
     )
 
 

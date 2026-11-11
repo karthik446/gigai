@@ -24,6 +24,7 @@ import re
 import uuid
 from collections.abc import Callable, Collection
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 
@@ -220,6 +221,22 @@ def parse_json_bytes(data: bytes) -> Any:
 
 def _sha256_digest(data: bytes) -> str:
     return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+
+def sha256_hex(data: bytes) -> str:
+    """SHA-256 of ``data`` as bare lowercase hex, for ids and sidecars that carry no ``sha256:`` prefix."""
+
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256_file_hex(path: Path) -> str:
+    """SHA-256 of the file's bytes as bare hex, read in 1 MiB blocks."""
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def canonical_json_digest(value: Any) -> str:

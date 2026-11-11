@@ -15,11 +15,11 @@ the gig redistributes.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..canonical import sha256_file_hex
 from .home import GigNameError, gig_folder
 
 #: SPDX ids a dataset the gig ships (and every ``ci`` dataset) may carry; compared case-insensitively.
@@ -167,8 +167,4 @@ def dataset_status(dataset: EvalDataset, package_dir: Path | None, data_dir: Pat
 def file_sha256(path: Path) -> str:
     """SHA-256 (hex) of the file's bytes."""
 
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return sha256_file_hex(path)

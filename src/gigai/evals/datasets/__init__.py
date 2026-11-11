@@ -18,7 +18,6 @@ install that only a ``release`` build of a parquet set needs (``parquet_rows``).
 
 from __future__ import annotations
 
-import hashlib
 import json
 import random
 import re
@@ -29,6 +28,8 @@ from importlib import import_module
 from pathlib import Path
 from types import ModuleType
 from typing import Any, TypeVar
+
+from ...canonical import sha256_file_hex
 
 SEED = 20261109
 #: Longest flattened prompt an item may carry, in characters.
@@ -139,11 +140,7 @@ def build(set_name: str, raw: Path, suite: str) -> list[Item]:
 
 
 def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return sha256_file_hex(path)
 
 
 def _sidecar(path: Path) -> Path:

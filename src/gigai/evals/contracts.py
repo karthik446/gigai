@@ -16,14 +16,13 @@ inspect_ai's ``model_graded_qa`` template and grade pattern, which a ``step:<id>
 
 from __future__ import annotations
 
-import hashlib
 import math
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ..canonical import digest_imported_bytes
+from ..canonical import digest_imported_bytes, sha256_hex
 from ._vendor.inspect_ai._metric import (
     CORRECT,
     INCORRECT,
@@ -143,7 +142,7 @@ def judge_prompt(input: str, output: str, reference: Any) -> str:
     random), so the same trace always gets the same prompt.
     """
 
-    nonce = hashlib.sha256(f"{input}\0{output}".encode()).hexdigest()[:8]
+    nonce = sha256_hex(f"{input}\0{output}".encode())[:8]
     return DEFAULT_MODEL_GRADED_QA_TEMPLATE.format(
         question=input,
         answer=output,
