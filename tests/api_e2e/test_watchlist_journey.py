@@ -24,6 +24,7 @@ window/run proof here needs only the hand-written config field.
 
 from __future__ import annotations
 
+import datetime
 import json
 from pathlib import Path
 
@@ -108,13 +109,16 @@ def test_add_company_then_window_then_run(tmp_path: Path, monkeypatch: pytest.Mo
         assert [item["watchlist_id"] for item in listed["entries"]] == ["scout_watchlist:ashby:kong"]
 
         # -- 3. a real run with the rolling window set ----------------------
+        # The server's clock is the real one, so the window is sized from today: always 30 days wider than the
+        # age of the fixture's acme posting (2026-09-22), instead of a fixed 45 that the posting outgrows.
+        window_days = (datetime.date.today() - datetime.date(2026, 9, 22)).days + 30
         config_path = target / "find-jobs.json"
         windowed = json.loads(config_path.read_text(encoding="utf-8"))
-        windowed["max_age_days"] = 45
+        windowed["max_age_days"] = window_days
         windowed["published_after"] = None
         config_path.write_text(json.dumps(windowed), encoding="utf-8")
         config_before_run = client.get("/api/config").json()
-        assert config_before_run["config"]["max_age_days"] == 45
+        assert config_before_run["config"]["max_age_days"] == window_days
         run_response = client.post("/api/run", json=run_request_body(config_before_run["config_digest"]))
         assert run_response.status_code == 202, run_response.text
         run_id = run_response.json()["run_id"]
@@ -122,7 +126,7 @@ def test_add_company_then_window_then_run(tmp_path: Path, monkeypatch: pytest.Mo
         assert status_body["status"] == "succeeded", status_body
         results = client.get(f"/api/runs/{run_id}/results").json()
         rows = results["payload"]["rows"]
-        assert rows, "the fixture's acme posting (2026-09-22) must be inside a 45-day window"
+        assert rows, "the fixture's acme posting (2026-09-22) must be inside the rolling window"
         assert all(row["posting"]["board_token"] != "kong" for row in rows)  # no fixture board for kong
 
         # -- 4. the wizard's save writes the rolling window -----------------
