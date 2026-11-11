@@ -30,6 +30,51 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.2.0
+
+This is the first stable release of GigAI 2. It adds the commands to make, install and update gigs, and two example
+gigs. Everything the earlier 0.2.0 pre-releases added is included.
+
+#### Added
+
+- **Make a gig.** `gigai gig new <name>` writes a working gig into a folder of its own (a `gig.toml`, a command
+  group, a docs page, a command manual and tests) that `gigai gig check` accepts as it stands. `--server process`
+  starts you from a gig that runs a small local server.
+- **Install, update and remove a gig.** `gigai gig install <wheel, sdist, project folder or name>` adds a gig to
+  GigAI's own tool environment, `gigai gig update <name>` moves it to a newer release, and `gigai gig uninstall
+  <name>` takes it out again (its folder and data are kept); each takes `--dry-run` and prints the exact commands it
+  would run. A gig that needs a newer GigAI than the one installed is refused before anything changes. A gig is
+  installed only into a GigAI that was itself installed with `uv tool install`; with pipx the command stops and says
+  why.
+- **`baseline-behavior`, a second gig.** It records what a web page or API returns today, records it again later and
+  shows what changed. It lives in `gigs/baseline-behavior/` of the repository and is not part of the `gigai`
+  package; install it from a checkout with `gigai gig install ./gigs/baseline-behavior`.
+- **The eval book as a gig.** `gigai eval-book run` serves the book's lessons on your own machine behind a one-time
+  token (`gigai eval-book url` prints the address), and the lessons' live panels run on the model target you bind to
+  each step instead of asking for a key in the page. It ships with the book, outside this repository
+  (`gigai gig install <book folder>/gigai-eval-book`).
+
+#### Fixed
+
+- **A step name like `1.2/judge` can be traced.** A step name that a gig's manifest declares with dots and slashes
+  was refused when its first call was stored; it is now stored as declared. Names that could climb out of the gig
+  folder or are empty are still refused.
+
+#### Changed
+
+- **The gig checker and the lint job cover `gigs/`.** The pull-request test selector runs a gig's conformance test
+  when only that gig's files changed.
+
+#### Upgrade notes
+
+- `gigai gigs` and `gigai gig use` still work and print one deprecation line; use `gigai workpad list` and
+  `gigai workpad use`.
+- The ten top-level Scout command groups (`external`, `capability`, `application`, `scout-report`,
+  `scout-documents`, `scout-answer`, `scout-acquisition`, `scout-import`, `scout-interview`, `scout-transfer`) are
+  hidden aliases that print a deprecation line; they are removed at 0.4.0 or later. `gigai scout --help` lists the
+  same commands.
+- Additive: nothing in your data changes, and rollback is `uv tool install gigai==0.1.11.13`.
+
 ### 0.2.0a2
 
 This is the second pre-release of GigAI 2. Install it by name: `uv tool install gigai==0.2.0a2`

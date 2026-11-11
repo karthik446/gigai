@@ -3,6 +3,10 @@ workpad use
 gig list
 gig info
 gig check
+gig new
+gig install
+gig update
+gig uninstall
 gigs
 gig use
 application history
