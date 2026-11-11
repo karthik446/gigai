@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "baseline-behavior config",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "target": {
+      "type": "string",
+      "pattern": "^https?://[^/?#]+",
+      "description": "Base URL of the HTTP service under test; `init --target URL` writes it. Request paths are appended to it."
+    },
+    "timeout_seconds": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 300,
+      "description": "How long `init` and `capture` wait for one HTTP response."
+    }
+  },
+  "required": ["timeout_seconds"]
+}

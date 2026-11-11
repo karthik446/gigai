@@ -109,6 +109,11 @@ class Graph:
         for rel in changed:
             if rel in ALL_PATTERNS:
                 return ALL
+            if rel.startswith("gigs/") and rel.count("/") >= 2:
+                # a gig in its own folder (gigs/<name>/...): its conformance test, tests/behaviors/gigs/test_<name>.py
+                stem = "test_" + rel.split("/")[1].replace("-", "_")
+                chosen |= {t for t in self.tests if t.rsplit(".", 1)[-1] == stem}
+                continue
             if rel.endswith(NON_CODE_SUFFIXES) and not rel.startswith("src/"):
                 continue
             if rel.startswith(NON_CODE_PREFIXES):

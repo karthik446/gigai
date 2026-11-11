@@ -1,0 +1,29 @@
+[gig]
+manifest_format = 1
+name = "baseline-behavior"
+description = "Capture what an HTTP service answers today as snapshots, diff two snapshots, report"
+core = ">=0.2,<0.3"
+
+[commands]
+group = "gigai_baseline_behavior.cli:baseline_behavior"
+provides = ["init", "capture", "diff", "report", "generate-tests"]
+
+[dependencies]
+python = ">=3.11"
+
+[config]
+schema = "config.schema.json"
+[config.defaults]
+timeout_seconds = 10
+
+[data]
+stores = [{ name = "baseline", engine = "sqlite" }]
+
+[docs]
+page = "docs/index.md"
+cli_manual = "docs/commands.yaml"
+
+[steps.draft-tests]
+prompt = "prompts/draft-tests.md"
+role = "planner"
+description = "Draft characterization tests from one snapshot (generate-tests; only --dry-run ships)."

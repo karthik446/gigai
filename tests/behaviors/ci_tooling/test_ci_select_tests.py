@@ -60,6 +60,17 @@ def test_a_change_no_test_can_be_mapped_to_selects_everything_and_the_tool_runs_
     assert graph.select(["pyproject.toml", "src/gigai/other.py"], "direct") == ci_select_tests.ALL
 
 
+def test_a_gig_in_its_own_folder_selects_its_conformance_test(tmp_path: Path) -> None:
+    graph = _repo(tmp_path)
+    _write(tmp_path, "tests/behaviors/__init__.py")
+    _write(tmp_path, "tests/behaviors/gigs/__init__.py")
+    _write(tmp_path, "tests/behaviors/gigs/test_demo_gig.py", "def test_a():\n    pass\n")
+    graph = ci_select_tests.Graph(tmp_path)
+
+    for changed in ("gigs/demo-gig/src/gigai_demo_gig/cli.py", "gigs/demo-gig/tests/test_verbs.py", "gigs/demo-gig/src/gigai_demo_gig/gig.toml", "gigs/demo-gig/README.md"):
+        assert graph.select([changed], "direct") == ["tests/behaviors/gigs/test_demo_gig.py"]
+
+
 def test_tests_are_counted_by_their_functions(tmp_path: Path) -> None:
     _write(tmp_path, "t.py", "def test_a():\n    pass\n\nasync def test_b():\n    pass\n\ndef helper():\n    pass\n")
 

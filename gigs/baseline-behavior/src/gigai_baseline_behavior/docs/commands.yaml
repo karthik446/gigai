@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "commands": {
+    "baseline-behavior init": {
+      "summary": "Probe an HTTP service with one GET and save it as the gig's target in config.toml, rewriting (and so repairing) an existing one.",
+      "effect": "write",
+      "external": "network",
+      "output": "Human-readable text: the status the target answered and the config file written, then any keys dropped from a broken old config.toml. Exit 1 when the target does not answer, 2 when the URL is not http(s).",
+      "examples": ["gigai baseline-behavior init --target http://127.0.0.1:8000"]
+    },
+    "baseline-behavior capture": {
+      "summary": "Send the requests (one GET / by default) to the target and store every answer as a new, immutable snapshot.",
+      "effect": "write",
+      "external": "network",
+      "output": "Human-readable text: one line per response (status, content hash prefix, request key), then a summary. Exit 1 when the snapshot exists or a request gets no answer (nothing is stored), 2 on a bad requests file or no target.",
+      "examples": [
+        "gigai baseline-behavior capture --snapshot before",
+        "gigai baseline-behavior capture --snapshot after --requests requests.jsonl"
+      ]
+    },
+    "baseline-behavior diff": {
+      "summary": "Compare two snapshots request by request (status and content hash).",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text: one line per added, removed or changed request, then a count. Exit 0 when they match, 1 when they differ, 2 when a snapshot does not exist.",
+      "examples": ["gigai baseline-behavior diff before after"]
+    },
+    "baseline-behavior report": {
+      "summary": "Show a snapshot's target, capture time, request count and responses per status.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; with --json one object: snapshot, target, captured_at, requests, statuses.",
+      "examples": [
+        "gigai baseline-behavior report --snapshot before",
+        "gigai baseline-behavior report --snapshot before --json"
+      ]
+    },
+    "baseline-behavior generate-tests": {
+      "summary": "Print the prompt model step draft-tests would get for a snapshot; makes no model call. Without --dry-run it exits 2: the model step ships later.",
+      "effect": "read",
+      "external": "none",
+      "output": "The prompt text.",
+      "examples": ["gigai baseline-behavior generate-tests --snapshot before --dry-run"]
+    }
+  }
+}

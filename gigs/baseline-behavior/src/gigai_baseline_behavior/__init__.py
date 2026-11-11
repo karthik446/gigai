@@ -1,0 +1,1 @@
+"""baseline-behavior gig. Keep this module import-free: core imports it only to run a command."""

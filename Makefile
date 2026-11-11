@@ -17,7 +17,7 @@ TEST_XDIST_DIST ?= worksteal
 # there (a re-export) or for what importing it does says so on its line: `# noqa: F401 - <reason>`.
 RUFF_VERSION ?= 0.16.10
 lint:
-	$(UV) tool run ruff@$(RUFF_VERSION) check --select F --no-fix src/gigai
+	$(UV) tool run ruff@$(RUFF_VERSION) check --select F --no-fix src/gigai gigs
 
 # Complete portable offline coverage: one source discovery pass, the existing
 # deterministic behavior evaluation, and a fresh wheel plus every installed

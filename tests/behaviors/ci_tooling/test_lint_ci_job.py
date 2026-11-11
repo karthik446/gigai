@@ -36,7 +36,7 @@ def test_make_lint_is_ruff_pyflakes_over_the_package_with_a_pinned_version() -> 
 
     assert re.search(r"^RUFF_VERSION \?= \d+\.\d+\.\d+$", makefile, re.MULTILINE), "ruff's version is pinned in the Makefile"
     # Every F rule, never fixed in place: F821 and F823 (the 0.1.10.9 crash) are two of them.
-    assert "\nlint:\n\t$(UV) tool run ruff@$(RUFF_VERSION) check --select F --no-fix src/gigai\n" in makefile
+    assert "\nlint:\n\t$(UV) tool run ruff@$(RUFF_VERSION) check --select F --no-fix src/gigai gigs\n" in makefile
 
 
 def test_every_pyflakes_exception_in_the_package_says_why() -> None:

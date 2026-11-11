@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gigai-baseline-behavior"
+version = "0.1.0"
+description = "Capture what an HTTP service answers today as snapshots, diff two snapshots, report"
+requires-python = ">=3.11"
+dependencies = ["gigai>=0.2.0a1,<0.3", "click>=8"]
+
+[project.entry-points."gigai.gigs"]
+baseline-behavior = "gigai_baseline_behavior.cli:baseline_behavior"
+
+[project.optional-dependencies]
+test = ["pytest>=8", "jsonschema>=4"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gigai_baseline_behavior"]
+
+# The gig's own pytest root: inside the gigai repository, pytest would otherwise take the monorepo's root config.
+[tool.pytest.ini_options]
+addopts = "-p no:cacheprovider"
+testpaths = ["tests"]
