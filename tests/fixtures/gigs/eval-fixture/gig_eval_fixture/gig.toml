@@ -6,11 +6,22 @@ core = ">=0.2.0a2"
 
 [commands]
 group = "gig_eval_fixture:eval_fixture"
-provides = ["answer", "replay", "note"]
+provides = ["answer", "replay", "note", "ask"]
 
 [[data.stores]]
 name = "notes"
 engine = "sqlite"
+
+# BK2: `ctx.model(step)` binds each step to a config.toml model target; the deterministic targets
+# answer from responses.json["<target id>"].
+[steps.answer]
+prompt = "prompts/answer.txt"
+target = "deterministic-a"
+
+[steps.judge]
+prompt = "prompts/judge.txt"
+target = "deterministic-b"
+settings = { temperature = 0.0 }
 
 [evals]
 cluster = "fixture"

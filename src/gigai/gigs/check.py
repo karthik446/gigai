@@ -128,6 +128,10 @@ def check_installed(gig: InstalledGig, *, installed: str) -> list[Result]:
     results += _docs_items(gig.name, manifest, package_dir, verbs)
     results.append(_tests_item(gig, package_dir))
     results += _evals_items(manifest, package_dir, _data_dir(gig.name))
+    from ..setup import default_home_root
+    from ..steps import stale_overrides
+
+    results += [Result(WARN, "steps", message) for message in stale_overrides(default_home_root(), gig.name, manifest)]
     return results
 
 

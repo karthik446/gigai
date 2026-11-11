@@ -585,6 +585,24 @@
             "minLength": 1,
             "description": "Model target the step is bound to; wins over `role`."
           },
+          "settings": {
+            "type": "object",
+            "description": "Request settings every call of the step carries; the call's keyword arguments win. A claude/codex CLI target carries only `system` and `output_mode`, so any other setting refuses that target.",
+            "propertyNames": {
+              "enum": [
+                "temperature",
+                "top_p",
+                "seed",
+                "output_mode",
+                "system",
+                "retry_policy",
+                "logprobs",
+                "top_logprobs",
+                "tools",
+                "tool_choice"
+              ]
+            }
+          },
           "description": {
             "type": "string"
           }

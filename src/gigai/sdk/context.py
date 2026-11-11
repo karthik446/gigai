@@ -11,7 +11,8 @@ from ..gigs.home import check_name, ensure_gig_folder
 from .store import GigStore
 
 if TYPE_CHECKING:
-    from ..evals.records import Postprocess, ReplayRow, TraceRecord
+    from ..adapters.port import InvocationResult
+    from ..evals.records import ItemRef, Postprocess, ReplayRow, RunRecord, TraceRecord
 
 
 @dataclass(frozen=True)
@@ -63,3 +64,19 @@ class GigContext:
         from ..evals.records import replay
 
         return replay(self.home, self.name, run_id, postprocess, step_id=step_id)
+
+    def model(
+        self, step_id: str, input: str, *, run: RunRecord | None = None, item: ItemRef | None = None, **settings: Any
+    ) -> InvocationResult:
+        """Call the model target step ``step_id`` resolves to with prompt ``input`` and return the result.
+
+        The target is the operator's ``steps set`` override, else the manifest's ``[steps].<id>`` target or role (see
+        ``gigai.steps``); an undeclared step is a ``KeyError``. ``settings`` (``temperature``, ``tools``, ...) go over
+        the step's manifest ``settings``; one the target cannot carry is a ``StepTargetError`` before any call. When
+        the gig folder already has ``evals.sqlite`` the call is traced under ``run``/``item`` (default: a one-call run);
+        otherwise no file is written.
+        """
+
+        from ..steps import call
+
+        return call(self, step_id, input, run=run, item=item, settings=settings)

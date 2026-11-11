@@ -142,3 +142,15 @@ def note(ctx, text):
         db.execute("CREATE TABLE IF NOT EXISTS notes (text TEXT NOT NULL)")
         db.execute("INSERT INTO notes (text) VALUES (?)", (text,))
     db.close()
+
+
+@eval_fixture.command("ask")
+@click.argument("step")
+@click.argument("text")
+@click.option("--temperature", type=float, default=None, help="Ask with this temperature (a request setting).")
+@click.pass_obj
+def ask(ctx, step, text, temperature):
+    """Ask STEP's model target TEXT through ctx.model and print its answer (BK2)."""
+
+    result = ctx.model(step, text, **({} if temperature is None else {"temperature": temperature}))
+    click.echo(json.dumps({"step": step, "output": result.output_text, "model": result.resolved_model}))

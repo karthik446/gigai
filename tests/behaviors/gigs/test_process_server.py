@@ -376,6 +376,6 @@ def test_core_verbs_are_added_only_to_process_gigs_and_a_gigs_own_verb_wins(
     loaded = LazyGig("demo", entry_point, tomllib.loads((site / "gig_demo" / "gig.toml").read_text(encoding="utf-8"))).load()
     group = entry_point.load()
     assert loaded is not group and loaded.name == group.name
-    # V1: every in-process gig another dist ships also gets core's `export`.
-    assert loaded.list_commands(click.Context(loaded)) == ["hello", "export", "run", "status", "stop"]
+    # V1: every in-process gig another dist ships also gets core's `export`; BK2: and `steps`.
+    assert loaded.list_commands(click.Context(loaded)) == ["hello", "export", "run", "status", "steps", "stop"]
     assert sorted(group.commands) == ["hello"], "the gig's own group must not be changed"

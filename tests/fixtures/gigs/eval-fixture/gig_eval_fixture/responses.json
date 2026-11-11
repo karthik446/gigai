@@ -4,5 +4,7 @@
   "q3": "{\"answer\": \"green\"}",
   "q4": "{\"answer\": \"pink\"}",
   "q5": "{\"answer\": \"E\"}",
-  "q6": "{\"reply\": \"A\"}"
+  "q6": "{\"reply\": \"A\"}",
+  "deterministic-a": {"2+2": "target A says 4"},
+  "deterministic-b": {"2+2": "target B says four"}
 }

@@ -26,6 +26,7 @@ if TYPE_CHECKING:
         model_call,
         new_id,
     )
+    from ..steps import StepTargetError
 
 _RECORDS = frozenset(
     {
@@ -50,6 +51,10 @@ def __getattr__(name: str) -> Any:
         from ..evals import records
 
         return getattr(records, name)
+    if name == "StepTargetError":
+        from ..steps import StepTargetError
+
+        return StepTargetError
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -64,6 +69,7 @@ __all__ = [
     "RunRecord",
     "ScoreRecord",
     "Settings",
+    "StepTargetError",
     "TraceRecord",
     "model_call",
     "new_id",

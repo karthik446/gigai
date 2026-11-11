@@ -200,7 +200,9 @@ class LazyGig(click.Group):
             if executable is None and isinstance(target, click.Group):
                 verbs = _server_verbs(self) if _process_server(self.manifest) else {}
                 if _dist_name(self.entry_point) != CORE_DIST:
-                    verbs["export"] = _export_verb(self)
+                    from ..steps import step_verbs
+
+                    verbs.update(step_verbs(verbs), export=_export_verb(self))
                 from ..evals.verbs import eval_verbs
                 verbs.update(eval_verbs(self.manifest))
                 if verbs:
