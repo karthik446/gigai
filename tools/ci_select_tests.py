@@ -9,7 +9,7 @@ AST (imports inside function bodies included), one hop through `tests/support`. 
 useless here: `gigai.cli` and `gigai.workpad` are imported, directly or not, by most of the suite.
 
 Prints nothing (and says why on stderr) when the selection cannot be trusted or is too big for the lane:
-`pyproject.toml`, `uv.lock`, `tests/conftest.py`, `Makefile` or `tools/run_ci_tests.py` changed, or the
+`pyproject.toml`, `uv.lock`, `tests/conftest.py`, `tests/support/scout_fixtures.py`, `Makefile` or `tools/run_ci_tests.py` changed, or the
 selected files hold more than --max-tests tests. The nightly `full` run covers those.
 Standard library only: it runs before `uv sync`.
 """
@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 ALL = "ALL"
-ALL_PATTERNS = ("pyproject.toml", "uv.lock", "tests/conftest.py", "tests/__init__.py", "Makefile", "tools/run_ci_tests.py")
+ALL_PATTERNS = ("pyproject.toml", "uv.lock", "tests/conftest.py", "tests/support/scout_fixtures.py", "tests/__init__.py", "Makefile", "tools/run_ci_tests.py")
 NON_CODE_SUFFIXES = (".md", ".markdown", ".txt")
 NON_CODE_PREFIXES = ("docs/", "gigai-docs/", ".orchestrator/", ".claude/")
 

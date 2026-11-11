@@ -126,7 +126,7 @@ def test_update_sources_indexes_the_watchlist_and_a_second_update_changes_nothin
             "awaiting_model_not_queued": 0,
             "not_queued_reason": None,
             "tagging": {"state": "off", "detail": None, "retry_after": None, "model": None},
-            # The suite turns model tagging off for every server it starts (tests/conftest.py).
+            # The suite turns model tagging off for every server it starts (tests/support/scout_fixtures.py).
             "setting": {"model_enabled": False, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "environment"},
             "models": {"demand": "ollama_local", "backfill": "ollama_local"},
         }

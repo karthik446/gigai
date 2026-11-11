@@ -10,7 +10,7 @@ Scout server has no pytest path in its command line.
 
 Used by the API e2e harness (a per-test finalizer over the servers it
 started), the port-takeover fixture, and the session-finish guard in
-``tests/conftest.py``.
+``tests/support/scout_fixtures.py``.
 """
 
 from __future__ import annotations
