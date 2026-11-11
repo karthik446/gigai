@@ -201,6 +201,8 @@ class LazyGig(click.Group):
                 verbs = _server_verbs(self) if _process_server(self.manifest) else {}
                 if _dist_name(self.entry_point) != CORE_DIST:
                     verbs["export"] = _export_verb(self)
+                from ..evals.verbs import eval_verbs
+                verbs.update(eval_verbs(self.manifest))
                 if verbs:
                     target = _with_core_verbs(target, verbs)
             self._target = target

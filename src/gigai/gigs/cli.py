@@ -1,6 +1,7 @@
 """``gigai gig list | info | check``: inspect installed gigs (``gigai.gigs`` entry points) and gig manifests.
 
-Nothing here imports a gig except ``gig check <name>`` items 4-6, which must load it. Registered with one
+Nothing here imports a gig except ``gig check <name>`` items 4-6, which must load it, and item 11, which imports the
+``[evals]`` scorer symbols in a child interpreter. Registered with one
 ``cli.add_command(gig_group)`` in ``gigai.cli``; later packets add ``new`` and ``install|update|uninstall``.
 """
 
@@ -84,7 +85,7 @@ def _dist_name(command: LazyGig) -> str | None:
 @gig_group.command("info")
 @click.argument("gig")
 def gig_info_command(gig: str) -> None:
-    """Show one installed gig (or a gig.toml file): status, core range, verbs, keys, data dirs, docs."""
+    """Show one installed gig (or a gig.toml file or gig project directory): status, core range, verbs, keys, data dirs, docs."""
 
     installed = gig_manifest.installed_core_version()
     found, path_manifest, path = _resolve(gig)
@@ -140,7 +141,7 @@ def _key_line(key: dict[str, Any]) -> str:
 @gig_group.command("check")
 @click.argument("gig")
 def gig_check_command(gig: str) -> None:
-    """Check an installed gig (or a gig.toml file) against the gig contract; exit 1 on any FAIL."""
+    """Check an installed gig, a gig.toml file or a gig project directory against the gig contract; exit 1 on any FAIL."""
 
     installed = gig_manifest.installed_core_version()
     found, path_manifest, path = _resolve(gig)
@@ -150,7 +151,7 @@ def gig_check_command(gig: str) -> None:
     else:
         assert path_manifest is not None
         label = str(path)
-        results = check_file(path_manifest, installed=installed)
+        results = check_file(path_manifest, installed=installed, manifest_path=path)
     click.echo(f"gigai gig check {label}")
     for result in results:
         click.echo(_result_line(result))
@@ -165,9 +166,12 @@ def _result_line(result: Result) -> str:
 
 
 def _resolve(target: str) -> tuple[InstalledGig | None, dict[str, Any] | None, Path | None]:
-    """An installed gig by name, or a manifest file (mapped back to its installed gig when it is one's manifest)."""
+    """An installed gig by name, or a manifest file (mapped back to its installed gig when it is one's manifest); a
+    directory stands for the one ``gig.toml`` in it, in a package folder below it, or below its ``src/``."""
 
     path = Path(target)
+    if path.is_dir():
+        path = _project_manifest(path)
     if target.endswith(".toml") or path.exists():
         if not path.is_file():
             raise click.ClickException(f"{target}: no such manifest file")
@@ -182,3 +186,15 @@ def _resolve(target: str) -> tuple[InstalledGig | None, dict[str, Any] | None, P
     if not matches:
         raise click.ClickException(f"no installed gig named {target!r}; `gigai gig list` shows the installed gigs")
     return matches[0], None, None
+
+
+def _project_manifest(directory: Path) -> Path:
+    found = [
+        path
+        for path in (directory / "gig.toml", *sorted(directory.glob("*/gig.toml")), *sorted(directory.glob("src/*/gig.toml")))
+        if path.is_file()
+    ]
+    if len(found) != 1:
+        reason = "no gig.toml" if not found else f"{len(found)} gig.toml files ({', '.join(map(str, found))})"
+        raise click.ClickException(f"{directory}: {reason} in it, in a package folder below it, or below its src/")
+    return found[0]

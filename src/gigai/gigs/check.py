@@ -1,13 +1,20 @@
-"""``gigai gig check``: the gig conformance checks, items 1-8 and 13 of the framework's list.
+"""``gigai gig check``: the gig conformance checks, items 1-8, 11 and 13 of the framework's list.
 
 1 schema-valid manifest · 2 exactly one entry point, name == ``[gig] name``, value == ``[commands] group`` ·
 3 manifest readable without importing the entry-point module or its package · 4 group loads, ``--help`` exits 0, every ``provides`` verb
 exists with help · 5 no core verb listed in ``provides`` (a core verb defined in code is reported as
 ``override: <verb>``) · 6 hidden ``describe`` prints the manifest · 7 ``[config.defaults]`` validate against
-``[config] schema`` · 8 docs files present, the CLI manual covers every verb · 13 the gig's own tests pass.
+``[config] schema`` · 8 docs files present, the CLI manual covers every verb · 11 the ``[evals]`` table: every scorer
+and postprocess symbol imports (in a child interpreter), every ``step:<id>`` scorer names a judge step, every prompt
+file exists (its sha256 printed), every dataset exists inside its root (a private one under ``{data}`` may be absent,
+except in the ``ci`` suite; a path that leaves the package or ``{data}`` fails), every ``ci`` dataset's sha256
+matches, every licence is on the allow-list or the data is private under ``{data}`` and not ``ci``
+(``eval_manifest``) · 13 the gig's own tests pass.
 
-Items 9-12 (dist pins, import weight, home provisioning, tools) belong to later packets. A manifest file
-that is not an installed gig's gets item 1 only (plus the core-range line); 2-8 and 13 need the installed gig.
+Items 9, 10 and 12 (dist pins, import weight, tools) belong to later packets; item 11 reports nothing for a manifest
+without ``[evals]``. A manifest file that is not an installed gig's gets item 1 only (plus the core-range line) and
+the reference and licence half of item 11; 2-8 and 13 need the installed gig. When the file sits in a package (a
+project directory or checkout), item 11 also checks that package's files and symbols.
 """
 
 from __future__ import annotations
@@ -26,6 +33,20 @@ from typing import Any
 
 import click
 
+from .eval_manifest import (
+    ABSENT_PRIVATE,
+    DATA_TOKEN,
+    MISSING,
+    OUTSIDE,
+    UNCHECKED,
+    EvalDataset,
+    data_folder,
+    dataset_status,
+    eval_steps,
+    file_sha256,
+    licence_problem,
+    step_datasets,
+)
 from .loader import _which
 from .manifest import (
     CORE_VERBS,
@@ -74,16 +95,20 @@ def check_manifest(manifest: dict[str, Any], *, installed: str) -> list[Result]:
     return results
 
 
-def check_file(manifest: dict[str, Any], *, installed: str) -> list[Result]:
-    """A manifest file that is not an installed gig's: item 1 and the core range; the rest is skipped."""
+def check_file(manifest: dict[str, Any], *, installed: str, manifest_path: Path | None = None) -> list[Result]:
+    """A manifest file that is not an installed gig's: item 1, the core range and item 11; the rest is skipped.
+
+    Item 11 checks files and symbols only when ``manifest_path`` sits in a package (its folder has ``__init__.py``)."""
 
     results = check_manifest(manifest, installed=installed)
     results += [Result(SKIP, item, _NEEDS_INSTALL) for item in ("2", "3", "4", "5", "6", "7", "8", "13")]
+    package_dir = manifest_path.parent if manifest_path is not None and (manifest_path.parent / "__init__.py").is_file() else None
+    results += _evals_items(manifest, package_dir, _data_dir(gig_table(manifest, "gig").get("name")))
     return results
 
 
 def check_installed(gig: InstalledGig, *, installed: str) -> list[Result]:
-    """Items 1-8 and 13 for one installed gig."""
+    """Items 1-8, 11 and 13 for one installed gig."""
 
     if gig.manifest is None:
         return [Result(FAIL, "1", f"cannot read {gig.name}'s manifest: {gig.problem}")]
@@ -102,6 +127,7 @@ def check_installed(gig: InstalledGig, *, installed: str) -> list[Result]:
     results.append(_config_item(manifest, package_dir))
     results += _docs_items(gig.name, manifest, package_dir, verbs)
     results.append(_tests_item(gig, package_dir))
+    results += _evals_items(manifest, package_dir, _data_dir(gig.name))
     return results
 
 
@@ -412,6 +438,153 @@ def _project_root(gig: InstalledGig, package_dir: Path | None) -> Path | None:
         if isinstance(project, dict) and _normalize(str(project.get("name", ""))) == _normalize(gig.dist):
             return candidate
     return None
+
+
+# --- 11 ---------------------------------------------------------------------------------------------------
+
+
+_IMPORT_SYMBOLS = """\
+import importlib, json, sys
+problems = {}
+for symbol in sys.argv[1:]:
+    module, _, attr = symbol.partition(":")
+    try:
+        if not callable(getattr(importlib.import_module(module), attr)):
+            problems[symbol] = "not callable"
+    except BaseException as exc:
+        problems[symbol] = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+print()
+print(json.dumps(problems))
+"""
+
+
+def _data_dir(name: object) -> Path | None:
+    """What ``{data}`` stands for when checking gig ``name``: its gig folder under the gigai home."""
+
+    from ..setup import default_home_root
+
+    return data_folder(default_home_root(), name)
+
+
+def _evals_items(manifest: dict[str, Any], package_dir: Path | None, data_dir: Path | None) -> list[Result]:
+    """Item 11; ``[]`` when the manifest has no ``[evals]`` table. Without ``package_dir`` only the references and
+    licences are checked."""
+
+    if not isinstance(manifest.get("evals"), dict):
+        return []
+    steps = eval_steps(manifest)
+    ids = [step.get("id") for step in steps]
+    judges = {step["id"] for step in steps if isinstance(step.get("id"), str) and isinstance(step.get("grades"), str)}
+    results = [
+        Result(FAIL, "11", f"evals.steps: step id {step_id!r} is declared more than once")
+        for step_id in sorted({step_id for step_id in ids if isinstance(step_id, str) and ids.count(step_id) > 1})
+    ]
+    symbols: dict[str, list[str]] = {}
+    for step in steps:
+        field = f"evals.steps.{step.get('id', '?')}"
+        results += _step_references(field, step, ids, judges, symbols)
+        for dataset in step_datasets(step):
+            problem = licence_problem(dataset)
+            if problem is not None:
+                results.append(Result(FAIL, "11", f"{field}.datasets.{dataset.suite}.licence: {problem}"))
+    if not results:
+        results.append(Result(PASS, "11", f"[evals]: {len(steps)} step(s); step references and dataset licences check out"))
+    if package_dir is None:
+        results.append(Result(SKIP, "11", "[evals] files and symbols: needs the gig's package (check the installed gig or its project directory)"))
+        return results
+    for step in steps:
+        field = f"evals.steps.{step.get('id', '?')}"
+        prompt = step.get("prompt")
+        if isinstance(prompt, dict) and isinstance(prompt.get("file"), str):
+            results.append(_prompt_result(f"{field}.prompt.file", prompt["file"], package_dir))
+        for dataset in step_datasets(step):
+            results.append(_dataset_result(f"{field}.datasets.{dataset.suite}", dataset, package_dir, data_dir))
+    for key, entry in gig_table(manifest, "steps").items():
+        if isinstance(entry, dict) and isinstance(entry.get("prompt"), str):
+            results.append(_prompt_result(f"steps.{key}.prompt", entry["prompt"], package_dir))
+    results += _symbol_results(symbols, package_dir)
+    return results
+
+
+def _step_references(field: str, step: dict[str, Any], ids: list[Any], judges: set[str], symbols: dict[str, list[str]]) -> list[Result]:
+    """Static half of item 11 for one step: ``step:<id>`` scorers and a local ``grades`` name a step here; collects
+    the ``module:attr`` symbols (scorers, postprocess) into ``symbols`` for the import check."""
+
+    results = []
+    scorers = step.get("scorers")
+    for scorer in scorers if isinstance(scorers, list) else []:
+        if not isinstance(scorer, str):
+            continue
+        if scorer.startswith("step:"):
+            if scorer[len("step:") :] not in judges:
+                results.append(Result(FAIL, "11", f"{field}.scorers: {scorer!r} names no judge step (a step with `grades`) of this manifest"))
+        else:
+            symbols.setdefault(scorer, []).append(f"{field}.scorers")
+    if isinstance(step.get("postprocess"), str):
+        symbols.setdefault(step["postprocess"], []).append(f"{field}.postprocess")
+    grades = step.get("grades")
+    if isinstance(grades, str) and ":" not in grades and grades not in ids:
+        results.append(Result(FAIL, "11", f"{field}.grades: {grades!r} names no step of this manifest"))
+    return results
+
+
+def _prompt_result(field: str, relative: str, package_dir: Path) -> Result:
+    path = _package_file(package_dir, relative)
+    if path is None:
+        return Result(FAIL, "11", f"{field}: {relative!r} is not a file in the gig's package")
+    return Result(PASS, "11", f"{field}: {relative} sha256 {file_sha256(path)}")
+
+
+def _dataset_result(field: str, dataset: EvalDataset, package_dir: Path, data_dir: Path | None) -> Result:
+    status, path = dataset_status(dataset, package_dir, data_dir)
+    if status == MISSING:
+        return Result(FAIL, "11", f"{field}.path: {dataset.path!r} is not a file in the gig's package")
+    if status == OUTSIDE:
+        root = f"{DATA_TOKEN} ({data_dir})" if dataset.private else "the gig's package"
+        return Result(FAIL, "11", f"{field}.path: {dataset.path!r} leaves {root} (`..`, an absolute path or a symlink out)")
+    if status == UNCHECKED:
+        return Result(SKIP, "11", f"{field}: {dataset.path} not checked (no gig folder for this gig name)")
+    if status == ABSENT_PRIVATE:
+        if dataset.suite == "ci":
+            return Result(FAIL, "11", f"{field}.path: {dataset.path} is absent (private); a ci dataset must ship in the package")
+        return Result(SKIP, "11", f"{field}: {dataset.path} absent (private)")
+    assert path is not None
+    actual = file_sha256(path)
+    if dataset.sha256 is not None and dataset.sha256 != actual:
+        outcome = FAIL if dataset.suite == "ci" else WARN
+        return Result(outcome, "11", f"{field}.sha256: declared {dataset.sha256}, {dataset.path} has {actual}")
+    return Result(PASS, "11", f"{field}: {dataset.path} sha256 {actual}")
+
+
+def _symbol_results(symbols: dict[str, list[str]], package_dir: Path) -> list[Result]:
+    """Import every ``module:attr`` in a fresh interpreter that also sees the package's own folder."""
+
+    if not symbols:
+        return []
+    root = package_dir.resolve()
+    while (root.parent / "__init__.py").is_file():
+        root = root.parent
+    env = _child_env()
+    env["PYTHONPATH"] = os.pathsep.join([str(root.parent), env["PYTHONPATH"]])
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", _IMPORT_SYMBOLS, *symbols],
+            capture_output=True, text=True, env=env, timeout=120, check=False, shell=False,
+        )
+        problems = json.loads(completed.stdout.strip().splitlines()[-1]) if completed.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError) as exc:
+        return [Result(FAIL, "11", f"cannot import the [evals] symbols in a fresh interpreter: {exc}")]
+    if not isinstance(problems, dict):
+        return [Result(FAIL, "11", f"cannot import the [evals] symbols in a fresh interpreter: {_last_line(completed.stderr)}")]
+    results = [
+        Result(FAIL, "11", f"{', '.join(fields)}: {symbol!r} does not import ({problems[symbol]})")
+        for symbol, fields in symbols.items()
+        if symbol in problems
+    ]
+    if not results:
+        results.append(Result(PASS, "11", f"{len(symbols)} scorer/postprocess symbol(s) import"))
+    return results
 
 
 # --- helpers ----------------------------------------------------------------------------------------------

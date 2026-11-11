@@ -278,7 +278,7 @@ gigai feedback prop-1 --text "Make the summary shorter"
 
 ## `gigai gig check`
 
-Check an installed gig (or a gig.toml file) against the gig contract; exits 1 on any FAIL.
+Check an installed gig, a gig.toml file or a gig project directory against the gig contract; exits 1 on any FAIL.
 
 `gigai gig check [OPTIONS] GIG`
 
@@ -289,13 +289,14 @@ Example:
 ```sh
 gigai gig check hello
 gigai gig check path/to/gig.toml
+gigai gig check path/to/project
 ```
 
-A gig.toml that is not an installed gig's gets the schema and core-range checks only. An installed gig is loaded to check its commands, and its project's tests run when its source checkout is next to the package.
+A directory stands for the one gig.toml in it, in a package folder below it, or below its src/. A gig.toml that is not an installed gig's gets the schema and core-range checks, plus the static half of item 11 (the [evals] table: step references and dataset licences) when it has an [evals] table; when the gig.toml sits in a package, item 11 also checks its prompt files, datasets (sha256, and paths that stay inside the package or {data}) and imports its scorer and postprocess symbols in a child interpreter. An installed gig is loaded to check its commands, and its project's tests run when its source checkout is next to the package.
 
 ## `gigai gig info`
 
-Show one installed gig (or a gig.toml file): status, core range, verbs, keys, data dirs and docs.
+Show one installed gig (or a gig.toml file or gig project directory): status, core range, verbs, keys, data dirs and docs.
 
 `gigai gig info [OPTIONS] GIG`
 
@@ -305,6 +306,7 @@ Example:
 
 ```sh
 gigai gig info hello
+gigai gig info path/to/project
 ```
 
 ## `gigai gig list`

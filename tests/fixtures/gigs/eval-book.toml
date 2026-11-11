@@ -53,13 +53,16 @@ export = ["labels.sqlite", "notebooks/**", "exports/**"]
 page = "docs/index.md"
 cli_manual = "docs/commands.yaml"
 
-[evals]                           # hook only; design: gigai-jhf. The eval book *consumes* other gigs' steps; it declares one of its own: the LLM judge.
+[evals]                           # design: gigai-jhf SPIKE §9.2. The eval book *consumes* other gigs' steps; it declares one of its own: the LLM judge.
 [[evals.steps]]
 id = "judge"
 input_schema = "schemas/judge-input.json"
 output_schema = "schemas/judge-output.json"
 model_target = "judge"
-dataset = "datasets/judge-calibration.jsonl"
+grades = "scout:assess"
+dimension = "row_status"
+datasets = { release = "{data}/datasets/judge-calibration.jsonl" }   # operator labels, private
+validation = { against = "labels", min_n = 126, min_kappa = 0.6, report = ["tpr", "tnr", "kappa"] }
 
 [permissions]
 network = ["openrouter.ai"]

@@ -55,13 +55,15 @@ page = "docs/index.md"
 cli_manual = "docs/commands.yaml"
 skill = "docs/SKILL.md"            # the method (what to capture, how to write a characterization test)
 
-[evals]                            # hook only; design: gigai-jhf
+[evals]                            # design: gigai-jhf SPIKE §9.2 ("second gig, five lines")
 [[evals.steps]]
 id = "draft-tests"
 input_schema = "schemas/draft-tests-input.json"    # a capture group (request/response pairs)
 output_schema = "schemas/draft-tests-output.json"  # pytest source + rationale per test
 model_target = "assessment"
-dataset = "datasets/draft-tests-gold.jsonl"        # operator-labelled good/bad drafts
+datasets.ci = { path = "evals/draft-tests-synthetic.jsonl", source = "invented capture pairs written for the package", licence = "MIT", sha256 = "9b2e4d6f8a0c1e3b5d7f9a1c3e5b7d9f0a2c4e6b8d0f1a3c5e7b9d1f3a5c7e9b" }   # placeholder digest
+datasets.release = "{data}/evals/draft-tests.jsonl"  # operator-labelled good/bad drafts, private
+scorers = ["baseline_behavior.evals:pytest_collects", "baseline_behavior.evals:tests_pass_on_capture"]
 
 [permissions]
 network = ["openrouter.ai", "<target.base_url>"]

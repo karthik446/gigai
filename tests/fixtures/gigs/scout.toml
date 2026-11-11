@@ -73,20 +73,69 @@ page = "docs/index.md"            # today: gigai-docs Starlight group "scout" (a
 cli_manual = "docs/commands.yaml" # today: core data/cli/commands.yaml holds Scout prose (agent_context.py:135-177)
 skill = "docs/SKILL.md"           # today: agent_skill.py:20 hard-codes gigai-scout
 
-[evals]                           # hook only; design: gigai-jhf
+[evals]                           # design: gigai-jhf SPIKE §9.2 (Scout `assess`, in full)
+cluster = "posting_sha"           # default unit for every CI and paired test
+
 [[evals.steps]]
 id = "assess"
+model_target = "assessment"
 input_schema = "schemas/assess-input.json"
 output_schema = "schemas/assess-output.json"
-model_target = "assessment"
-dataset = "evals/assess-gold.jsonl"
+prompt = { id = "assess-prompt", version = "v10", file = "prompts/assess-v10.md" }
+postprocess = "gigai_scout.assessment:postprocess"
+scorers = [
+  "gigai_scout.evals.assess:schema_ok",
+  "gigai_scout.evals.assess:lines_anchored",
+  "gigai_scout.evals.assess:key_agreement",
+  "gigai_scout.evals.assess:operator_agreement",
+  "gigai_scout.evals.assess:unmet_detection",
+  "gigai_scout.evals.assess:over_asks",
+  "gigai_scout.evals.assess:verdict_right",
+  "step:row-judge",
+]
+
+[evals.steps.datasets]
+ci = { path = "evals/assess-synthetic.jsonl", source = "invented rows written for the package", licence = "CC0-1.0", sha256 = "5f0c9a3e1b7d2c4e6a8f0b1d3c5e7a9f1b3d5c7e9a0f2b4d6c8e0a1f3b5d7c9e" }   # placeholder digest
+release = "{data}/evals/assess-release.jsonl"    # 48 real postings, private
+upgrade = "{data}/evals/assess-full.jsonl"
+
+[evals.steps.gates.ci]
+suite = "ci"
+max_calls = 0
+require = ["schema_ok", "lines_anchored"]
+snapshot = "evals/assess-ci-snapshot.json"
+
+[evals.steps.gates.release]
+suite = "release"
+max_calls = 48
+primary = { metric = "operator_agreement", min_ci_lower = 0.0, no_worse = -0.02 }
+guard = { metric = "unmet_detection", min_ci_lower = -0.10 }
+
+[evals.steps.gates.upgrade]
+suite = "upgrade"
+k = 3
+max_calls = 600
+paired_to = "previous-model"
+slices = ["buried", "below_met", "clear"]
+primary = { metric = "operator_agreement", min_ci_lower = 0.0 }
+guard = { metric = "unmet_detection", min_ci_lower = -0.10 }
+
+[[evals.steps]]
+id = "row-judge"
+model_target = "judge"
+grades = "assess"
+dimension = "row_status"
+prompt = { id = "row-judge", version = "v1", file = "prompts/row-judge-v1.md" }
+input_schema = "schemas/row-judge-input.json"
+output_schema = "schemas/row-judge-output.json"
+validation = { against = "labels", min_n = 126, min_kappa = 0.6, report = ["tpr", "tnr", "kappa"] }
 
 [[evals.steps]]
 id = "tailor"
+model_target = "assessment"
 input_schema = "schemas/tailor-input.json"
 output_schema = "schemas/tailor-output.json"
-model_target = "assessment"
-dataset = "evals/tailor-gold.jsonl"
+datasets = { release = "{data}/evals/tailor-release.jsonl" }
 
 [permissions]
 network = ["openrouter.ai", "api.openai.com", "api.exa.ai", "*.greenhouse.io", "*.lever.co", "github.com"]   # A2 §6 outbound table

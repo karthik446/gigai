@@ -336,7 +336,7 @@
                   "dolt",
                   "files"
                 ],
-                "description": "sqlite = `ctx.store.db(gig, name)` opens the store at `<home>/gigs/<gig>/<name>.sqlite` (created on first open, nothing at install); the gig steps its `user_version` with `gigai.sdk.store.migrate`; dolt = [C: pending]; files = plain directory."
+                "description": "sqlite = `ctx.store.db(gig, name)` opens the store at `<home>/gigs/<gig>/<name>.sqlite` (created on first open, nothing at install); the gig steps its `user_version` with `ctx.store.migrate(name, steps)`; dolt = [C: pending]; files = plain directory."
               },
               "file": {
                 "type": "string",
@@ -344,7 +344,7 @@
               },
               "migrations": {
                 "type": "string",
-                "description": "Not applied by core at install: the gig applies its migrations at run time, on first open, with `gigai.sdk.store.migrate` (one `user_version` step per transaction)."
+                "description": "Not applied by core at install: the gig applies its migrations at run time, on first open, with `ctx.store.migrate(name, steps)` (one `user_version` step per transaction)."
               },
               "rebuildable": {
                 "type": "boolean",
@@ -390,9 +390,13 @@
     },
     "evals": {
       "type": "object",
-      "description": "HOOK ONLY. Design: gigai-jhf (research/gigai-evals). Declares the gig's model-call steps so core can record traces and run `gigai <gig> eval ...`.",
+      "description": "Design: gigai-jhf (research/gigai-evals SPIKE.md section 9). Declares the gig's model-call steps, their prompts, datasets, scorers and gates, so core records traces and runs `gigai <gig> eval ...`. Paths are package-relative unless they start with `{data}` (the gig folder `<home>/gigs/<gig>/`). `gigai gig check` item 11 checks it.",
       "additionalProperties": false,
       "properties": {
+        "cluster": {
+          "type": "string",
+          "description": "Default unit for every confidence interval and paired test: the item field whose equal values are not independent (Scout: `posting_sha`)."
+        },
         "steps": {
           "type": "array",
           "items": {
@@ -422,9 +426,167 @@
               },
               "dataset": {
                 "type": "string",
-                "description": "Package- or data-relative reference to the gold/replay dataset (JSONL) for this step."
+                "description": "Package- or data-relative reference to the gold/replay dataset (JSONL) for this step; the same as `datasets.release` given as a bare path."
+              },
+              "prompt": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "version",
+                  "file"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Package-relative prompt template; core stamps its sha256 on every trace."
+                  }
+                },
+                "description": "The step's prompt template: id, version and file."
+              },
+              "postprocess": {
+                "$ref": "#/$defs/symbol",
+                "description": "`module:attr` of the pure function turning a raw output into the typed object (replayable with no model call)."
+              },
+              "scorers": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/symbol"
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^step:[a-z][a-z0-9_-]*$"
+                    }
+                  ]
+                },
+                "description": "Code scorers: callables named `module:attr` (their signature is set by `eval run`), or `step:<id>` for a judge step of this manifest."
+              },
+              "datasets": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "ci": {
+                    "allOf": [
+                      {
+                        "$ref": "#/$defs/eval_dataset"
+                      },
+                      {
+                        "required": [
+                          "sha256"
+                        ]
+                      }
+                    ],
+                    "description": "Synthetic rows shipped in the package, pinned by sha256; run with 0 model calls. Its licence must be on the allow-list."
+                  },
+                  "release": {
+                    "$ref": "#/$defs/eval_dataset_or_path",
+                    "description": "The small live suite (usually private, under `{data}`)."
+                  },
+                  "upgrade": {
+                    "$ref": "#/$defs/eval_dataset_or_path",
+                    "description": "The full suite a model change is measured on (usually private, under `{data}`)."
+                  }
+                },
+                "description": "One dataset per suite."
+              },
+              "gates": {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[a-z][a-z0-9_-]*$"
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/eval_gate"
+                },
+                "description": "Named gates (`ci`, `release`, `upgrade`): which suite, how many calls, and the rules a run must meet."
+              },
+              "grades": {
+                "type": "string",
+                "pattern": "^([a-z0-9][a-z0-9_-]*:)?[a-z][a-z0-9_-]*$",
+                "description": "Judge steps: the step this judge grades, `<step>` in this manifest or `<gig>:<step>` in another gig."
+              },
+              "dimension": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Judge steps: the one dimension this judge grades."
+              },
+              "validation": {
+                "type": "object",
+                "required": [
+                  "against"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "against": {
+                    "type": "string",
+                    "description": "What the judge is checked against (`labels`)."
+                  },
+                  "min_n": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "min_kappa": {
+                    "type": "number",
+                    "minimum": -1,
+                    "maximum": 1
+                  },
+                  "report": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]*$"
+                    }
+                  }
+                },
+                "description": "Judge steps: the agreement a judge must show before `eval run` uses it."
               }
             }
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "object",
+      "description": "Generic per-step model binding any gig may declare, keyed by step id: the prompt file, the output schema and the adapter role (or target) `ctx.model(step_id)` resolves the step to.",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_./-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Package-relative prompt file of the step."
+          },
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Package-relative JSON Schema of the step output."
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Adapter role the step falls back to (a profile role: planner, critic, adjudicator, reviewer, verifier, researcher, gig_creator)."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Model target the step is bound to; wins over `role`."
+          },
+          "description": {
+            "type": "string"
           }
         }
       }
@@ -475,6 +637,153 @@
           "type": "string",
           "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$",
           "description": "Returns extra doctor checks merged into `gigai <name> doctor`."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "eval_dataset": {
+      "type": "object",
+      "required": [
+        "path",
+        "source",
+        "licence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Package-relative JSONL, or `{data}/...` under the gig folder (private, never shipped)."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Where the rows come from (`synthetic`, a URL, `operator labels`)."
+        },
+        "licence": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SPDX id (allow-list: CC0-1.0, CC-BY-4.0, CC-BY-SA-4.0, MIT, Apache-2.0, BSD-3-Clause, ODC-By-1.0, CDLA-Permissive-2.0), or any licence / `private` for private data under `{data}` outside the `ci` suite."
+        },
+        "split": {
+          "type": "string",
+          "description": "Which split of the source (`test`, `dev`)."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the file's bytes."
+        },
+        "slice_recipe": {
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "How the slice was cut: filter, stratification, count."
+        },
+        "seed": {
+          "type": "integer",
+          "description": "The sampling seed of the slice."
+        }
+      }
+    },
+    "eval_dataset_or_path": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "$ref": "#/$defs/eval_dataset"
+        }
+      ]
+    },
+    "metric_rule": {
+      "type": "object",
+      "required": [
+        "metric"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "metric": {
+          "type": "string",
+          "minLength": 1
+        },
+        "min_ci_lower": {
+          "type": "number",
+          "description": "Lowest allowed lower bound of the paired difference's confidence interval."
+        },
+        "no_worse": {
+          "type": "number",
+          "description": "Largest allowed drop of the point estimate (negative)."
+        }
+      }
+    },
+    "eval_gate": {
+      "type": "object",
+      "required": [
+        "suite"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "suite": {
+          "type": "string",
+          "enum": [
+            "ci",
+            "release",
+            "upgrade"
+          ]
+        },
+        "max_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "k": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Repeats per item."
+        },
+        "paired_to": {
+          "type": "string",
+          "description": "The run this one is paired against (`previous-model`, `last-release`)."
+        },
+        "slices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "primary": {
+          "$ref": "#/$defs/metric_rule"
+        },
+        "guard": {
+          "$ref": "#/$defs/metric_rule"
+        },
+        "require": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              }
+            }
+          ],
+          "description": "Scorers that must pass on every item, or named minimums."
+        },
+        "snapshot": {
+          "type": "string",
+          "description": "Package-relative replay snapshot the `ci` gate's numbers must equal."
         }
       }
     }
