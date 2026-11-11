@@ -68,6 +68,18 @@ def alias_env_name(env: str, alias: str) -> str:
     return f"{env}_{alias.upper().replace('-', '_')}"
 
 
+def alias_resolver(*, home_root: Path | None, alias: str | None):
+    """A ``CredentialResolver`` bound to one home and key alias, to hand to an adapter.
+
+    The caller never resolves a credential itself: only the HTTP transport calls the returned function, so
+    :func:`resolve_reference_value` stays imported by ``adapters/http.py`` alone.
+    """
+
+    from functools import partial
+
+    return partial(resolve_reference_value, home_root=home_root, alias=alias)
+
+
 def resolve_reference_value(
     reference: CredentialReference, *, home_root: Path | None = None, alias: str | None = None
 ) -> str:

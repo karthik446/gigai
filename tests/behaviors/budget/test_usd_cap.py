@@ -20,9 +20,11 @@ import subprocess
 import sys
 import threading
 import tomllib
+import urllib.request
 import warnings
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -291,7 +293,11 @@ def test_fetch_prices_writes_the_table_from_a_models_list(tmp_path: Path, provid
     home.mkdir()
     before = datetime.now(UTC).replace(microsecond=0)
 
-    table = fetch_prices(home, url=f"{provider.base_url}/models")
+    # urllib's default context does not read SSL_CERT_FILE on every platform (Linux CI); trust the fake's cert explicitly
+    context = ssl.create_default_context(cafile=str(provider.cert))
+    opener = partial(urllib.request.urlopen, context=context)
+
+    table = fetch_prices(home, url=f"{provider.base_url}/models", opener=opener)
 
     assert provider.models_requests == 1
     assert (table.price("fake/model-1").prompt, table.price("fake/model-1").completion) == (0.00001, 0.00005)

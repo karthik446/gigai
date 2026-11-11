@@ -44,13 +44,13 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-from functools import cached_property, partial
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Protocol
 from collections.abc import Callable, Iterator, Mapping
 
 from .. import secrets_store
-from ..credentials import CredentialReferenceError, CredentialUnavailableError, alias_env_name, resolve_reference_value
+from ..credentials import CredentialReferenceError, CredentialUnavailableError, alias_env_name, alias_resolver
 from ..gigs.home import ensure_gig_folder
 from ..model_execution import InvocationBudget
 from ..secrets_catalog import KNOWN_SERVICES
@@ -578,7 +578,7 @@ class GigBudget:
         """
 
         row = self.key
-        return partial(resolve_reference_value, home_root=self.home, alias=None if row is None else row.alias)
+        return alias_resolver(home_root=self.home, alias=None if row is None else row.alias)
 
     def spent(self) -> Spent:
         """Today's charges (UTC); a file from another day counts as nothing; no file is zero.
