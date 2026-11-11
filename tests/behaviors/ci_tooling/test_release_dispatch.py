@@ -359,3 +359,37 @@ def test_rollback_workflow_is_manual_and_defaults_to_a_dry_run() -> None:
     for job in ("github-release", "docs"):
         assert "!inputs.dry_run" in _job(text, job).split("runs-on:", 1)[0]
     assert "git push --force" not in text and "git tag -d" not in text
+
+
+@pytest.mark.parametrize(
+    ("version", "prerelease"),
+    [("0.2.0a1", True), ("0.3.0rc2", True), ("0.2.0b1", True), ("0.2.0", False), ("0.1.11.13", False)],
+)
+@pytest.mark.parametrize("notes", [True, False])
+def test_the_github_release_is_a_prerelease_exactly_when_the_version_has_letters(
+    tmp_path: Path, version: str, prerelease: bool, notes: bool
+) -> None:
+    """Run the workflow's own `gh release create` step with a fake gh and read its argv."""
+
+    job = _job(_workflow(), "github-release")
+    step = job.split("gh release create", 1)[0].rsplit("      - env:", 1)[1]
+    script = step.split("run: |\n", 1)[1] + "gh release create" + job.split("gh release create", 1)[1]
+    script = script.split("\n  media:", 1)[0]
+    lines = [line[10:] if line.startswith(" " * 10) else line for line in script.splitlines()]
+    body = "\n".join(lines[: lines.index("fi", len(lines) - 4) + 1] if "fi" in lines else lines)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    log = tmp_path / "argv.txt"
+    (fake_bin / "gh").write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> {log}\n', encoding="utf-8")
+    (fake_bin / "gh").chmod(0o755)
+    (tmp_path / "release-notes.md").write_text("notes\n" if notes else "", encoding="utf-8")
+    subprocess.run(
+        ["bash", "-e", "-c", body],
+        cwd=tmp_path,
+        check=True,
+        env={"PATH": f"{fake_bin}:/usr/bin:/bin", "TAG": f"v{version}", "VERSION": version, "REPOSITORY": "o/r"},
+    )
+    argv = log.read_text(encoding="utf-8")
+    assert argv.startswith(f"release create v{version} ")
+    assert ("--prerelease" in argv.split()) is prerelease
+    assert ("--notes-file" in argv) is notes

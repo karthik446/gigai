@@ -223,10 +223,17 @@ jobs:
           TAG: ${{ needs.preflight.outputs.tag }}
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
+          # A version with letters (0.2.0a1, 0.2.0rc1) is a PEP 440 pre-release: keep it off
+          # the repository's "latest" release, as PyPI keeps it off "latest" for plain installs.
+          prerelease=()
+          if [[ "${VERSION}" =~ [A-Za-z] ]]; then
+            prerelease=(--prerelease)
+          fi
           if [ -s release-notes.md ]; then
             gh release create "${TAG}" \
               --repo "${REPOSITORY}" \
               --verify-tag \
+              "${prerelease[@]}" \
               dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/release-manifest.json \
               --title "GigAI ${VERSION}" \
               --notes-file release-notes.md
@@ -234,6 +241,7 @@ jobs:
             gh release create "${TAG}" \
               --repo "${REPOSITORY}" \
               --verify-tag \
+              "${prerelease[@]}" \
               dist/*.whl dist/*.tar.gz dist/SHA256SUMS dist/release-manifest.json \
               --title "GigAI ${VERSION}" \
               --generate-notes
