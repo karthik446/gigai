@@ -431,7 +431,7 @@ def _read_interview_events(
     try:
         connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     except sqlite3.Error as exc:
-        raise JournalIndexError("state database is malformed") from exc
+        raise JournalIndexError(f"state database is malformed ({exc})") from exc
     try:
         try:
             table = connection.execute(
@@ -439,7 +439,7 @@ def _read_interview_events(
                 "WHERE type = 'table' AND name = 'interview_events'"
             ).fetchone()
         except sqlite3.DatabaseError as exc:
-            raise JournalIndexError("state database is malformed") from exc
+            raise JournalIndexError(f"state database is malformed ({exc})") from exc
         if table is None:
             return None
         columns = tuple(
@@ -466,7 +466,7 @@ def _read_scout_tables(path: Path) -> list[tuple[str, str, list[tuple[object, ob
     try:
         connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     except sqlite3.Error as exc:
-        raise JournalIndexError("state database is malformed") from exc
+        raise JournalIndexError(f"state database is malformed ({exc})") from exc
     try:
         try:
             objects = connection.execute(
@@ -474,7 +474,7 @@ def _read_scout_tables(path: Path) -> list[tuple[str, str, list[tuple[object, ob
                 "WHERE name NOT LIKE 'sqlite_autoindex_%'"
             ).fetchall()
         except sqlite3.DatabaseError as exc:
-            raise JournalIndexError("state database is malformed") from exc
+            raise JournalIndexError(f"state database is malformed ({exc})") from exc
         unexpected_objects = [
             item for item in objects
             if item[0] != "table" or item[1] not in {

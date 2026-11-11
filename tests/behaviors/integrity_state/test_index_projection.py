@@ -71,7 +71,7 @@ def test_index_rebuild_is_disposable_deterministic_and_idempotent(
     )
     assert rebuilt.as_dict() == first.as_dict()
     (created.workpad / "state.sqlite").write_bytes(b"not a SQLite database")
-    with pytest.raises(JournalIndexError, match="malformed"):
+    with pytest.raises(JournalIndexError, match=r"malformed \(file is not a database\)"):
         read_index(
             workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id
         )
