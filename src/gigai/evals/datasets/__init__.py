@@ -1,7 +1,7 @@
 """Public eval datasets: a committed ``ci`` slice per set, and a ``release`` slice built on demand under ``{data}``.
 
 Each set has one loader module (``contractnli``, ``ragtruth``, ``quality``, ``ifeval``, ``jsonschemabench``,
-``rewardbench2``, ``judgebench``, ``mtbench_human``, ``tinygsm8k``, ``tinymmlu``) defining:
+``rewardbench2``, ``judgebench``, ``mtbench_human``, ``tinygsm8k``, ``tinymmlu``, ``injection_composite``) defining:
 
 - ``SOURCES``: ``{file name: (url, sha256)}``, the pinned upstream files the loader reads;
 - ``RECIPES``: ``{suite: text}``, how the suite's subset is drawn (``seed = 20261109``);
@@ -45,6 +45,7 @@ SETS = (
     "mtbench_human",
     "tinygsm8k",
     "tinymmlu",
+    "injection_composite",
 )
 #: Where the committed ``ci`` slices live (a source checkout; they are not shipped in the wheel).
 CI_DIR = Path(__file__).resolve().parents[4] / "tests" / "fixtures" / "evals" / "ci"

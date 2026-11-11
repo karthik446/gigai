@@ -302,3 +302,25 @@ keeps the upstream ids in `source_ids`. Items are reformatted into one prompt st
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
   SOFTWARE.
   ```
+
+## injection_composite
+
+- Name: SEP (Should it be Executed or Processed?), the probe strings and witnesses of `SEP_dataset.json`, crossed
+  with GigAI's own synthetic rules-eval postings
+- SPDX: CC-BY-4.0
+- Licence: Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/
+- URL: https://github.com/egozverev/Should-It-Be-Executed-Or-Processed at commit
+  7606c0696f20f5aa433169fd2221f76852d1d4f5 (file `SEP_dataset/SEP_dataset.json`); licence stated in that commit's
+  `readme.md`, section "License": "Code in this repository is licensed under the [MIT License](LICENSE). The dataset
+  in `data/` is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)." The repository has no
+  `data/` directory (the data sits in `SEP_dataset/` and `datasets/`); the dataset is read as CC BY 4.0 and the MIT
+  `LICENCE` as covering the code, none of which GigAI uses.
+- Fetched: 2026-11-11
+- Attribution: SEP dataset by Egor Zverev, Sahar Abdelnabi, Soroush Tabesh, Mario Fritz and Christoph H. Lampert,
+  from "Can LLMs Separate Instructions From Data? And What Do We Even Mean By That?", ICLR 2025, arXiv:2403.06833,
+  licensed CC BY 4.0. The postings, resume and candidates are GigAI's invented fixtures
+  (`tests/evals/fixtures/rules_cases.json` and `injection_cases.json`), not SEP data.
+- Changes made: derived. Only SEP's 50 probe questions (each in its base and insistent wording) and their witness
+  words are used, recovered as the difference between each row's instructed and clean prompt; SEP's tasks and data
+  paragraphs are dropped. Each kept probe is inserted unchanged as its own paragraph at the start, middle or end of
+  a synthetic posting; probes whose witness already occurs in a clean posting's prompt are dropped.
