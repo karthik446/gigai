@@ -38,7 +38,7 @@ EXPECTED_SHA256 = {
     "finding.schema.json": "4444e0cfec3a32bb83b016172331072a369afb2699b093ad670dc36dfbcdd8f7",
     "gig-builder-session.schema.json": "40e8042c69c33cf8fb763ff9a3074e9118c40d7c5e2711e6c23497a86b16b247",
     "gig-discovery-manifest.schema.json": "6a3618eed54963d85e42a68bd28976f291e4003a00f8aa9291066229b5870ca8",
-    "gig-manifest.schema.json": "8465741631a30411bff742beca378357858df0abcb66a311b06d28e26cbbe0a7",
+    "gig-manifest.schema.json": "05bdbde475eec09b92d9949c28946103062918f3ec0e7b3fd23e5cf18de38c9d",
     "gig-package.schema.json": "921e2a481cdb61103f91cad6045e860a432101af50cf3a5b14e4108d8eda4e04",
     "gig-proposal.schema.json": "515f16368059c7d8d4bf88cb47d8fc0df63afc50a51e13c8c75601c013f134b3",
     "gig-proposal-v2.schema.json": "fe1e712aa86b83f60b48de95bfbedbe5ff411e4427ebfb0f85b7b6fc9b640cf2",
