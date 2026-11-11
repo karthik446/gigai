@@ -17,8 +17,16 @@ A ``deterministic`` target answers from the standard pack plus the gig package's
 the target, ``{"<target id>": {"<prompt>": "<text>"}}``: one offline gig can bind two steps to two targets that answer
 differently.
 
-``steps.toml`` is one ``[steps]`` table of ``step = "<target>"``. It is written lock-free by an atomic replace (two
-concurrent ``steps set`` leave one of the two files), with mode 0600 and never through a symlink.
+``steps.toml`` is one ``[steps]`` table of ``step = "<target>"`` and one ``[caps]`` table of ``step = <usd>`` (the
+per-click cap ``gigai <gig> steps set <step> --cap-usd <usd>`` writes; it wins over the manifest's
+``[steps].<id>.cap_usd``, and a call's ``cap_usd=`` argument wins over both). It is written lock-free by an atomic
+replace (two concurrent ``steps set`` leave one of the two files), with mode 0600 and never through a symlink.
+
+A call on a priced target (anything but ``deterministic``) with a cap is estimated first (``GigBudget.estimate``:
+the price table ``<home>/prices.json``, ``ceil(chars / 4)`` input tokens, ``max_output_tokens`` output tokens) and
+refused with ``estimated $X > cap $Y`` before any adapter call; the ledger holds the estimate during the call and
+settles to the cost the provider reported. The trace's ``cost_usd`` is that reported cost (NULL when the adapter
+reports none), its ``usage`` mapping carries ``cost_status`` and the ``estimate_usd`` when one was made.
 """
 
 from __future__ import annotations
@@ -27,6 +35,7 @@ import contextlib
 import dataclasses
 import io
 import json
+import math
 import os
 import stat
 import tomllib
@@ -67,7 +76,8 @@ class StepsFileError(ValueError):
 
 @dataclass(frozen=True)
 class Target:
-    """The model target step ``step`` resolved to, where from (``override``, ``manifest``, ``role:<role>``)."""
+    """The model target step ``step`` resolved to, where from (``override``, ``manifest``, ``role:<role>``), and its
+    per-click cap (``steps.toml`` ``[caps]`` over the manifest's ``[steps].<id>.cap_usd``; ``None`` when neither)."""
 
     step: str
     id: str
@@ -76,9 +86,17 @@ class Target:
     source: str
     settings: dict[str, Any]
     resolved: ResolvedModelTarget = field(repr=False)
+    cap_usd: float | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return {"target": self.id, "adapter": self.adapter, "model": self.model, "source": self.source, "settings": self.settings}
+        return {
+            "target": self.id,
+            "adapter": self.adapter,
+            "model": self.model,
+            "source": self.source,
+            "settings": self.settings,
+            "cap_usd": self.cap_usd,
+        }
 
 
 def steps_path(home: Path, gig: str) -> Path:
@@ -99,15 +117,15 @@ def _refuse_symlinks(path: Path) -> None:
                 raise StepsFileError(f"refusing a symlink in the gig folder: {part}")
 
 
-def read_overrides(home: Path, gig: str) -> dict[str, str]:
-    """The step overrides in ``steps.toml``; ``{}`` when there is none."""
+def _read_steps_file(home: Path, gig: str) -> tuple[dict[str, str], dict[str, float]]:
+    """``steps.toml``'s ``[steps]`` targets and ``[caps]`` caps; two empty tables when there is no file."""
 
     path = steps_path(home, gig)
     _refuse_symlinks(path)
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
-        return {}
+        return {}, {}
     with os.fdopen(descriptor, "rb") as handle:
         if os.fstat(handle.fileno()).st_mode & 0o022:
             raise StepsFileError(f"{path} is writable by group or others; run chmod 600 on it")
@@ -115,46 +133,92 @@ def read_overrides(home: Path, gig: str) -> dict[str, str]:
             payload = tomllib.load(handle)
         except tomllib.TOMLDecodeError as exc:
             raise StepsFileError(f"{path} is not TOML: {exc}") from exc
-    table = payload.get("steps", {})
-    if set(payload) - {"steps"} or not isinstance(table, dict) or any(type(v) is not str or not v for v in table.values()):
-        raise StepsFileError(f'{path} must hold only a [steps] table of step = "<model target>" lines')
-    return table
+    table, caps = payload.get("steps", {}), payload.get("caps", {})
+    if (
+        set(payload) - {"steps", "caps"}
+        or not isinstance(table, dict)
+        or any(type(v) is not str or not v for v in table.values())
+        or not isinstance(caps, dict)
+        or any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in caps.values())
+    ):
+        raise StepsFileError(
+            f'{path} must hold only a [steps] table of step = "<model target>" lines and a [caps] table of step = <usd> lines'
+        )
+    return table, {step: float(cap) for step, cap in caps.items()}
 
 
-def _write_override(home: Path, gig: str, step_id: str, target_id: str | None) -> bool:
-    """Set (or, for ``None``, remove) one override by an atomic replace; ``False`` when there was nothing to remove."""
+def read_overrides(home: Path, gig: str) -> dict[str, str]:
+    """The step target overrides in ``steps.toml``; ``{}`` when there is none."""
+
+    return _read_steps_file(home, gig)[0]
+
+
+def read_caps(home: Path, gig: str) -> dict[str, float]:
+    """The per-click caps in ``steps.toml``'s ``[caps]``; ``{}`` when there is none."""
+
+    return _read_steps_file(home, gig)[1]
+
+
+KEEP: Any = object()  # ``set_override``: leave the target (or the cap) as it is
+
+
+def _write_steps(home: Path, gig: str, step_id: str, target_id: str | None, cap_usd: float | None) -> tuple[bool, bool]:
+    """Set (or, for ``None``, remove; ``KEEP`` leaves) one step's target and cap by an atomic replace; whether each
+    changed anything (``False`` when there was nothing to remove)."""
 
     _refuse_symlinks(steps_path(home, gig))
-    overrides = read_overrides(home, gig)
-    if target_id is None and overrides.pop(step_id, None) is None:
-        return False
-    if target_id is not None:
-        overrides[step_id] = target_id
+    overrides, caps = _read_steps_file(home, gig)
+    changed_target = changed_cap = False
+    if target_id is None:
+        changed_target = overrides.pop(step_id, None) is not None
+    elif target_id is not KEEP:
+        overrides[step_id], changed_target = target_id, True
+    if cap_usd is None:
+        changed_cap = caps.pop(step_id, None) is not None
+    elif cap_usd is not KEEP:
+        caps[step_id], changed_cap = cap_usd, True
+    if not (changed_target or changed_cap):
+        return False, False
     folder = ensure_gig_folder(home, gig)
     _refuse_symlinks(folder / STEPS_FILE)
     lines = "".join(f"{json.dumps(step)} = {json.dumps(target)}\n" for step, target in sorted(overrides.items()))
+    cap_lines = "".join(f"{json.dumps(step)} = {cap!r}\n" for step, cap in sorted(caps.items()))
     temporary = folder / f".{STEPS_FILE}.{uuid.uuid4().hex}.tmp"
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(f"# gigai {gig} steps set: per-step model target overrides\n[steps]\n{lines}")
+            caps_table = f"\n[caps]\n{cap_lines}" if cap_lines else ""
+            handle.write(f"# gigai {gig} steps set: per-step model target overrides and per-click USD caps\n[steps]\n{lines}{caps_table}")
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, folder / STEPS_FILE)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
-    return True
+    return changed_target, changed_cap
 
 
-def _target(config: GigAIConfig, step_id: str, target_id: str, source: str, settings: dict[str, Any]) -> Target:
+def _target(config: GigAIConfig, step_id: str, target_id: str, source: str, settings: dict[str, Any], cap_usd: float | None = None) -> Target:
     from .model_targets import ModelTargetResolutionError, resolve_model_target
 
     try:
         resolved = resolve_model_target(config, target_id)
     except ModelTargetResolutionError as exc:
         raise StepTargetError(f"step {step_id!r} ({source}): {exc} in config.toml [[model_targets]]") from exc
-    return Target(step_id, target_id, resolved.endpoint.adapter, resolved.target.model, source, settings, resolved)
+    return Target(step_id, target_id, resolved.endpoint.adapter, resolved.target.model, source, settings, resolved, cap_usd)
+
+
+def _manifest_cap(step_id: str, step: Mapping[str, Any]) -> float | None:
+    """``[steps].<id>.cap_usd``; a value that is not a non-negative number is a ``StepTargetError``."""
+
+    if step.get("cap_usd") is None:
+        return None
+    from .sdk.budget import cap_value
+
+    try:
+        return cap_value(step["cap_usd"], f"[steps].{step_id}.cap_usd")
+    except ValueError as exc:
+        raise StepTargetError(f"step {step_id!r}: {exc}") from exc
 
 
 def resolve_target(home: Path, gig: str, manifest: Mapping[str, Any], step_id: str, config: GigAIConfig) -> Target:
@@ -165,11 +229,13 @@ def resolve_target(home: Path, gig: str, manifest: Mapping[str, Any], step_id: s
         raise KeyError(f"step {step_id!r} is not declared in the gig manifest's [steps] table ([steps].{step_id})")
     step = declared.get(step_id, {})
     settings = dict(step.get("settings") or {})
-    override = read_overrides(home, gig).get(step_id)
+    overrides, caps = _read_steps_file(home, gig)
+    cap = caps[step_id] if step_id in caps else _manifest_cap(step_id, step)
+    override = overrides.get(step_id)
     if override is not None:
-        return _target(config, step_id, override, "override", settings)
+        return _target(config, step_id, override, "override", settings, cap)
     if step.get("target"):
-        return _target(config, step_id, step["target"], "manifest", settings)
+        return _target(config, step_id, step["target"], "manifest", settings, cap)
     role = step.get("role") or (step_id if step_id in ROLES else None)
     if role is None:
         raise KeyError(f"step {step_id!r} names no model: set [steps].{step_id}.target or [steps].{step_id}.role")
@@ -179,7 +245,7 @@ def resolve_target(home: Path, gig: str, manifest: Mapping[str, Any], step_id: s
     if profile is None:
         raise StepTargetError(f"step {step_id!r} uses role {role!r} but config.toml has no 'default' profile")
     target_id = getattr(profile, role) or getattr(profile, _ROLE_FALLBACK[role])
-    return _target(config, step_id, target_id, f"role:{role}", settings)
+    return _target(config, step_id, target_id, f"role:{role}", settings, cap)
 
 
 def check_settings(target: Target, settings: Mapping[str, Any]) -> None:
@@ -198,32 +264,52 @@ def check_settings(target: Target, settings: Mapping[str, Any]) -> None:
         )
 
 
-def set_override(home: Path, gig: str, manifest: Mapping[str, Any], step_id: str, target_id: str | None) -> str:
-    """``gigai <gig> steps set``: check the step and the target, then write ``steps.toml``; returns what changed."""
+def set_override(home: Path, gig: str, manifest: Mapping[str, Any], step_id: str, target_id: str | None = KEEP, *, cap_usd: float | None = KEEP) -> str:
+    """``gigai <gig> steps set``: check the step, the target and the cap, then write ``steps.toml``; what changed.
 
-    if target_id is None:
-        removed = _write_override(home, gig, step_id, None)
-        return f"{step_id}: override removed" if removed else f"{step_id}: no override to remove"
-    if step_id not in _declared(manifest):
+    ``target_id``/``cap_usd``: a value sets it, ``None`` removes it, ``KEEP`` (the default) leaves it.
+    """
+
+    if target_id is KEEP and cap_usd is KEEP:
+        raise ValueError(f"{step_id}: nothing to set (a target, `-` to remove it, or --cap-usd)")
+    if (target_id not in (None, KEEP) or cap_usd not in (None, KEEP)) and step_id not in _declared(manifest):
         raise KeyError(f"step {step_id!r} is not declared in the gig manifest's [steps] table ([steps].{step_id})")
-    from .config import load_config
+    if cap_usd not in (None, KEEP):
+        from .sdk.budget import cap_value
 
-    target = _target(load_config(home), step_id, target_id, "override", dict(_declared(manifest)[step_id].get("settings") or {}))
-    check_settings(target, target.settings)
-    _write_override(home, gig, step_id, target_id)
-    return f"{step_id} -> {target_id} (written to {steps_path(home, gig)})"
+        cap_usd = cap_value(cap_usd, f"{step_id}: --cap-usd")
+    if target_id not in (None, KEEP):
+        from .config import load_config
+
+        target = _target(load_config(home), step_id, target_id, "override", dict(_declared(manifest)[step_id].get("settings") or {}))
+        check_settings(target, target.settings)
+    changed_target, changed_cap = _write_steps(home, gig, step_id, target_id, cap_usd)
+    path = steps_path(home, gig)
+    changes = []
+    if target_id is None:
+        changes.append(f"{step_id}: override removed" if changed_target else f"{step_id}: no override to remove")
+    elif target_id is not KEEP:
+        changes.append(f"{step_id} -> {target_id} (written to {path})")
+    if cap_usd is None:
+        changes.append(f"{step_id}: cap removed" if changed_cap else f"{step_id}: no cap to remove")
+    elif cap_usd is not KEEP:
+        changes.append(f"{step_id}: cap_usd {cap_usd} (written to {path})")
+    return "; ".join(changes)
 
 
 def stale_overrides(home: Path, gig: str, manifest: Mapping[str, Any]) -> list[str]:
-    """``gigai gig check`` warnings: an unreadable ``steps.toml``, an override of a step the manifest lacks."""
+    """``gigai gig check`` warnings: an unreadable ``steps.toml``, an override or cap of a step the manifest lacks."""
 
     try:
-        overrides = read_overrides(home, gig)
+        overrides, caps = _read_steps_file(home, gig)
     except (ValueError, OSError) as exc:
         return [str(exc)]
     return [
         f"{STEPS_FILE} overrides step {step!r}, which the manifest's [steps] lacks; run `gigai {gig} steps set {step} -`"
         for step in sorted(set(overrides) - set(_declared(manifest)))
+    ] + [
+        f"{STEPS_FILE} caps step {step!r}, which the manifest's [steps] lacks; run `gigai {gig} steps set {step} --cap-usd -`"
+        for step in sorted(set(caps) - set(_declared(manifest)))
     ]
 
 
@@ -284,7 +370,15 @@ def call(
     repeat_index: int = 0,
     postprocess: Postprocess | None = None,
 ) -> InvocationResult:
-    """``ctx.model``: resolve, refuse what the target cannot carry, call, and trace when ``evals.sqlite`` exists."""
+    """``ctx.model``: resolve, refuse what the target cannot carry, estimate against the cap, reserve, call, settle,
+    and trace when ``evals.sqlite`` exists.
+
+    ``settings["cap_usd"]`` is the call's per-click cap (``None``: no cap for this call), over the step's. A
+    ``deterministic`` target is free: no estimate, no ledger. Any other target is metered when the call has a cap or
+    the gig declares a key: ``ctx.budget.reserve(estimate, cap_usd=cap)`` before the adapter (``BudgetExhausted`` when
+    refused; nothing was called) and ``settle`` after it. Only a capped call is estimated (the price table is fetched
+    for nothing else); an uncapped keyed call reserves nothing and charges the cost the provider reported.
+    """
 
     from .adapters.factory import resolve_model_adapter
     from .adapters.port import RetryPolicy
@@ -294,25 +388,48 @@ def call(
 
     config = load_config(ctx.home)
     target = resolve_target(ctx.home, ctx.name, ctx.manifest, step_id, config)
+    settings = dict(settings)
+    cap = settings.pop("cap_usd", KEEP)
+    if cap is KEEP:
+        cap = target.cap_usd
+    elif cap is not None:
+        from .sdk.budget import cap_value
+
+        cap = cap_value(cap, f"step {step_id!r}: cap_usd")
     merged = {**target.settings, **settings}
     check_settings(target, merged)
     if isinstance(merged.get("retry_policy"), Mapping):
         merged["retry_policy"] = RetryPolicy(**merged["retry_policy"])
-    binding = resolve_model_adapter(config, target.id, home_root=ctx.home)
+    budget = None if target.adapter == "deterministic" else ctx.budget
+    binding = resolve_model_adapter(
+        config, target.id, home_root=ctx.home, credential_resolver=None if budget is None else budget.resolver
+    )
     if target.adapter == "deterministic":
         canned = json.loads(_package_file(ctx.manifest, "responses.json") or b"{}").get(target.id)
         if isinstance(canned, dict):
             binding.port._responses = {**binding.port._responses, **canned}  # type: ignore[attr-defined]
     role = target.source.removeprefix("role:") if target.source.startswith("role:") else "reviewer"
     request = dataclasses.replace(binding.request(role=role, prompt=input), **merged)
+    estimate: float | None = None
+    metered = budget is not None and (cap is not None or budget.key is not None)
     try:
+        if metered:
+            if cap is not None:
+                estimate = budget.estimate(request, target.resolved.target)
+            budget.reserve(estimate or 0.0, cap_usd=cap)
         result = invoke_bounded(
             binding.port, request, max_wall_time_ms=_WALL_TIME_MS, max_output_tokens=target.resolved.target.max_output_tokens
         )
     finally:
         binding.close()
+    if metered:
+        budget.settle(estimate or 0.0, result.cost_usd if result.cost_status == "provider_reported" else None)
     if records.evals_db_path(ctx.name, ctx.home).is_file():
         parsed, status = postprocess(result.output_text) if postprocess is not None else (None, "not_parsed")
+        model = records.model_call(binding, request, result)
+        usage = {**model.usage, "cost_status": result.cost_status}
+        if estimate is not None:
+            usage["estimate_usd"] = estimate
         ctx.trace(
             step_id,
             input,
@@ -320,7 +437,7 @@ def call(
             run=run or _adhoc_run(ctx, input),
             item=item or records.ItemRef("adhoc", "1"),
             prompt=_prompt(ctx.manifest, step_id),
-            model=records.model_call(binding, request, result),
+            model=dataclasses.replace(model, usage=usage),
             repeat_index=repeat_index,
             output_parsed=parsed,
             parse_status=status,
@@ -384,19 +501,34 @@ def step_verbs(verbs: Mapping[str, click.Command]) -> dict[str, click.Command]:
             click.echo("no steps: the manifest declares no [steps]")
         for step, row in rows.items():
             detail = row.get("error") or f"{row['target']} ({row['adapter']} {row['model']}, {row['source']})"
+            if row.get("cap_usd") is not None:
+                detail += f", cap_usd {row['cap_usd']}"
             click.echo(f"{step}: {detail}")
 
     @steps.command("set")
     @click.argument("step")
-    @click.argument("target")
+    @click.argument("target", required=False)
+    @click.option("--cap-usd", "cap_usd", default=None, help="Per-click USD cap for STEP (a non-negative amount; '-' removes it).")
     @click.pass_obj
-    def set_step(ctx: GigContext, step: str, target: str) -> None:
-        """Bind STEP to model TARGET (a config.toml [[model_targets]] name) in steps.toml; TARGET '-' removes it."""
+    def set_step(ctx: GigContext, step: str, target: str | None, cap_usd: str | None) -> None:
+        """Bind STEP to model TARGET (a config.toml [[model_targets]] name) in steps.toml; TARGET '-' removes it.
+        --cap-usd sets (or, with '-', removes) the step's per-click USD cap; either, or both, may be given."""
 
         from .config import ConfigurationError
 
+        if target is None and cap_usd is None:
+            raise click.UsageError("give a TARGET ('-' removes the override), --cap-usd, or both")
         try:
-            click.echo(set_override(ctx.home, ctx.name, ctx.manifest, step, None if target == "-" else target))
+            click.echo(
+                set_override(
+                    ctx.home,
+                    ctx.name,
+                    ctx.manifest,
+                    step,
+                    KEEP if target is None else None if target == "-" else target,
+                    cap_usd=KEEP if cap_usd is None else None if cap_usd == "-" else cap_usd,
+                )
+            )
         except (KeyError, ValueError, OSError, ConfigurationError) as exc:
             _fail(ctx.name, exc)
 

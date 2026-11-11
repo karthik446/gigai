@@ -54,8 +54,8 @@ from tests.behaviors.gigs.test_loader import FIXTURES, _add_fixture, _run
 
 GIG = "eval-fixture"
 MANIFEST = {"gig": {"name": GIG}, "data": {"stores": [{"name": "notes", "engine": "sqlite"}]}, "evals": {"steps": []}}
-# Columns a successful deterministic-adapter trace may leave NULL: the error, the cost (V1 never prices a call).
-MAY_BE_NULL = {"error", "cost_usd"}
+# Columns a successful deterministic-adapter trace may leave NULL: the error (its cost is the reported $0.0).
+MAY_BE_NULL = {"error"}
 SCHEMA = {"type": "object"}
 
 

@@ -14,6 +14,7 @@ from .codex_cli import CodexCLIAdapter
 from .openai_api import OpenAIAPIAdapter
 from .openrouter_api import OpenRouterAPIAdapter
 from .ollama_local import OllamaLocalAdapter
+from .http import CredentialResolver
 from .port import InvocationRequest, ModelInvocationPort
 
 
@@ -92,6 +93,7 @@ def resolve_model_adapter(
     executable_overrides: Mapping[str, str] | None = None,
     transport_overrides: Mapping[str, object] | None = None,
     home_root: Path | None = None,
+    credential_resolver: CredentialResolver | None = None,
 ) -> ModelAdapterBinding:
     """Resolve ``configuration -> target -> endpoint -> concrete adapter``.
 
@@ -101,6 +103,11 @@ def resolve_model_adapter(
     no effect on ``deterministic``/``codex_cli``/``claude_cli``/
     ``ollama_local`` targets (none resolve a credential). Omitting it keeps
     today's default resolver (env, then the default home).
+
+    ``credential_resolver`` (BK3) replaces that default for the remote
+    adapters: ``gigai.steps.call`` passes the gig budget's alias-aware
+    resolver (``GigBudget.resolver``) so a ``[[keys]]`` alias is tried before
+    the shared variable. It wins over ``home_root`` when both are given.
     """
 
     target = resolve_model_target(config, target_name)
@@ -145,6 +152,7 @@ def resolve_model_adapter(
             port=OpenAIAPIAdapter(
                 credential=credential,
                 base_url=endpoint.base_url,
+                credential_resolver=credential_resolver,
                 home_root=home_root,
             ),
         )
@@ -154,6 +162,7 @@ def resolve_model_adapter(
             port=OpenRouterAPIAdapter(
                 credential=credential,
                 base_url=endpoint.base_url,
+                credential_resolver=credential_resolver,
                 home_root=home_root,
             ),
         )

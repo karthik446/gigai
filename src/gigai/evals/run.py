@@ -110,9 +110,11 @@ class CallBudget:
         paid = not self.deterministic[step_id]
         if paid and self.paid_cap is not None and self.paid >= self.paid_cap:
             raise CapReachedError(f"cap {self.paid_cap} reached before call {self.paid_cap + 1}")
+        from ..sdk.budget import BudgetExhausted
+
         try:
             gig.model(step_id, prompt, **fields)
-        except (StepTargetError, KeyError) as exc:  # refused before the adapter was called
+        except (StepTargetError, KeyError, BudgetExhausted) as exc:  # refused before the adapter was called
             raise RunRefused(_redact(_message(exc), prompt, *private)) from exc
         except Exception as exc:
             self.made += 1
@@ -232,6 +234,7 @@ def execute(
     planned = []
     for item_id, row in data.rows.items():
         prompt = _render(template, row, step_id)
+    _check_caps(gig, targets)
         planned.append((item_id, row, prompt, {**(settings or {}), **_schema_settings(row, settings or {}, prompt)}))
     _check_settings(targets, step_id, [call_settings for *_, call_settings in planned])
     run = records.RunRecord(
@@ -583,6 +586,26 @@ def _check_settings(targets: Mapping[str, Target], step_id: str, call_settings: 
         for name, target in targets.items():
             if name != step_id:
                 check_settings(target, target.settings)
+def _check_caps(gig: GigContext, targets: Mapping[str, Target]) -> None:
+    """BK3: refuse, before any call and before the run row, a capped step whose output alone (``max_output_tokens``
+    at the completion price, no input) is already over its ``cap_usd``, or whose price is unknown; ``steps.call``
+    then estimates each prompt against the cap (``estimated $X > cap $Y``, also a refusal, exit 2)."""
+
+    from types import SimpleNamespace
+
+    from ..sdk.budget import BudgetExhausted, ClickCapExceeded
+
+    for target in targets.values():
+        if target.cap_usd is None or target.adapter == "deterministic":
+            continue
+        try:
+            floor = gig.budget.estimate(SimpleNamespace(prompt="", system=None, messages=()), target.resolved.target)
+            if floor > target.cap_usd:
+                raise ClickCapExceeded(floor, target.cap_usd)
+        except BudgetExhausted as exc:
+            raise RunRefused(str(exc)) from exc
+
+
     except StepTargetError as exc:
         raise RunRefused(str(exc)) from exc
 

@@ -1,0 +1,13 @@
+{
+  "schema_version": "gig-prices:1",
+  "fetched_at": "2026-11-10T00:00:00Z",
+  "source": "tests/fixtures/budget/prices.json (synthetic; not OpenRouter's list)",
+  "note": "USD per token. fake/model-1 is priced so that a 4000-character prompt with max_output_tokens 1000 estimates to exactly $0.06.",
+  "prices": {
+    "fake/model-1": {"prompt": 0.00001, "completion": 0.00005},
+    "fake/model-2": {"prompt": 0.000002, "completion": 0.000008},
+    "sonnet": {"prompt": 0.000003, "completion": 0.000015},
+    "openai/gpt-4o-mini": {"prompt": 0.00000015, "completion": 0.0000006},
+    "anthropic/claude-sonnet-4": {"prompt": 0.000003, "completion": 0.000015}
+  }
+}

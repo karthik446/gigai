@@ -13,7 +13,8 @@ same file through the same function.
 A trace stores the input and the raw output with their SHA-256, so a later scorer re-scores it with no model call
 (``replay``). ``model_call`` is the adapter hook: from a binding, its request and the result it returned, it fills
 the model identity, the child argv (CLI adapters only; never a credential), the sampling settings the adapter
-carried, the token usage and the timing. ``cost_usd`` stays NULL until P12 prices calls.
+carried, the token usage, the timing and the cost (``cost_usd`` when the provider reported one, else NULL; BK3's
+``ctx.model`` adds ``cost_status`` and, when it priced the call, ``estimate_usd`` to the usage mapping).
 """
 
 from __future__ import annotations
@@ -165,11 +166,14 @@ class ModelCall:
     adapter_version: str | None
     argv: tuple[str, ...]
     settings: Settings
-    #: ``{"input_tokens", "output_tokens", "total_tokens", "raw"}``; a token count the adapter did not report is null.
+    #: ``{"input_tokens", "output_tokens", "total_tokens", "raw"}`` (``ctx.model`` adds ``cost_status`` and, when it
+    #: priced the call, ``estimate_usd``); a token count the adapter did not report is null.
     usage: Mapping[str, Any]
     latency_ms: int | None
     started_at: str | None
     completed_at: str | None
+    #: The cost the provider reported (``cost_status == "provider_reported"``); ``None`` otherwise.
+    cost_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -308,6 +312,7 @@ def model_call(binding: ModelAdapterBinding, request: InvocationRequest, result:
         latency_ms=result.latency_ms,
         started_at=result.started_at,
         completed_at=result.completed_at,
+        cost_usd=result.cost_usd if result.cost_status == "provider_reported" else None,
     )
 
 
@@ -676,7 +681,7 @@ def _put_trace(connection: sqlite3.Connection, record: TraceRecord) -> None:
         "latency_ms": None if model is None else model.latency_ms,
         "started_at": None if model is None else model.started_at,
         "completed_at": None if model is None else model.completed_at,
-        "cost_usd": None,  # P12 prices calls
+        "cost_usd": None if model is None else model.cost_usd,
         "outcome": record.outcome,
         "error": None if record.error is None else _json(record.error),
         "recorded_at": record.recorded_at,

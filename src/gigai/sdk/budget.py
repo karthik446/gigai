@@ -13,9 +13,19 @@ The first row with a ``spend_cap`` caps the gig. Core keeps what the gig charged
 hard stop for USD is the per-gig key's own limit at the provider (:class:`KeyProvider`) -- when the provider says the
 key is spent, ``check`` refuses with the provider's words and does not retry.
 
+Per click (BK3): a step's ``cap_usd`` (``[steps].<id>.cap_usd``, ``steps set <id> --cap-usd``, or the call argument)
+bounds one call. ``estimate(request, target)`` is the worst case the call can cost from the price table
+``<home>/prices.json`` (:class:`PriceTable`: OpenRouter's model list, fetched once by :func:`fetch_prices` and cached
+with its ``fetched_at``; older than :data:`PRICES_MAX_AGE` warns once and is still used): ``ceil(chars / 4)`` input
+tokens (:data:`CHARS_PER_TOKEN`) times the prompt price plus ``max_output_tokens`` times the completion price, rounded
+to the microdollar. ``reserve(estimate, cap_usd=cap)`` refuses ``estimated $X > cap $Y`` (:class:`ClickCapExceeded`)
+before the provider is asked, the lock is taken or any adapter is called; an equal estimate passes. After the call
+``settle`` moves the ledger from the estimate to the cost the provider reported.
+
 Fail closed: a ``spend.json`` that cannot be read as today's numbers (corrupt, negative, not a number) refuses every
 ``check``/``reserve``/``charge`` with :class:`SpendFileError` naming the file, and never resets a cap; ``status``
-reports the error instead of raising.
+reports the error instead of raising. A price the table lacks (or no ``max_output_tokens``) refuses the estimate with
+:class:`PriceUnknownError` naming the model and the file, never an unbounded guess.
 
 Nothing here keeps or prints a secret: ``present`` in :meth:`GigBudget.status` comes from variable names only, and the
 key value only passes through :attr:`GigBudget.resolver` to an adapter or to a provider's ``usage`` call.
@@ -25,14 +35,16 @@ from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
 import sys
 import tempfile
 import uuid
+import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-from functools import partial
+from functools import cached_property, partial
 from pathlib import Path
 from typing import Any, Protocol
 from collections.abc import Callable, Iterator, Mapping
@@ -45,21 +57,39 @@ from ..secrets_catalog import KNOWN_SERVICES
 
 SPEND_FILENAME = "spend.json"
 SPEND_SCHEMA = "gig-spend:1"
+PRICES_FILENAME = "prices.json"
+PRICES_SCHEMA = "gig-prices:1"
+#: OpenRouter's model list; ``pricing.prompt``/``pricing.completion`` are USD per token as decimal strings.
+#: NOT fetched from this repository's tests (a loopback fake serves the same shape); unverified live.
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+#: The input-length rule of ``estimate``: one token per four characters of prompt, system and prior turns, rounded up.
+CHARS_PER_TOKEN = 4
+PRICES_MAX_AGE = timedelta(days=7)
 _UNBOUNDED = sys.maxsize
 
 __all__ = [
     "BudgetExhausted",
+    "CHARS_PER_TOKEN",
+    "ClickCapExceeded",
     "GigBudget",
     "KeyExhausted",
     "KeyProvider",
     "KeyRow",
     "KeyUsage",
     "LoopbackKeyProvider",
+    "OPENROUTER_MODELS_URL",
     "OpenRouterKeyProvider",
+    "PRICES_MAX_AGE",
+    "Price",
+    "PriceTable",
+    "PriceUnknownError",
     "Remaining",
     "SpendCap",
     "SpendFileError",
     "Spent",
+    "StalePricesWarning",
+    "cap_value",
+    "fetch_prices",
     "key_rows",
     "status_fields",
 ]
@@ -75,6 +105,31 @@ class SpendFileError(BudgetExhausted):
     """``spend.json`` cannot be read as today's spend; the gig is refused until the file is fixed or removed."""
 
     code = "spend_file_unreadable"
+
+
+class ClickCapExceeded(BudgetExhausted):
+    """One call's worst-case estimate is over the step's ``cap_usd``; refused before any adapter call.
+
+    The text is ``estimated $X > cap $Y`` in cents; when both round to the same cents it shows four, then six, decimals.
+    """
+
+    code = "cap_usd_exceeded"
+
+    def __init__(self, estimate: float, cap: float) -> None:
+        decimals = next((n for n in (2, 4) if f"{estimate:.{n}f}" != f"{cap:.{n}f}"), 6)
+        super().__init__(f"estimated ${estimate:.{decimals}f} > cap ${cap:.{decimals}f}")
+        self.estimate, self.cap = estimate, cap
+
+
+class PriceUnknownError(BudgetExhausted):
+    """No worst case can be put on the call: the price table is missing or lacks the model, or the request has no
+    ``max_output_tokens``; the call is refused rather than guessed unbounded."""
+
+    code = "price_unknown"
+
+
+class StalePricesWarning(UserWarning):
+    """``prices.json`` is older than :data:`PRICES_MAX_AGE`; the estimate uses it anyway. Warned once per budget."""
 
 
 class KeyExhausted(Exception):
@@ -321,6 +376,151 @@ def _provider_message(error: Any) -> str:
     return str(message) if message else f"HTTP {error.code}: {error.reason}"
 
 
+# --- the price table ---------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Price:
+    """USD per token of one model: what it charges for a prompt token and for a completion token."""
+
+    prompt: float
+    completion: float
+
+
+@dataclass(frozen=True)
+class PriceTable:
+    """``<home>/prices.json``: per-token prices by model id, with when they were fetched and from where.
+
+    The file is ``{"schema_version": "gig-prices:1", "fetched_at": "<UTC, ISO 8601>", "source": "<url>",
+    "prices": {"<model id>": {"prompt": <usd/token>, "completion": <usd/token>}}}``. Lookups are by the target's
+    ``model`` string as config.toml spells it (an OpenRouter id such as ``openai/gpt-4o-mini``); a CLI target's model
+    (``sonnet``) is priced only when the table carries that id.
+    """
+
+    path: Path
+    fetched_at: datetime
+    source: str
+    prices: Mapping[str, Price]
+
+    @classmethod
+    def load(cls, path: Path) -> PriceTable:
+        """The table in ``path``; :class:`PriceUnknownError` names the file when it is missing or not a price table."""
+
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            raise PriceUnknownError(f"no price table at {path}: fetch one with gigai.sdk.budget.fetch_prices") from None
+        except (OSError, ValueError) as error:
+            raise PriceUnknownError(f"{path} is not a price table: {error}") from None
+        try:
+            if payload.get("schema_version") != PRICES_SCHEMA:
+                raise ValueError(f"schema_version is not {PRICES_SCHEMA!r}")
+            fetched_at = datetime.fromisoformat(str(payload["fetched_at"]).replace("Z", "+00:00"))
+            if fetched_at.tzinfo is None:
+                raise ValueError("fetched_at has no timezone")
+            prices = {
+                str(model): Price(_number(entry["prompt"], f"prices[{model}].prompt"), _number(entry["completion"], f"prices[{model}].completion"))
+                for model, entry in payload["prices"].items()
+            }
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise PriceUnknownError(f"{path} is not a price table: {error}") from None
+        return cls(path=path, fetched_at=fetched_at, source=str(payload.get("source", "")), prices=prices)
+
+    @classmethod
+    def from_models(cls, payload: Mapping[str, Any], *, path: Path, source: str, fetched_at: datetime) -> PriceTable:
+        """A table from OpenRouter's ``/api/v1/models`` body (``data[].id``, ``data[].pricing.prompt/completion``,
+        USD per token as decimal strings); a model whose two prices are not numbers is left out."""
+
+        prices = {}
+        for item in payload.get("data") or ():
+            pricing = item.get("pricing") if isinstance(item, Mapping) else None
+            if not isinstance(pricing, Mapping) or not isinstance(item.get("id"), str):
+                continue
+            try:
+                prices[item["id"]] = Price(_number(float(pricing["prompt"]), "prompt"), _number(float(pricing["completion"]), "completion"))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return cls(path=path, fetched_at=fetched_at, source=source, prices=prices)
+
+    def write(self) -> None:
+        """Write the table to :attr:`path` atomically (the home must exist)."""
+
+        _write_json(
+            self.path,
+            {
+                "schema_version": PRICES_SCHEMA,
+                "fetched_at": self.fetched_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "source": self.source,
+                "prices": {model: {"prompt": price.prompt, "completion": price.completion} for model, price in sorted(self.prices.items())},
+            },
+        )
+
+    def stale(self, now: datetime | None = None) -> bool:
+        return (now or datetime.now(UTC)) - self.fetched_at > PRICES_MAX_AGE
+
+    def price(self, model: str) -> Price:
+        """The price of ``model``; :class:`PriceUnknownError` names the model and the file when the table lacks it."""
+
+        try:
+            return self.prices[model]
+        except KeyError:
+            raise PriceUnknownError(f"no price for model {model!r} in {self.path}: refetch it or bind the step to a listed model") from None
+
+
+def prices_path(home: Path) -> Path:
+    return Path(home) / PRICES_FILENAME
+
+
+def fetch_prices(home: Path, *, url: str = OPENROUTER_MODELS_URL, opener: Callable[..., Any] | None = None, timeout: float = 10.0) -> PriceTable:
+    """Fetch the model list at ``url`` (OpenRouter's shape), write ``<home>/prices.json`` and return the table.
+
+    ``opener`` is ``urllib.request.urlopen`` by default; tests pass a loopback server's URL. The real
+    :data:`OPENROUTER_MODELS_URL` is never fetched by this repository's tests (unverified live); a response that is
+    not that shape is a :class:`PriceUnknownError`.
+    """
+
+    import urllib.error
+    import urllib.request
+
+    open_url = opener or urllib.request.urlopen
+    try:
+        with open_url(urllib.request.Request(url, headers={"Accept": "application/json"}), timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        raise PriceUnknownError(f"could not fetch prices from {url}: {error}") from None
+    if not isinstance(payload, Mapping):
+        raise PriceUnknownError(f"could not fetch prices from {url}: not a model list")
+    table = PriceTable.from_models(payload, path=prices_path(home), source=url, fetched_at=datetime.now(UTC))
+    table.write()
+    return table
+
+
+def cap_value(value: Any, where: str) -> float:
+    """A ``cap_usd``: a finite, non-negative number (``0`` refuses every priced call); anything else is a
+    ``ValueError`` naming ``where``."""
+
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            raise ValueError(f"{where}: {value!r} is not a USD amount (a cap_usd is a non-negative USD amount)") from None
+    try:
+        return _number(value, where)
+    except ValueError as error:
+        raise ValueError(f"{error} (a cap_usd is a non-negative USD amount)") from None
+
+
+def _request_chars(request: Any) -> int:
+    """The characters a request sends: prompt, system and the content of prior turns."""
+
+    chars = len(getattr(request, "prompt", "") or "") + len(getattr(request, "system", None) or "")
+    for turn in getattr(request, "messages", None) or ():
+        content = turn.get("content") if isinstance(turn, Mapping) else None
+        chars += len(content) if isinstance(content, str) else len(json.dumps(content, default=str)) if content is not None else 0
+    return chars
+
+
+
 @dataclass(frozen=True)
 class GigBudget:
     """One gig's budget: its caps, today's spend, the current run's ledger and its per-gig key.
@@ -336,6 +536,7 @@ class GigBudget:
     provider: KeyProvider | None = None
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     run: InvocationBudget = field(default=None, repr=False)  # type: ignore[assignment]  # built in __post_init__
+    _warned: list[str] = field(default_factory=list, repr=False, compare=False)  # ``["stale"]`` once the stale-prices warning went out
 
     def __post_init__(self) -> None:
         if self.run is None:
@@ -461,18 +662,24 @@ class GigBudget:
             return self._charge_locked(self.spent(), usd, calls)
 
     def _charge_locked(self, spent: Spent, usd: float, calls: int) -> Spent:
-        spent = Spent(day=spent.day, usd=spent.usd + usd, calls=spent.calls + calls)
+        spent = Spent(day=spent.day, usd=round(spent.usd + usd, 6), calls=spent.calls + calls)
         _write_json(self._path(), spent.to_json())
         self.run.model_calls += calls
-        self.run.usd += usd
+        self.run.usd = round(self.run.usd + usd, 6)
         return spent
 
-    def reserve(self, usd: float) -> Remaining:
-        """Fail-closed pre-charge of one call costing up to ``usd``: check the caps, fit, charge -- read, decision
-        and write under one lock, so concurrent reservations never pass a cap together."""
+    def reserve(self, usd: float, *, cap_usd: float | None = None) -> Remaining:
+        """Fail-closed pre-charge of one call costing up to ``usd``: the per-click cap, then the caps, fit, charge --
+        read, decision and write under one lock, so concurrent reservations never pass a cap together.
+
+        ``cap_usd`` is the step's per-click cap: ``usd`` over it is :class:`ClickCapExceeded` (``estimated $X > cap
+        $Y``) before the provider is asked or the lock taken; equal passes.
+        """
 
         if usd < 0:
             raise ValueError("reservations are non-negative")
+        if cap_usd is not None and usd > cap_usd:
+            raise ClickCapExceeded(usd, cap_usd)
         self._ask_provider()
         with self._locked():
             spent = self.spent()
@@ -481,6 +688,59 @@ class GigBudget:
             if left.usd is not None and usd > left.usd:
                 raise BudgetExhausted(f"{self.gig}: ${usd:.4f} does not fit the remaining ${left.usd:.4f}")
             return self._remaining(self._charge_locked(spent, usd, 1))
+
+    def settle(self, reserved: float, actual: float | None) -> Spent:
+        """After the call: move today's file and the run ledger from the ``reserved`` estimate to the ``actual`` cost
+        the provider reported (``None``: the estimate stands). Never refuses; the ledger never goes below zero."""
+
+        if actual is None or actual < 0:
+            return self.spent()
+        with self._locked():
+            spent = self.spent()
+            usd = max(0.0, round(spent.usd + actual - reserved, 6))
+            spent = Spent(day=spent.day, usd=usd, calls=spent.calls)
+            _write_json(self._path(), spent.to_json())
+            self.run.usd = max(0.0, round(self.run.usd + actual - reserved, 6))
+            return spent
+
+    @cached_property
+    def prices(self) -> PriceTable:
+        """``<home>/prices.json``, fetched once from :data:`OPENROUTER_MODELS_URL` when the home has none. A stale
+        table is used; :meth:`estimate` warns about it."""
+
+        path = prices_path(self.home)
+        return PriceTable.load(path) if path.is_file() else fetch_prices(self.home)
+
+    def _priced(self) -> PriceTable:
+        """:attr:`prices`, warning once per budget (:class:`StalePricesWarning`, attributed to :meth:`estimate`'s
+        caller) when the table is older than :data:`PRICES_MAX_AGE`."""
+
+        table = self.prices
+        if table.stale() and "stale" not in self._warned:
+            self._warned.append("stale")
+            age = (datetime.now(UTC) - table.fetched_at).days
+            warnings.warn(
+                f"{prices_path(self.home)} was fetched {age} days ago; estimates use these prices until it is refetched",
+                StalePricesWarning,
+                stacklevel=3,
+            )
+        return table
+
+    def estimate(self, request: Any, target: Any) -> float:
+        """The worst case ``request`` on ``target`` can cost, in USD, rounded to the microdollar.
+
+        Input tokens are ``ceil(chars / CHARS_PER_TOKEN)`` over the prompt, the system text and prior turns; output
+        tokens are the request's ``max_output_tokens`` (else the target's). The price is :attr:`prices` at
+        ``target.model``. No positive ``max_output_tokens``, no table or no price for the model is
+        :class:`PriceUnknownError`; nothing is guessed.
+        """
+
+        max_output = getattr(request, "max_output_tokens", None) or getattr(target, "max_output_tokens", None)
+        if isinstance(max_output, bool) or not isinstance(max_output, int) or max_output <= 0:
+            raise PriceUnknownError(f"cannot estimate a call of {getattr(target, 'model', target)!r}: no max_output_tokens on the request or the target")
+        price = self._priced().price(str(getattr(target, "model", target)))
+        input_tokens = math.ceil(_request_chars(request) / CHARS_PER_TOKEN)
+        return round(input_tokens * price.prompt + max_output * price.completion, 6)
 
     def status(self) -> dict[str, Any]:
         """The ``budget`` object of ``status --json``: caps, spent, remaining and the UTC day window; an unreadable

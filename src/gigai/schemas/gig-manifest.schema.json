@@ -603,6 +603,11 @@
               ]
             }
           },
+          "cap_usd": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Per-click USD cap: a call whose worst-case estimate (input tokens x prompt price + max_output_tokens x completion price) is over it is refused before any adapter call. `steps set <step> --cap-usd` overrides it; `ctx.model(..., cap_usd=)` overrides both."
+          },
           "description": {
             "type": "string"
           }
