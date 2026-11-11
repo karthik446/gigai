@@ -340,7 +340,7 @@ def stop_server(server: RunningServer) -> None:
         # 0110-028: whatever the supervisor's stop did (it only signals a pid
         # whose identity check passes, and removes the state file either
         # way), no server of this home outlives this call.
-        survived = _process_is_alive(server.pid)
+        survived = _wait_until_gone(server.pid)
         killed = stop_test_servers(scout_test_servers(under=server.home))
         if server in _STARTED:
             _STARTED.remove(server)
@@ -351,7 +351,23 @@ def stop_server(server: RunningServer) -> None:
     )
 
 
+def _wait_until_gone(pid: int, *, seconds: float = 5.0) -> bool:
+    """True when ``pid`` is still alive after a short grace: the supervisor's stop returns as the child exits, not after."""
+
+    deadline = time.monotonic() + seconds
+    while _process_is_alive(pid):
+        if time.monotonic() >= deadline:
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def _process_is_alive(pid: int) -> bool:
+    try:
+        if os.waitpid(pid, os.WNOHANG)[0] == pid:  # our own exited child: reap it, a zombie answers kill(pid, 0)
+            return False
+    except ChildProcessError:
+        pass
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
