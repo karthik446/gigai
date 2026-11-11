@@ -1,6 +1,7 @@
 """Public eval datasets: a committed ``ci`` slice per set, and a ``release`` slice built on demand under ``{data}``.
 
-Each set has one loader module (``contractnli``, ``ragtruth``, ``quality``, ``ifeval``) defining:
+Each set has one loader module (``contractnli``, ``ragtruth``, ``quality``, ``ifeval``, ``jsonschemabench``,
+``rewardbench2``, ``judgebench``, ``mtbench_human``, ``tinygsm8k``, ``tinymmlu``) defining:
 
 - ``SOURCES``: ``{file name: (url, sha256)}``, the pinned upstream files the loader reads;
 - ``RECIPES``: ``{suite: text}``, how the suite's subset is drawn (``seed = 20261109``);
@@ -10,8 +11,9 @@ Each set has one loader module (``contractnli``, ``ragtruth``, ``quality``, ``if
 A ``ci`` slice lives in ``tests/fixtures/evals/ci/<set>.jsonl`` next to ``<set>.sha256``. Its rows carry a canned
 completion, so a ``ci`` run makes 0 model calls. ``release`` slices are never committed: ``download_release``
 builds one under ``{data}/datasets/`` from the upstream files, downloading them only when they are absent. Licences
-and attribution are in ``NOTICES.md`` next to this file. The module is stdlib only; a loader module is imported the
-first time its set is used.
+and attribution are in ``NOTICES.md`` next to this file. The package needs only the standard library; a loader
+module is imported the first time its set is used. Upstream parquet files are read with ``pyarrow``, an optional
+install that only a ``release`` build of a parquet set needs (``parquet_rows``).
 """
 
 from __future__ import annotations
@@ -32,7 +34,18 @@ SEED = 20261109
 #: Longest flattened prompt an item may carry, in characters.
 MAX_PROMPT_CHARS = 60_000
 #: The sets with a loader module, in the order the docs list them.
-SETS = ("contractnli", "ragtruth", "quality", "ifeval")
+SETS = (
+    "contractnli",
+    "ragtruth",
+    "quality",
+    "ifeval",
+    "jsonschemabench",
+    "rewardbench2",
+    "judgebench",
+    "mtbench_human",
+    "tinygsm8k",
+    "tinymmlu",
+)
 #: Where the committed ``ci`` slices live (a source checkout; they are not shipped in the wheel).
 CI_DIR = Path(__file__).resolve().parents[4] / "tests" / "fixtures" / "evals" / "ci"
 #: Appended to every ``ci`` recipe: committed fixtures must pass tests/behaviors/ci_tooling/test_no_real_fixture_data.py.
@@ -172,6 +185,16 @@ def load_ci(set_name: str, directory: Path | None = None) -> list[Item]:
 def _unavailable(message: str) -> SystemExit:
     sys.stderr.write(f"gigai: {message}\n")
     return SystemExit(2)
+
+
+def parquet_rows(path: Path, set_name: str) -> list[dict[str, Any]]:
+    """The rows of the parquet file at ``path``; exits 2 with an install hint when ``pyarrow`` is absent."""
+    try:
+        from pyarrow import parquet  # optional: only a release build reads parquet
+    except ImportError as error:
+        hint = "install pyarrow next to gigai (uv tool install --with pyarrow gigai) and run again"
+        raise _unavailable(f"{set_name}: reading {path.name} needs pyarrow; {hint}") from error
+    return parquet.read_table(path).to_pylist()
 
 
 def download_release(set_name: str, data_dir: Path, *, timeout: float = 60.0) -> Path:

@@ -98,3 +98,207 @@ keeps the upstream ids in `source_ids`. Items are reformatted into one prompt st
   See the License for the specific language governing permissions and
   limitations under the License.
   ```
+
+## jsonschemabench
+
+- Name: JSONSchemaBench (`Github_medium` subset, test split)
+- SPDX: MIT
+- URL: https://huggingface.co/datasets/epfl-dlab/JSONSchemaBench at revision 5bd0f4640badc6f3f02df796421d21cb0ca0b141
+  (file `Github_medium/test-00000-of-00001.parquet`)
+- Fetched: 2026-11-11
+- Attribution: Saibo Geng et al., "Generating Structured Outputs from Language Models: Benchmark and Studies",
+  arXiv:2501.10868, 2025. The dataset card says "This dataset is provided under the [MIT License]
+  (https://opensource.org/licenses/MIT)"; the repository has no `LICENSE` file, so the copyright line below names
+  the authors as the card's citation does. The card lists the schemas' sources as GitHub, Kubernetes, API
+  specifications and curated collections.
+- Changes made: sliced. A seeded subset of schemas is kept unchanged as each item's expected value; one fixed
+  instruction is the prompt.
+- Licence (MIT, the text at https://opensource.org/licenses/MIT):
+
+  ```text
+  MIT License
+
+  Copyright (c) 2025 Saibo Geng et al. (the JSONSchemaBench authors)
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+  ```
+
+## rewardbench2
+
+- Name: RewardBench 2 (`Focus` and `Factuality` subsets, test split)
+- SPDX: ODC-By-1.0
+- Licence: Open Data Commons Attribution License v1.0, https://opendatacommons.org/licenses/by/1-0/
+- URL: https://huggingface.co/datasets/allenai/reward-bench-2 at revision 7ff08853b0d5686e79b13fda8677024f566a104a
+  (file `data/test-00000-of-00001.parquet`)
+- Fetched: 2026-11-11
+- Attribution: Contains information from RewardBench 2, which is made available here under the Open Data Commons
+  Attribution License v1.0 (https://opendatacommons.org/licenses/by/1-0/). Allen Institute for AI. Saumya Malik,
+  Valentina Pyatkin, Sander Land, Jacob Morrison, Noah A. Smith, Hannaneh Hajishirzi and Nathan Lambert, "RewardBench
+  2: Advancing Reward Model Evaluation", arXiv:2506.01937, 2025. The card adds: "This dataset includes output data
+  generated from third party models that are subject to separate terms governing their use"; it lists each model's
+  terms (among them OpenAI's terms of use for GPT-4o outputs, Anthropic's terms of service and usage policy for
+  Claude 3.5 Sonnet outputs, the Llama community licences, the Qwen licence and the DeepSeek model licence's use
+  restrictions). Each item records which model wrote each response in `source_ids.models`.
+- Changes made: sliced and flattened. A seeded subset of prompts is kept; each prompt and its four responses are
+  rendered as one prompt with the responses in a seeded order, lettered A-D; the chosen response becomes a letter;
+  item ids carry the subset because upstream ids repeat across subsets. The dataset card also asks for research and
+  educational use in line with Ai2's Responsible Use Guidelines (guidance, not a licence term).
+
+## judgebench
+
+- Name: JudgeBench: A Benchmark for Evaluating LLM-Based Judges (`gpt` split)
+- SPDX: MIT
+- URL: https://huggingface.co/datasets/ScalerLab/JudgeBench at revision 57dd5e0b9817d07f05ec8f45a91b2ce1e310e308
+  (file `data/gpt-00000-of-00001.jsonl`)
+- Fetched: 2026-11-11
+- Attribution: Sijun Tan, Siyuan Zhuang, Kyle Montgomery, Willian Yuan Tang, Alejandro Cuadron, Chenguang Wang,
+  Raluca Ada Popa and Ion Stoica, arXiv:2410.12784, 2024. The dataset card states `license: mit`; neither the card
+  nor the GitHub repository carries a `LICENSE` file, so the copyright line below names the authors as the card's
+  citation does. The questions come from MMLU-Pro, LiveBench and LiveCodeBench; both responses of a pair are
+  GPT-4o (2024-05-13) outputs, subject to OpenAI's terms of use.
+- Changes made: sliced and flattened. A seeded subset of pairs is kept; question and both responses are rendered as
+  one prompt, with A and B swapped by a seeded coin per pair (the swap and the source label are kept in
+  `source_ids`).
+- Licence (MIT, the text at https://opensource.org/licenses/MIT):
+
+  ```text
+  MIT License
+
+  Copyright (c) 2024 Sijun Tan, Siyuan Zhuang, Kyle Montgomery, Willian Yuan Tang,
+  Alejandro Cuadron, Chenguang Wang, Raluca Ada Popa and Ion Stoica
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+  ```
+
+## mtbench_human
+
+- Name: MT-Bench human judgments (`human` split)
+- SPDX: CC-BY-4.0
+- Licence: Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/
+- URL: https://huggingface.co/datasets/lmsys/mt_bench_human_judgments at revision
+  f7d2896d2cc5d80f8b55c2bbc722613555233c25 (file `data/human-00000-of-00001-25f4910818759289.parquet`)
+- Fetched: 2026-11-11
+- Attribution: LMSYS, CC BY 4.0. Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao
+  Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E. Gonzalez and Ion Stoica, "Judging
+  LLM-as-a-judge with MT-Bench and Chatbot Arena", arXiv:2306.05685, 2023. The kept answers are outputs of GPT-4,
+  GPT-3.5-turbo, Vicuna-13B, Alpaca-13B and LLaMA-13B.
+- Changes made: filtered, sliced and flattened. Judgments are grouped per question, turn and ordered model pair;
+  only groups with two or more judgments that agree on a non-tie winner and have no Claude model are kept; the two
+  conversations are rendered as one prompt (turn 1 items show the first exchange only); the winner becomes a letter.
+
+## tinygsm8k
+
+- Name: tinyGSM8k (tinyBenchmarks), a 100-problem subset of GSM8K's test split
+- SPDX: MIT
+- URL: https://huggingface.co/datasets/tinyBenchmarks/tinyGSM8k at revision b870449ed96ee3e308748b550908332450ec4098
+  (file `main/test-00000-of-00001.parquet`); licences from
+  https://github.com/felipemaiapolo/tinyBenchmarks/blob/deabaab9d654f3bb0989cc8672ebe3aacfb8e9a1/LICENSE and
+  https://github.com/openai/grade-school-math/blob/b0bb162abedc65e1fdd8e93ed090fd7598ee68bc/LICENSE
+- Fetched: 2026-11-11
+- Attribution: Felipe Maia Polo, Lucas Weber, Leshem Choshen, Yuekai Sun, Gongjun Xu and Mikhail Yurochkin,
+  "tinyBenchmarks: evaluating LLMs with fewer examples", arXiv:2402.14992, 2024. GSM8K: Karl Cobbe et al.,
+  "Training Verifiers to Solve Math Word Problems", arXiv:2110.14168, 2021. The Hugging Face card carries no
+  licence tag; the tinyBenchmarks repository and GSM8K are both MIT, so both licences are carried below.
+- Changes made: sliced. A seeded subset of problems is kept; the question text is unchanged in the prompt, after a
+  fixed answer-format instruction. The canned completion is the published solution with its `<<...>>` calculator
+  annotations removed and the final `#### N` line rewritten as `ANSWER: N`.
+- Licence (the two repositories' `LICENSE` files, identical except for the copyright line, which both carry here):
+
+  ```text
+  MIT License
+
+  Copyright (c) 2024 Felipe Maia Polo
+  Copyright (c) 2021 OpenAI
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+  ```
+
+## tinymmlu
+
+- Name: tinyMMLU (tinyBenchmarks), a 100-question subset of MMLU's test split
+- SPDX: MIT
+- URL: https://huggingface.co/datasets/tinyBenchmarks/tinyMMLU at revision cd6a8ee9e1e6f3f18f683535f6c096c386a85da3
+  (file `all/test-00000-of-00001.parquet`); licences from
+  https://github.com/felipemaiapolo/tinyBenchmarks/blob/deabaab9d654f3bb0989cc8672ebe3aacfb8e9a1/LICENSE and
+  https://github.com/hendrycks/test/blob/0aff600098ffa002d8e9f1ffe4d6e05475edd28e/LICENSE
+- Fetched: 2026-11-11
+- Attribution: Felipe Maia Polo, Lucas Weber, Leshem Choshen, Yuekai Sun, Gongjun Xu and Mikhail Yurochkin,
+  "tinyBenchmarks: evaluating LLMs with fewer examples", arXiv:2402.14992, 2024. MMLU: Dan Hendrycks et al.,
+  "Measuring Massive Multitask Language Understanding", ICLR 2021. The Hugging Face card carries no licence tag;
+  the tinyBenchmarks repository and MMLU are both MIT, so both licences are carried below.
+- Changes made: sliced and flattened. A seeded subset of questions is kept; question and choices are rendered as one
+  prompt with the choices lettered A-D; the 0-based answer index becomes a letter.
+- Licence (the two repositories' `LICENSE` files, identical except for the copyright line, which both carry here):
+
+  ```text
+  MIT License
+
+  Copyright (c) 2024 Felipe Maia Polo
+  Copyright (c) 2020 Dan Hendrycks
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+  ```
