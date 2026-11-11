@@ -38,7 +38,7 @@ postprocess = "gig_eval_fixture:postprocess"
 scorers = ["gig_eval_fixture.scorers:exact_match", "step:judge"]
 datasets.ci = { path = "dataset.jsonl", source = "synthetic (written for the gigai test suite)", licence = "CC0-1.0", sha256 = "1900380cb28eab5800ad3d25fa3d08fe6e8284a6f7d67536c0fbb094d66cc655" }
 datasets.release = { path = "{data}/datasets/answer-release.jsonl", source = "the operator's own questions", licence = "private", sha256 = "3c1e5a7b9d0f2a4c6e8b0d1f3a5c7e9b1d3f5a7c9e0b2d4f6a8c0e1b3d5f7a9c" }
-gates.ci = { suite = "ci", max_calls = 0, primary = { metric = "exact_match", min_ci_lower = 0.5 } }
+gates.ci = { suite = "ci", max_calls = 0, primary = { metric = "exact_match", min_ci_lower = 0.5 }, snapshot = "snapshots/answer-ci.json" }
 
 [[evals.steps]]
 id = "judge"
@@ -57,3 +57,9 @@ prompt = { id = "solve", version = "1", file = "prompts/solve.txt" }
 postprocess = "gig_eval_fixture.scorers:final_number"
 scorers = ["gigai.evals.contracts:match", "gig_eval_fixture.scorers:answer_marker"]
 datasets.ci = { path = "tinygsm8k.jsonl", source = "tinyBenchmarks/tinyGSM8k @ b870449ed96ee3e308748b550908332450ec4098 (ci slice of 10 rows)", licence = "MIT", sha256 = "d75f87e7d63bfcff9c5db621a4d67a751b2d652e778b2fa28c0554d20b6bc81d" }
+# `eval run --step solve --suite release|upgrade` answers the 12 synthetic rows (10 clusters, slices easy/hard, tag
+# core) offline from responses.json; the gates name the step's scorers by metric (match, answer_marker).
+datasets.release = { path = "release.jsonl", source = "synthetic (written for the gigai test suite)", licence = "CC0-1.0", sha256 = "b0a23ac9b8057a03bfee67687978cf4f9a0891990bb86a09ffea5b5042298443" }
+datasets.upgrade = { path = "release.jsonl", source = "synthetic (written for the gigai test suite)", licence = "CC0-1.0", sha256 = "b0a23ac9b8057a03bfee67687978cf4f9a0891990bb86a09ffea5b5042298443" }
+gates.release = { suite = "release", k = 1, paired_to = "last-release", slices = ["easy", "hard", "core"], primary = { metric = "match", min_ci_lower = -0.25 }, guard = { metric = "answer_marker", no_worse = -0.10 } }
+gates.upgrade = { suite = "upgrade", k = 2, paired_to = "previous-model", primary = { metric = "match", no_worse = -0.05 } }

@@ -22,7 +22,19 @@
     "Solve the following math problem step by step. The last line of your response should be of the form 'ANSWER: $NUMBER' (without quotes) where $NUMBER is the answer to the problem.\n\nJanet’s ducks lay 16 eggs per day. She eats three for breakfast every morning and bakes muffins for her friends every day with four. She sells the remainder at the farmers' market daily for $2 per fresh duck egg. How much in dollars does she make every day at the farmers' market?\n": "ANSWER: 18",
     "Solve the following math problem step by step. The last line of your response should be of the form 'ANSWER: $NUMBER' (without quotes) where $NUMBER is the answer to the problem.\n\nOn Tuesday, Clara bought 20 pomegranates at $20 each. At the till she got $2 off because she had a voucher. The next day, the price shot to $30 per fruit, but the store also offered a 10% discount on the total cost. Sheila took advantage of the discount and bought 20 pomegranates. What is the difference between the final prices paid for the pomegranates on the two days?\n": "So the total is $142.00",
     "Solve the following math problem step by step. The last line of your response should be of the form 'ANSWER: $NUMBER' (without quotes) where $NUMBER is the answer to the problem.\n\nMr. Smith has two farms, Farm X and Farm Y. He has 55 goats in Farm X and 45 goats in Farm Y. He sold 10 goats from Farm X and twice as many goats from Farm Y. How many goats are left in the two farms altogether?\n": "So the total is $70.00",
-    "Solve the following math problem step by step. The last line of your response should be of the form 'ANSWER: $NUMBER' (without quotes) where $NUMBER is the answer to the problem.\n\nAda's daily electric consumption is 12 kilowatts per hour. She is planning to add a device that will consume 2 kilowatts per hour a day. If a kilowatt per hour is $1.50, how much is the difference between Ada's weekly electric bill before and after she adds the new device?\n": "I think ANSWER: 22"
+    "Solve the following math problem step by step. The last line of your response should be of the form 'ANSWER: $NUMBER' (without quotes) where $NUMBER is the answer to the problem.\n\nAda's daily electric consumption is 12 kilowatts per hour. She is planning to add a device that will consume 2 kilowatts per hour a day. If a kilowatt per hour is $1.50, how much is the difference between Ada's weekly electric bill before and after she adds the new device?\n": "I think ANSWER: 22",
+    "What is 1 + 1?\n": "ANSWER: 2",
+    "What is 2 + 2?\n": "ANSWER: 4",
+    "What is 3 + 3?\n": "ANSWER: 6",
+    "What is 4 + 4?\n": "ANSWER: 8",
+    "What is 5 + 5?\n": "ANSWER: 10",
+    "What is 6 + 6?\n": "ANSWER: 12",
+    "What is 7 + 7?\n": "ANSWER: 14",
+    "What is 8 + 8?\n": "ANSWER: 16",
+    "What is 9 + 9?\n": "So the total is 18",
+    "What is 10 + 10?\n": "ANSWER: 2,0",
+    "What is 11 + 11?\n": "ANSWER: 22",
+    "What is 12 + 12?\n": "ANSWER: 25"
   },
   "deterministic-b": {
     "2+2": "target B says four",

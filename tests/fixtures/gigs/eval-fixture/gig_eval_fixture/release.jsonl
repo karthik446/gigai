@@ -1,0 +1,12 @@
+{"id": "r01", "version": "1", "cluster_id": "c01", "slice": "easy", "tags": ["core"], "prompt": "What is 1 + 1?", "expected": "2"}
+{"id": "r02", "version": "1", "cluster_id": "c02", "slice": "easy", "tags": ["core"], "prompt": "What is 2 + 2?", "expected": "4"}
+{"id": "r03", "version": "1", "cluster_id": "c03", "slice": "easy", "tags": ["core"], "prompt": "What is 3 + 3?", "expected": "6"}
+{"id": "r04", "version": "1", "cluster_id": "c04", "slice": "easy", "tags": ["core"], "prompt": "What is 4 + 4?", "expected": "8"}
+{"id": "r05", "version": "1", "cluster_id": "c05", "slice": "easy", "tags": ["core"], "prompt": "What is 5 + 5?", "expected": "10"}
+{"id": "r06", "version": "1", "cluster_id": "c06", "slice": "easy", "tags": ["core"], "prompt": "What is 6 + 6?", "expected": "12"}
+{"id": "r07", "version": "1", "cluster_id": "c07", "slice": "hard", "tags": ["core"], "prompt": "What is 7 + 7?", "expected": "14"}
+{"id": "r08", "version": "1", "cluster_id": "c08", "slice": "hard", "tags": ["core"], "prompt": "What is 8 + 8?", "expected": "16"}
+{"id": "r09", "version": "1", "cluster_id": "c09", "slice": "hard", "tags": ["core"], "prompt": "What is 9 + 9?", "expected": "18"}
+{"id": "r10", "version": "1", "cluster_id": "c10", "slice": "hard", "tags": ["core"], "prompt": "What is 10 + 10?", "expected": "20"}
+{"id": "r11", "version": "1", "cluster_id": "c01", "slice": "hard", "tags": [], "prompt": "What is 11 + 11?", "expected": "22"}
+{"id": "r12", "version": "1", "cluster_id": "c02", "slice": "hard", "tags": [], "prompt": "What is 12 + 12?", "expected": "24"}

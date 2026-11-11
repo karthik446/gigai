@@ -1,0 +1,73 @@
+{
+  "dataset_sha256": "sha256:1900380cb28eab5800ad3d25fa3d08fe6e8284a6f7d67536c0fbb094d66cc655",
+  "rows": [
+    {
+      "id": "q1",
+      "judge": {
+        "judge": "The submission matches the criterion.\n\nGRADE: C"
+      },
+      "output": "{\"answer\": \"4\"}",
+      "scores": {
+        "gig_eval_fixture.scorers:exact_match": 1.0,
+        "step:judge": 1.0
+      }
+    },
+    {
+      "id": "q2",
+      "judge": {
+        "judge": "The submission matches the criterion.\n\nGRADE: C"
+      },
+      "output": "{\"answer\": \"8\"}",
+      "scores": {
+        "gig_eval_fixture.scorers:exact_match": 1.0,
+        "step:judge": 1.0
+      }
+    },
+    {
+      "id": "q3",
+      "judge": {
+        "judge": "The submission matches the criterion.\n\nGRADE: C"
+      },
+      "output": "{\"answer\": \"green\"}",
+      "scores": {
+        "gig_eval_fixture.scorers:exact_match": 1.0,
+        "step:judge": 1.0
+      }
+    },
+    {
+      "id": "q4",
+      "judge": {
+        "judge": "The submission matches the criterion.\n\nGRADE: C"
+      },
+      "output": "{\"answer\": \"pink\"}",
+      "scores": {
+        "gig_eval_fixture.scorers:exact_match": 1.0,
+        "step:judge": 1.0
+      }
+    },
+    {
+      "id": "q5",
+      "judge": {
+        "judge": "The submission does not match the criterion.\n\nGRADE: I"
+      },
+      "output": "{\"answer\": \"E\"}",
+      "scores": {
+        "gig_eval_fixture.scorers:exact_match": 0.0,
+        "step:judge": 0.0
+      }
+    },
+    {
+      "id": "q6",
+      "judge": {
+        "judge": "The submission does not match the criterion.\n\nGRADE: I"
+      },
+      "output": "{\"reply\": \"A\"}",
+      "scores": {
+        "gig_eval_fixture.scorers:exact_match": 0.0,
+        "step:judge": 0.0
+      }
+    }
+  ],
+  "step": "answer",
+  "suite": "ci"
+}
