@@ -1,11 +1,13 @@
 """Find installed gigs and mount each one as a lazy ``gigai <gig>`` group.
 
-A gig is a distribution with an entry point in the ``gigai.gigs`` group and a static ``gig.toml`` next to
-its top-level package's ``__init__.py``. Discovery reads the entry points and each ``gig.toml`` from the
-distribution's files; no gig code is imported until ``gigai <gig> ...`` runs (or that gig's ``--help`` is
-rendered). A gig that fails to load answers ``gigai <gig>: cannot load (<error>)`` and exits 1; ``gigai
---help`` and every other verb are unaffected. A gig named like an existing gigai command is not mounted
-(the command wins) and one warning line goes to stderr.
+A gig is a distribution with an entry point in the ``gigai.gigs`` group and a static ``gig.toml`` in the package of
+the entry point's module (``gigai.scout.gig:cli`` -> ``gigai/scout/gig.toml``), else in one of its parent packages
+up to the top-level one. Discovery reads the entry points and each ``gig.toml`` from the distribution's files; no
+gig code is imported until ``gigai <gig> ...`` runs (or that gig's ``--help`` is rendered). A gig that fails to load
+answers ``gigai <gig>: cannot load (<error>)`` and exits 1; ``gigai --help`` and every other verb are unaffected. A
+gig named like an existing gigai command is not mounted (the command wins) and one warning line goes to stderr. The
+gigs the ``gigai`` distribution itself ships (Scout) come before any other distribution's: an installed dist that
+names its gig ``scout`` never replaces core's.
 
 ``[commands] executable`` (without ``group``) gigs run out of process: ``gigai <gig> ARGS`` forwards ARGS to
 that executable, and when ``gig.toml`` carries no description, ``<executable> describe`` (the manifest as
@@ -20,13 +22,20 @@ from __future__ import annotations
 import os
 import sys
 import tomllib
+from collections.abc import Iterable
 from importlib.metadata import EntryPoint, entry_points
+from pathlib import Path
 from typing import Any, NoReturn
 
 import click
 
 ENTRY_POINT_GROUP = "gigai.gigs"
 MANIFEST_NAME = "gig.toml"
+CORE_DIST = "gigai"
+
+# The commands of the group ``mount_gigs`` last mounted on, before any gig: names no gig may take. ``None`` until
+# ``mount_gigs`` ran in this process; ``mountable`` then reads them off ``gigai.cli``.
+_core_commands: frozenset[str] | None = None
 
 
 class GigLoadError(Exception):
@@ -45,8 +54,10 @@ def mount_gigs(group: click.Group) -> tuple[str, ...]:
         if not quiet:
             click.echo(f"gigai: no gigs mounted: cannot read installed entry points ({_reason(exc)})", err=True)
         return ()
+    global _core_commands
+    _core_commands = frozenset(name for name, command in group.commands.items() if not isinstance(command, LazyGig))
     owners: dict[str, EntryPoint] = {}
-    for entry_point in found:
+    for entry_point in _core_dist_first(found):
         name = entry_point.name
         if name in group.commands:
             if not quiet:
@@ -64,31 +75,82 @@ def mount_gigs(group: click.Group) -> tuple[str, ...]:
     return tuple(owners)
 
 
+def mountable(found: Iterable[EntryPoint]) -> dict[str, EntryPoint]:
+    """``{name: entry point}`` of the gigs ``mount_gigs`` mounts from ``found``, the same choice without mounting.
+
+    The ``gigai`` distribution's own entry points first, then the first one per name; a name core already has (the
+    group ``mount_gigs`` last mounted on, else ``gigai.cli``'s root) is never a gig's.
+    """
+
+    core = _core_commands if _core_commands is not None else _root_core_commands()
+    owners: dict[str, EntryPoint] = {}
+    for entry_point in _core_dist_first(found):
+        if entry_point.name not in core and entry_point.name not in owners:
+            owners[entry_point.name] = entry_point
+    return owners
+
+
+def _root_core_commands() -> frozenset[str]:
+    """Core's own root commands, for a process that never built ``gigai.cli`` (importing it imports no gig)."""
+
+    from ..cli import cli
+
+    return frozenset(name for name, command in cli.commands.items() if not isinstance(command, LazyGig))
+
+
+def _core_dist_first(found: Iterable[EntryPoint]) -> list[EntryPoint]:
+    return sorted(found, key=lambda entry_point: _dist_name(entry_point) != CORE_DIST)
+
+
+def _dist_name(entry_point: EntryPoint) -> str | None:
+    dist = entry_point.dist
+    return dist.name if dist is not None else None
+
+
 def read_manifest(entry_point: EntryPoint) -> dict[str, Any]:
     """Parse the gig's ``gig.toml`` without importing the gig's code."""
 
-    return tomllib.loads(_manifest_text(entry_point))
+    location = manifest_location(entry_point)
+    if location is None:
+        package = entry_point.module.rpartition(".")[0] or entry_point.module
+        raise GigLoadError(f"no {MANIFEST_NAME} next to package {package!r} in {_dist_label(entry_point)}")
+    return tomllib.loads(location.read_text(encoding="utf-8"))
 
 
-def _manifest_text(entry_point: EntryPoint) -> str:
+def manifest_location(entry_point: EntryPoint) -> Path | None:
+    """The gig's ``gig.toml``: in the package of the entry point's module, else the nearest parent package that has one.
+
+    For ``a.b.c:obj`` the candidates are ``a/b/c/``, ``a/b/``, ``a/`` (``c`` may be a module, then ``a/b/c/`` is not
+    a directory). Nothing below the top-level package is imported, and that one only located (``find_spec``).
+    """
+
     if EntryPoint.pattern.match(entry_point.value) is None:
         raise GigLoadError(f"invalid entry point value {entry_point.value!r}")
-    package = entry_point.module.partition(".")[0]
+    parts = tuple(entry_point.module.split("."))
+    candidates = [parts[:length] for length in range(len(parts), 0, -1)]
     dist = entry_point.dist
-    for path in (dist.files if dist is not None else None) or ():
-        if path.name == MANIFEST_NAME and path.parts[:-1] == (package,):
-            return path.read_text(encoding="utf-8")
+    in_dist = {
+        path.parts[:-1]: path
+        for path in (dist.files if dist is not None else None) or ()
+        if path.name == MANIFEST_NAME
+    }
+    for candidate in candidates:
+        if candidate in in_dist:
+            return Path(in_dist[candidate].locate())
     # Editable installs list only their .pth/finder in RECORD; find the package directory instead.
     # find_spec of a top-level name locates it without executing it.
     from importlib.util import find_spec
 
-    spec = find_spec(package)
+    try:
+        spec = find_spec(parts[0])
+    except (ImportError, ValueError):
+        return None
     for location in (spec.submodule_search_locations if spec is not None else None) or ():
-        candidate = os.path.join(location, MANIFEST_NAME)
-        if os.path.isfile(candidate):
-            with open(candidate, encoding="utf-8") as handle:
-                return handle.read()
-    raise GigLoadError(f"no {MANIFEST_NAME} next to package {package!r} in {_dist_label(entry_point)}")
+        for candidate in candidates:
+            path = Path(location, *candidate[1:], MANIFEST_NAME)
+            if path.is_file():
+                return path
+    return None
 
 
 class LazyGig(click.Group):
@@ -138,6 +200,19 @@ class LazyGig(click.Group):
             self._target = target
         return self._target
 
+    @property  # type: ignore[override]
+    def commands(self) -> dict[str, click.Command]:
+        """For a gig the ``gigai`` dist ships (Scout), its group's own commands, so a walk over ``Group.commands``
+        (``agent-context``, whose prose core's ``data/cli/commands.yaml`` holds) still sees its verbs; reading it
+        imports the gig. ``{}`` for any other dist's gig (core documents none of its verbs) and a broken one."""
+
+        target = self._loaded_or_none() if _dist_name(self.entry_point) == CORE_DIST else None
+        return target.commands if isinstance(target, click.Group) else {}
+
+    @commands.setter
+    def commands(self, value: dict[str, click.Command]) -> None:
+        """``click.Group.__init__`` assigns ``{}``; a gig's verbs live in its own group, never on the placeholder."""
+
     def make_context(
         self,
         info_name: str | None,
@@ -160,7 +235,8 @@ class LazyGig(click.Group):
         return context
 
     def _gig_context(self) -> Any:
-        """The ``GigContext`` the gig's commands get as ``ctx.obj``; building it creates the gig folder."""
+        """The ``GigContext`` the gig's commands get as ``ctx.obj``; it touches no file (the gig folder is created
+        when the gig first uses it), so a gig that keeps its own paths, like Scout, runs as it did before P3c."""
 
         import logging
 
@@ -170,7 +246,7 @@ class LazyGig(click.Group):
         name = self.name or ""
         try:
             return GigContext(default_home_root(), name, self.manifest or {}, logging.getLogger(f"gigai.gig.{name}"))
-        except (OSError, ValueError) as exc:
+        except ValueError as exc:
             _cannot_create_gig_folder(name, exc)
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:

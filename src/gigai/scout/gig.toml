@@ -1,0 +1,34 @@
+# Scout's gig manifest. Scout ships inside the gigai wheel (entry point `gigai.gigs: scout = gigai.scout.gig:cli`);
+# the loader reads this file without importing Scout. Trimmed from research packet gigai-hs0-D1's example to what
+# is true of today's code: no [config] [docs] [data] [evals] [hooks] [[keys]] (their files and seams do not exist
+# yet; core reaches Scout objects through the bridge rows in gigai/sdk/hooks.py).
+
+[gig]
+manifest_format = 1
+name = "scout"
+# The `gigai --help` line of 0.1.11.13's `scout` group (scout_cli.py `scout_group` help), byte for byte.
+description = "Install and configure the Scout gig for this project."
+core = ">=0.2,<0.3"
+
+[commands]
+group = "gigai.scout.gig:cli"
+# The visible verbs of `gigai scout --help`; `status` is core-provided and Scout's own command overrides it.
+provides = [
+  "answer", "answers", "assess", "cover-letter", "discover", "install", "jobs", "jobs-folder", "learning",
+  "metrics", "migrate-job-stores", "new", "pipeline", "privacy", "profile", "resume", "run", "snapshot",
+  "sources", "stop", "story", "suggestions", "watchlist",
+]
+
+# Decision 14: Scout keeps its own supervisor. Its own `run`/`stop`/`status` win over core's process-mode verbs,
+# so core never runs `start`; the values describe the server Scout's supervisor starts.
+[server]
+mode = "process"
+start = ["python", "-m", "gigai.scout.find_jobs.present_api", "--home", "{home}", "--port", "{port}"]
+port = 8765
+health = "/api/health"
+mount_path = "/gigs/scout/"
+ui = "ui/dist"
+bind = "loopback"
+
+[dependencies]
+python = ">=3.11"

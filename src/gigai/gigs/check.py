@@ -1,7 +1,7 @@
 """``gigai gig check``: the gig conformance checks, items 1-8 and 13 of the framework's list.
 
 1 schema-valid manifest · 2 exactly one entry point, name == ``[gig] name``, value == ``[commands] group`` ·
-3 manifest readable without importing the gig · 4 group loads, ``--help`` exits 0, every ``provides`` verb
+3 manifest readable without importing the entry-point module or its package · 4 group loads, ``--help`` exits 0, every ``provides`` verb
 exists with help · 5 no core verb listed in ``provides`` (a core verb defined in code is reported as
 ``override: <verb>``) · 6 hidden ``describe`` prints the manifest · 7 ``[config.defaults]`` validate against
 ``[config] schema`` · 8 docs files present, the CLI manual covers every verb · 13 the gig's own tests pass.
@@ -131,20 +131,29 @@ _READ_WITHOUT_IMPORT = """\
 import json, sys
 from importlib.metadata import entry_points
 from gigai.gigs.loader import read_manifest
-name, value, package = sys.argv[1:4]
+name, value, *modules = sys.argv[1:]
 (entry_point,) = [ep for ep in entry_points(group="gigai.gigs") if ep.name == name and ep.value == value]
 manifest = read_manifest(entry_point)
-print(json.dumps({"imported": package in sys.modules, "manifest": manifest}))
+print(json.dumps({"imported": [module for module in modules if module in sys.modules], "manifest": manifest}))
 """
+
+
+def _gig_modules(module: str) -> list[str]:
+    """The entry-point module, the package holding it and its top-level package: the gig's own code. The top-level
+    package is left out when it is core's ``gigai`` (Scout is ``gigai.scout.gig``), which reading any manifest imports."""
+
+    parts = module.split(".")
+    watched = [module, ".".join(parts[:-1]), parts[0] if parts[0] != "gigai" else ""]
+    return [name for index, name in enumerate(watched) if name and name not in watched[:index]]
 
 
 def _no_import_item(gig: InstalledGig) -> Result:
     """In a fresh interpreter (this one may already hold the gig), read the manifest as core does and look at sys.modules."""
 
-    package = gig.entry_point.module.partition(".")[0]
+    modules = _gig_modules(gig.entry_point.module)
     try:
         completed = subprocess.run(
-            [sys.executable, "-c", _READ_WITHOUT_IMPORT, gig.name, gig.entry_point.value, package],
+            [sys.executable, "-c", _READ_WITHOUT_IMPORT, gig.name, gig.entry_point.value, *modules],
             capture_output=True, text=True, env=_child_env(), timeout=120, check=False, shell=False,
         )
         report = json.loads(completed.stdout) if completed.returncode == 0 else None
@@ -153,10 +162,10 @@ def _no_import_item(gig: InstalledGig) -> Result:
     if not isinstance(report, dict):
         return Result(FAIL, "3", f"cannot read the manifest in a fresh interpreter: {_last_line(completed.stderr)}")
     if report.get("imported"):
-        return Result(FAIL, "3", f"reading the manifest imported {package!r}")
+        return Result(FAIL, "3", f"reading the manifest imported {report['imported'][-1]!r}")
     if report.get("manifest") != gig.manifest:
         return Result(FAIL, "3", "a fresh interpreter read a different manifest")
-    return Result(PASS, "3", f"manifest read without importing {package!r}")
+    return Result(PASS, "3", f"manifest read without importing {modules[-1]!r}")
 
 
 # --- 4, 5, 6 ----------------------------------------------------------------------------------------------

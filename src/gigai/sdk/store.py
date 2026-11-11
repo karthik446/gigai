@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..gigs.home import GIGS_DIRNAME, check_name, gig_folder, resolve_gig_folder
+from ..gigs.home import GIGS_DIRNAME, check_name, ensure_gig_folder, gig_folder
 
 STORE_SUFFIX = ".sqlite"
 RESERVED_STORES = frozenset({"registry"})  # core's file names; a gig store never takes them
@@ -83,7 +83,7 @@ class GigStore:
         """Open ``<home>/gigs/<gig>/<name>.sqlite``, creating the file (mode 0600) when it is missing."""
 
         self.path(gig, name)
-        resolve_gig_folder(self.home, gig)
+        ensure_gig_folder(self.home, gig)
         path = _real_store_path(self.home, gig, name)
         try:
             os.close(os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600))

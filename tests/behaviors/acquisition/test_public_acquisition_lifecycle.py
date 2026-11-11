@@ -62,7 +62,7 @@ def test_normal_cli_import_and_fresh_status(tmp_path: Path) -> None:
     assert imported.exit_code == 0, imported.output
     status = CliRunner().invoke(cli, ["scout-acquisition", "status", "--batch-id", "cli-batch", "--gig", created.gig_id, "--target", str(tmp_path / "target"), "--home", str(tmp_path / "home"), "--json"])
     assert status.exit_code == 0, status.output
-    assert json.loads(status.output)["result"]["processed"] == 4
+    assert json.loads(status.stdout)["result"]["processed"] == 4
 
 
 def test_changed_input_private_fields_and_unsafe_batch_are_refused(tmp_path: Path) -> None:

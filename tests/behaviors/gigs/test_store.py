@@ -83,7 +83,8 @@ def test_a_declared_store_opens_in_the_gig_folder_and_steps_its_version(tmp_path
     assert _tree(home) == ["gigs", "gigs/storegig", "gigs/storegig/notes.sqlite"]
 
 
-def test_a_gig_that_never_opens_a_store_gets_an_empty_gig_folder_on_its_first_run_and_none_before(tmp_path, site):
+def test_a_gig_that_never_uses_its_gig_folder_never_gets_one(tmp_path, site):
+    # P3c fix round (M1): building the GigContext touches no file; the folder appears when the gig first uses it.
     home = tmp_path / "home"
     home.mkdir()
     for argv, code, text in (
@@ -105,24 +106,20 @@ def test_a_gig_that_never_opens_a_store_gets_an_empty_gig_folder_on_its_first_ru
     ping = _gigai(tmp_path, site, home, "nostoregig", "ping")
     assert ping.returncode == 0, ping.stderr
     assert ping.stdout == "pong\n"
-    assert _tree(home) == ["gigs", "gigs/nostoregig"]
-    again = _gigai(tmp_path, site, home, "nostoregig", "ping")
-    assert again.returncode == 0, again.stderr
-    assert _tree(home) == ["gigs", "gigs/nostoregig"]
+    assert _tree(home) == []
 
 
 @pytest.mark.parametrize(("argv", "code", "text"), [
     (("nostoregig", "ping", "--help"), 0, "Usage: gigai nostoregig ping"),
     (("nostoregig", "nosuchverb"), 2, "No such command"),
 ])
-def test_any_run_that_reaches_the_gig_creates_its_gig_folder(tmp_path, site, argv, code, text):
-    # Accepted (P4s fix round, F4): once the gig's own group parsed, the run reached the gig and gets its folder,
-    # even when the subcommand only prints its help or is unknown.
+def test_a_run_that_reaches_the_gig_but_never_uses_its_folder_creates_nothing(tmp_path, site, argv, code, text):
+    # P3c fix round (M1) replaces P4s F4's eager folder: a subcommand's help or an unknown verb touches no file.
     home = tmp_path / "home"
     completed = _gigai(tmp_path, site, home, *argv)
     assert completed.returncode == code, completed.stderr
     assert text in completed.stdout + completed.stderr
-    assert _tree(home) == ["gigs", "gigs/nostoregig"]
+    assert not home.exists()
 
 
 def _executable_gig(tmp_path: Path) -> tuple[Path, Path]:
@@ -142,10 +139,12 @@ def _executable_gig(tmp_path: Path) -> tuple[Path, Path]:
 def test_a_gig_folder_that_cannot_be_created_is_a_clean_error(tmp_path, site):
     (tmp_path / "afile").write_text("not a folder", encoding="utf-8")
     home = tmp_path / "afile" / "home"
-    in_process = _gigai(tmp_path, site, home, "nostoregig", "ping")
+    # The failure surfaces where the gig first uses its folder (here `ctx.store.db`), never at verb entry.
+    assert _gigai(tmp_path, site, home, "nostoregig", "ping").stdout == "pong\n"
+    in_process = _gigai(tmp_path, site, home, "storegig", "open")
     assert in_process.returncode == 1
     assert in_process.stdout == ""
-    assert in_process.stderr.startswith("gigai nostoregig: cannot create its gig folder (")
+    assert in_process.stderr.startswith("gigai storegig: cannot create its gig folder (")
     assert "Traceback" not in in_process.stderr
     ext_site, bin_dir = _executable_gig(tmp_path)
     forwarded = _run(tmp_path, ext_site, "ext", "one", path=bin_dir, env_extra={"GIGAI_HOME": str(home)})
@@ -181,12 +180,15 @@ def test_an_executable_gig_gets_no_click_context_object_and_its_gig_folder_on_la
     assert _tree(home) == ["gigs", "gigs/ext"]
 
 
-def test_building_the_context_creates_only_the_empty_gig_folder(tmp_path):
+def test_building_the_context_creates_nothing_until_the_gig_uses_its_folder(tmp_path):
+    # P3c fix round (M1): was eager (the folder appeared when the context was built).
     home = tmp_path / "home"
     context = _context(home)
-    assert _tree(home) == ["gigs", "gigs/storegig"]
-    assert gig_folder(home, "storegig") == resolve_gig_folder(home, "storegig") == home / "gigs" / "storegig"
     assert context.store == GigStore(home, "storegig", STORE_MANIFEST)
+    assert not home.exists()
+    assert context.folder == gig_folder(home, "storegig") == home / "gigs" / "storegig"
+    assert _tree(home) == ["gigs", "gigs/storegig"]
+    assert resolve_gig_folder(home, "storegig") == context.folder
 
 
 def test_opening_a_store_touches_no_other_file(tmp_path):
@@ -251,7 +253,7 @@ def test_unsafe_store_and_gig_names_are_refused(tmp_path, name):
         store.db(name, "notes")
     with pytest.raises(GigNameError):
         _context(home, name)
-    assert _tree(home) == ["gigs", "gigs/storegig"]
+    assert not home.exists()
 
 
 def test_only_the_gigs_own_declared_sqlite_stores_open(tmp_path):
@@ -323,6 +325,7 @@ def test_symlinks_in_the_gig_folder_are_refused(tmp_path):
     home = tmp_path / "home"
     registry = _sqlite_at(home / "registry.sqlite", 3)
     store = _context(home).store
+    resolve_gig_folder(home, "storegig")
     # A store file that is a symlink to registry.sqlite.
     link = home / "gigs" / "storegig" / "notes.sqlite"
     link.symlink_to(registry)
@@ -358,7 +361,7 @@ def test_registry_is_a_reserved_store_name(tmp_path):
         store.db("storegig", "registry")
     with pytest.raises(StoreError, match="reserved for core"):
         store.path("storegig", "registry")
-    assert _tree(tmp_path) == ["gigs", "gigs/storegig"]
+    assert _tree(tmp_path) == []
 
 
 def test_two_runs_at_once_apply_each_step_once(tmp_path):
@@ -436,7 +439,7 @@ def test_a_fixture_gig_run_leaves_the_0_1_11_13_home_as_it_was(tmp_path, site, h
         "gigs/storegig/notes.sqlite"
     ]
     assert sorted(path.relative_to(home).as_posix() for path in (home / "gigs").rglob("*")) == [
-        "gigs/nostoregig", "gigs/storegig", "gigs/storegig/notes.sqlite"
+        "gigs/storegig", "gigs/storegig/notes.sqlite"
     ]
     after_counts = "".join(line for line in counts(home).splitlines(keepends=True) if not line.startswith("gigs/"))
     (tmp_path / "before.counts").write_text(before_counts, encoding="utf-8")

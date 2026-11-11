@@ -255,7 +255,7 @@ def test_public_prepare_interview_runs_approved_graph_and_persists_run_evidence(
         ],
     )
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload["status"] == "succeeded"
     run_details = read_run_details(home_root=home, requested_target=target, gig_id=created.gig_id, run_id=payload["run_id"])
     assert run_details["status"] == "succeeded"

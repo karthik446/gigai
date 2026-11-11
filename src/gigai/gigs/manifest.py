@@ -24,7 +24,8 @@ from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Any
 
-from .loader import ENTRY_POINT_GROUP, MANIFEST_NAME, read_manifest
+from .loader import ENTRY_POINT_GROUP, GigLoadError, read_manifest
+from .loader import manifest_location as _loader_manifest_location
 
 SCHEMA_RESOURCE = "gig-manifest.schema.json"
 #: Verbs core adds to every gig's group; a gig must not list them in ``[commands] provides``.
@@ -151,26 +152,12 @@ def inspect_entry_point(entry_point: EntryPoint) -> InstalledGig:
 
 
 def manifest_location(entry_point: EntryPoint) -> Path | None:
-    """Where the gig's ``gig.toml`` lives on disk (the same lookup as ``loader.read_manifest``), without importing it."""
-
-    if EntryPoint.pattern.match(entry_point.value) is None:
-        return None
-    package = entry_point.module.partition(".")[0]
-    dist = entry_point.dist
-    for path in (dist.files if dist is not None else None) or ():
-        if path.name == MANIFEST_NAME and path.parts[:-1] == (package,):
-            return Path(str(path.locate()))
-    from importlib.util import find_spec
+    """Where the gig's ``gig.toml`` lives on disk (``loader.manifest_location``), without importing it."""
 
     try:
-        spec = find_spec(package)
-    except (ImportError, ValueError):
+        return _loader_manifest_location(entry_point)
+    except GigLoadError:
         return None
-    for location in (spec.submodule_search_locations if spec is not None else None) or ():
-        candidate = Path(location) / MANIFEST_NAME
-        if candidate.is_file():
-            return candidate
-    return None
 
 
 # --- PEP 440 subset ---------------------------------------------------------------------------------------

@@ -78,8 +78,11 @@ def main() -> None:
     workpad_help = run("workpad", "--help")
     if workpad_help.returncode != 0 or "path" not in workpad_help.stdout:
         raise SystemExit("gigai workpad did not expose the approved path operation")
+    # Match command names only: the group's help prose may say "select" (P2's `workpad use`).
+    listed = workpad_help.stdout.split("Commands:", 1)[-1].splitlines()
+    workpad_commands = {line.split()[0] for line in listed if line.strip()}
     for forbidden in ("provision", "create", "activate", "select"):
-        if forbidden in workpad_help.stdout:
+        if forbidden in workpad_commands:
             raise SystemExit(
                 f"gigai workpad exposed forbidden lifecycle operation {forbidden!r}"
             )

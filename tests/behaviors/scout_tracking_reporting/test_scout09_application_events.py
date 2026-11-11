@@ -177,7 +177,7 @@ def test_confirmed_cli_publishes_and_replays_from_disposable_journal(tmp_path) -
         ],
     )
     assert second.exit_code == 0, second.output
-    assert json.loads(second.output)["status"] == "already_recorded"
+    assert json.loads(second.stdout)["status"] == "already_recorded"
     history = runner.invoke(
         cli,
         [
@@ -195,7 +195,7 @@ def test_confirmed_cli_publishes_and_replays_from_disposable_journal(tmp_path) -
         ],
     )
     assert history.exit_code == 0, history.output
-    assert json.loads(history.output)["current_status"] == "applied"
+    assert json.loads(history.stdout)["current_status"] == "applied"
 
 
 def test_no_confirm_writes_nothing_and_statuses_are_per_opportunity(tmp_path) -> None:
@@ -280,7 +280,7 @@ def test_no_confirm_writes_nothing_and_statuses_are_per_opportunity(tmp_path) ->
             "--json",
         ],
     )
-    assert json.loads(status.output)["statuses"] == {
+    assert json.loads(status.stdout)["statuses"] == {
         "opportunity_00000000000000000000000000000001": "saved",
         "opportunity_00000000000000000000000000000002": "saved",
     }
@@ -494,13 +494,13 @@ def test_external_ref_event_records_and_replays_from_disposable_journal(tmp_path
         ["application", "record", "--gig", gig, "--home", str(home), "--target", str(target), "--input", str(request), "--confirm", "--json"],
     )
     assert second.exit_code == 0, second.output
-    assert json.loads(second.output)["status"] == "already_recorded"
+    assert json.loads(second.stdout)["status"] == "already_recorded"
     history = runner.invoke(
         cli,
         ["application", "status", "--gig", gig, "--home", str(home), "--target", str(target), "--opportunity", "https://boards.greenhouse.io/acme/jobs/12345", "--json"],
     )
     assert history.exit_code == 0, history.output
-    payload = json.loads(history.output)
+    payload = json.loads(history.stdout)
     assert payload["current_status"] == "applied"
     assert payload["events"][0]["external_ref"] == "https://boards.greenhouse.io/acme/jobs/12345"
     assert "opportunity_ref" not in payload["events"][0]

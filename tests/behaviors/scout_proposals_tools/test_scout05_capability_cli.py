@@ -83,7 +83,7 @@ def _args(
 
 def _payload(result) -> dict[str, object]:
     assert result.output, result.exception
-    value = json.loads(result.output)
+    value = json.loads(result.stdout)
     assert isinstance(value, dict)
     return value
 

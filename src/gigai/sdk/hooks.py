@@ -2,20 +2,28 @@
 
 A hook is a name bound to a ``module:attribute`` target. ``get(name)`` returns the target object and
 imports its module at that first call, never when a core module is imported; it returns exactly what
-``from module import attribute`` returned (function, class or constant) and raises what that import
-raised. Nothing else happens here: no caching of objects beyond ``sys.modules``, no wrapping.
+``from module import attribute`` returned (function, class or constant). No caching of objects beyond
+``sys.modules``.
 
 Where the target comes from: a row of the built-in bridge below when there is one, else the ``[hooks]``
-table of the providing gig's ``gig.toml``. Scout is not a registered gig yet, so the bridge names today's
-Scout objects; when Scout declares a hook in its own manifest, that row goes. While a row exists it wins:
-core's Scout paths never scan installed gigs, and no installed distribution can stand in for a Scout
-object (``external_recording`` keeps its closed validator table).
+table of the providing gig's ``gig.toml``. Scout is a registered gig (``gigai.scout.gig``), but its manifest
+declares no hooks yet: the bridge names today's Scout objects (moving them is P6b's), and when Scout declares
+a hook in its own manifest, that row goes. While a row exists it wins: core's Scout paths never scan installed
+gigs, and no installed distribution can stand in for a Scout object (``external_recording`` keeps its closed
+validator table). A bridge row raises what the import statement raised (``external_recording`` tells "Scout is
+not installed" apart by ``ModuleNotFoundError.name``).
+
+A declared target is checked before use: it must be ``module:attribute`` (``EntryPoint.pattern``, as the loader
+checks entry points), and a failing import raises ``HookUnavailable`` naming the gig, the original error as its
+``__cause__``. Only gigs the loader mounts declare hooks (``loader.mountable``): a dist whose gig the loader
+refuses (a name core or the gigai dist already has) declares nothing.
 """
 
 from __future__ import annotations
 
 from functools import cache
 from importlib import import_module
+from importlib.metadata import EntryPoint
 from typing import Any
 
 SCOUT = "scout"
@@ -104,17 +112,30 @@ _BRIDGE: dict[str, str] = {
 
 
 class HookUnavailable(LookupError):
-    """The gig declares no such hook and the bridge has no row for it."""
+    """The gig declares no such hook (and the bridge has no row for it), or its declared target cannot be imported."""
 
 
 def get(name: str, *, gig: str = SCOUT) -> Any:
     """The object hook ``name`` of ``gig`` names, imported now: the bridge row, else the gig's ``gig.toml`` declaration."""
 
-    target = _BRIDGE.get(name) if gig == SCOUT else None
-    if target is None:
-        target = declared(name).get(gig)
+    row = _BRIDGE.get(name) if gig == SCOUT else None
+    if row is not None:
+        return _import_target(row)
+    target = declared(name).get(gig)
     if target is None:
         raise HookUnavailable(f"gig {gig!r} provides no hook {name!r}")
+    match = EntryPoint.pattern.match(target)
+    if match is None or match.group("attr") is None or match.group("extras"):
+        raise HookUnavailable(f"gig {gig!r} declares hook {name!r} as {target!r}, not module:attribute")
+    try:
+        return _import_target(f"{match.group('module')}:{match.group('attr')}")
+    except Exception as exc:  # noqa: BLE001 - whatever the gig's module raises on import, core sees one error type
+        raise HookUnavailable(f"gig {gig!r} hook {name!r}: cannot import {target!r} ({exc})") from exc
+
+
+def _import_target(target: str) -> Any:
+    """``from module import attribute`` for ``module:attribute``, raising what that statement raises."""
+
     module_name, _, attribute = target.partition(":")
     module = import_module(module_name)
     try:
@@ -129,31 +150,30 @@ def get(name: str, *, gig: str = SCOUT) -> Any:
 
 
 def declared(name: str) -> dict[str, str]:
-    """``{gig: target}`` for every installed gig whose ``[hooks]`` table declares ``name``; the others are skipped."""
+    """``{gig: target}`` for every mounted gig whose ``[hooks]`` table declares ``name``; the others are skipped."""
 
     return {gig: table[name] for gig, table in _declarations().items() if name in table}
 
 
 @cache
 def _declarations() -> dict[str, dict[str, str]]:
-    """Every installed gig's ``[hooks]`` table, read once per process from the manifests (no gig code runs).
+    """Every mounted gig's ``[hooks]`` table, read once per process from the manifests (no gig code runs).
 
     A gig whose entry points or manifest cannot be read declares nothing here; ``gigai <gig>`` reports it.
-    Like the loader, the first entry point for a name wins.
+    The gigs are the ones the loader mounts (``loader.mountable``): the gigai dist's own first, then the first
+    entry point per name, none named like a core command.
     """
 
     from importlib.metadata import entry_points
 
-    from ..gigs.loader import ENTRY_POINT_GROUP, read_manifest
+    from ..gigs.loader import ENTRY_POINT_GROUP, mountable, read_manifest
 
     try:
         found = tuple(entry_points(group=ENTRY_POINT_GROUP))
     except Exception:  # noqa: BLE001 - broken metadata of any dist: no gig declares a hook
         return {}
     tables: dict[str, dict[str, str]] = {}
-    for entry_point in found:
-        if entry_point.name in tables:
-            continue
+    for name, entry_point in mountable(found).items():
         try:
             table = read_manifest(entry_point).get("hooks")
         except Exception:  # noqa: BLE001 - an unreadable manifest declares nothing

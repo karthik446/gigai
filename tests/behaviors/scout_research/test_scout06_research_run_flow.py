@@ -146,12 +146,12 @@ def test_role_only_v2_checkpoint_mixed_research_and_check_then_submit(tmp_path: 
     plan_input.write_bytes(canonical_json_bytes(plan_request))
     planned = runner.invoke(cli, ["external", "plan", "--gig", gig_id, "--home", str(home), "--target", str(target), "--invocation", str(plan_input), "--protocol-version", "2", "--json"])
     assert planned.exit_code == 0, planned.output
-    plan = json.loads(planned.output)
+    plan = json.loads(planned.stdout)
     started_input = tmp_path / "start.json"
     started_input.write_bytes(canonical_json_bytes(_envelope("cli-start", {"run_plan_id": plan["run_plan_id"]})))
     started_result = runner.invoke(cli, ["external", "start", "--gig", gig_id, "--home", str(home), "--target", str(target), "--invocation", str(started_input), "--protocol-version", "2", "--json"])
     assert started_result.exit_code == 0, started_result.output
-    started = json.loads(started_result.output)
+    started = json.loads(started_result.stdout)
 
     renderer = import_module("gigai.scout.data.tools.cap_00000000-0000-4000-8000-000000000071.research")
     capture = b"Synthetic supplied role capture."
@@ -182,7 +182,7 @@ def test_role_only_v2_checkpoint_mixed_research_and_check_then_submit(tmp_path: 
     checkpoint_input.write_bytes(canonical_json_bytes(checkpoint_request))
     checkpoint_result = runner.invoke(cli, ["external", "checkpoint", "--gig", gig_id, "--home", str(home), "--target", str(target), "--invocation", str(checkpoint_input), "--protocol-version", "2", "--json"])
     assert checkpoint_result.exit_code == 0, checkpoint_result.output
-    checkpoint = json.loads(checkpoint_result.output)
+    checkpoint = json.loads(checkpoint_result.stdout)
     assert checkpoint["schema_version"] == "2.0"
     output, check = checkpoint["artifacts"]
     submit_request = _envelope("cli-submit", {"run_id": started["run_id"], "parent_checkpoint": checkpoint["checkpoint_id"], "output_refs": [{"kind": output["kind"], "markdown": output["markdown"], "sidecar": output["sidecar"], "domain_sidecar": output["domain_sidecar"], "supporting_artifacts": output["supporting_artifacts"]}], "check_refs": [check["sidecar"]], "disclosure": {"execution": "unobserved", "actor_report": "declared"}})
@@ -190,8 +190,8 @@ def test_role_only_v2_checkpoint_mixed_research_and_check_then_submit(tmp_path: 
     submit_input.write_bytes(canonical_json_bytes(submit_request))
     submitted_result = runner.invoke(cli, ["external", "submit", "--gig", gig_id, "--home", str(home), "--target", str(target), "--invocation", str(submit_input), "--protocol-version", "2", "--json"])
     assert submitted_result.exit_code == 0, submitted_result.output
-    submitted = json.loads(submitted_result.output)
+    submitted = json.loads(submitted_result.stdout)
     assert submitted["outcome"] == "succeeded"
     replay_result = runner.invoke(cli, ["external", "submit", "--gig", gig_id, "--home", str(home), "--target", str(target), "--invocation", str(submit_input), "--protocol-version", "2", "--json"])
     assert replay_result.exit_code == 0, replay_result.output
-    assert json.loads(replay_result.output) == submitted
+    assert json.loads(replay_result.stdout) == submitted

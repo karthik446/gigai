@@ -124,7 +124,7 @@ def test_cli_application_record_succeeds_after_a_real_run_left_progress_files(tm
         ["application", "record", "--gig", gig, "--home", str(home), "--target", str(target), "--input", str(request), "--confirm", "--json"],
     )
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output)["status"] == "recorded"
+    assert json.loads(result.stdout)["status"] == "recorded"
 
 
 def test_a_stray_file_under_runs_is_still_rejected(tmp_path: Path) -> None:

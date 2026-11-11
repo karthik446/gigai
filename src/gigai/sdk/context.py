@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..gigs.home import resolve_gig_folder
+from ..gigs.home import check_name, ensure_gig_folder
 from .store import GigStore
 
 
@@ -15,8 +15,8 @@ from .store import GigStore
 class GigContext:
     """What a gig gets from core: the gigai home, its name, its parsed ``gig.toml`` and a logger.
 
-    Building one creates the gig's gig folder ``<home>/gigs/<name>/`` when it is missing; ``store`` opens the
-    gig's SQLite stores in that folder.
+    Building one checks the name and touches no file. The gig folder ``<home>/gigs/<name>/`` is created the first
+    time the gig uses it: ``folder``, or ``store.db`` opening one of its SQLite stores there.
     """
 
     home: Path
@@ -25,7 +25,13 @@ class GigContext:
     log: logging.Logger
 
     def __post_init__(self) -> None:
-        resolve_gig_folder(self.home, self.name)
+        check_name("gig", self.name)
+
+    @property
+    def folder(self) -> Path:
+        """The gig folder ``<home>/gigs/<name>/``, created (empty) on first use; ``GigFolderError`` when it cannot be."""
+
+        return ensure_gig_folder(self.home, self.name)
 
     @property
     def store(self) -> GigStore:

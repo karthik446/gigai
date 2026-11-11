@@ -331,3 +331,27 @@ def test_checking_an_unknown_gig_names_it(tmp_path: Path, site: Path) -> None:
 
     assert result.returncode == 1
     assert "no installed gig named 'nope'" in result.stderr
+
+
+@pytest.mark.parametrize(("module", "watched"), [
+    ("gig_tidy", ["gig_tidy"]),
+    ("gig_tidy.cli", ["gig_tidy.cli", "gig_tidy"]),
+    ("acme.sub.cli", ["acme.sub.cli", "acme.sub", "acme"]),
+    ("gigai.scout.gig", ["gigai.scout.gig", "gigai.scout"]),
+])
+def test_item_3_watches_the_gigs_module_package_and_top_package_but_never_core_gigai(module: str, watched: list[str]) -> None:
+    # Reading any manifest imports `gigai` (the loader lives there), so a gig inside the gigai dist must not be
+    # judged by its top-level package; any other gig's top-level package is its own code.
+    from gigai.gigs.check import _gig_modules
+
+    assert _gig_modules(module) == watched
+
+
+def test_the_scout_gig_the_gigai_dist_ships_checks_without_a_fail(tmp_path: Path, site: Path) -> None:
+    result = _run(tmp_path, site, "gig", "check", "scout")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    outcomes = _outcomes(result.stdout)
+    assert {item: outcomes[item] for item in ("1", "2", "3", "4", "6")} == dict.fromkeys(("1", "2", "3", "4", "6"), {"PASS"})
+    assert "PASS     3  manifest read without importing 'gigai.scout'" in result.stdout
+    assert " 0 FAIL, " in result.stdout.splitlines()[-1]

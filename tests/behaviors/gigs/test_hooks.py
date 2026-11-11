@@ -131,19 +131,53 @@ def test_an_unknown_hook_is_unavailable(site):
     assert issubclass(hooks.HookUnavailable, LookupError)
 
 
-def test_a_missing_target_raises_what_the_import_statement_would(site):
-    """external_recording tells "Scout is not installed" apart by `ModuleNotFoundError.name`; a hook keeps that."""
+def test_a_declared_target_that_cannot_be_imported_is_unavailable_with_the_import_error_as_cause(site):
+    """A gig's broken declaration is one error type for core; the import statement's error rides along as __cause__."""
 
     _add_declaring_gig(site, "absent", 'doctor = "gig_absent_module.checks:doctor"\n')
     _add_declaring_gig(site, "noattr", 'doctor = "gig_noattr:doctor"\n')
 
-    with pytest.raises(ModuleNotFoundError) as missing_module:
+    with pytest.raises(hooks.HookUnavailable, match="gig 'absent' hook 'doctor': cannot import") as missing_module:
         hooks.get("doctor", gig="absent")
-    assert missing_module.value.name == "gig_absent_module"
-    with pytest.raises(ImportError, match="cannot import name 'doctor' from 'gig_noattr'") as missing_name:
+    assert isinstance(missing_module.value.__cause__, ModuleNotFoundError)
+    assert missing_module.value.__cause__.name == "gig_absent_module"
+    with pytest.raises(hooks.HookUnavailable, match="cannot import name 'doctor' from 'gig_noattr'") as missing_name:
         hooks.get("doctor", gig="noattr")
-    assert missing_name.value.name == "gig_noattr"
+    assert isinstance(missing_name.value.__cause__, ImportError)
+    assert not isinstance(missing_name.value.__cause__, ModuleNotFoundError)
+
+
+def test_a_bridge_row_raises_what_the_import_statement_would(monkeypatch):
+    """external_recording tells "Scout is not installed" apart by `ModuleNotFoundError.name`; a bridge row keeps that."""
+
+    monkeypatch.setitem(hooks._BRIDGE, "test_absent", "gigai.scout.no_such_module:thing")
+    monkeypatch.setitem(hooks._BRIDGE, "test_noattr", "gigai.sdk.hooks:no_such_name")
+
+    with pytest.raises(ModuleNotFoundError) as missing_module:
+        hooks.get("test_absent")
+    assert missing_module.value.name == "gigai.scout.no_such_module"
+    with pytest.raises(ImportError, match="cannot import name 'no_such_name' from 'gigai.sdk.hooks'") as missing_name:
+        hooks.get("test_noattr")
     assert not isinstance(missing_name.value, ModuleNotFoundError)
+
+
+@pytest.mark.parametrize("target", ["os", "os:system [extra]", "os system", ":system", "os:"])
+def test_a_declared_target_that_is_not_module_attribute_is_unavailable(site, target):
+    _add_declaring_gig(site, "shape", f"doctor = {json.dumps(target)}\n")
+
+    with pytest.raises(hooks.HookUnavailable, match="not module:attribute"):
+        hooks.get("doctor", gig="shape")
+
+
+def test_an_impostor_scout_dist_declares_nothing_the_gigai_dist_owns_the_name(site):
+    """A dist earlier on the path with a `scout` entry point never mounts (the gigai dist's gig wins), so its hooks
+    are not read: no `[hooks]` row of it reaches `get`, for a bridge name or any other."""
+
+    _add_declaring_gig(site, "scout", 'not_a_bridge_name = "os:system"\n')
+
+    assert hooks.declared("not_a_bridge_name") == {}
+    with pytest.raises(hooks.HookUnavailable, match="gig 'scout' provides no hook 'not_a_bridge_name'"):
+        hooks.get("not_a_bridge_name")
 
 
 def test_every_bridge_row_is_the_scout_object_the_import_named():
@@ -154,7 +188,7 @@ def test_every_bridge_row_is_the_scout_object_the_import_named():
 
 
 def test_a_bridge_row_wins_over_any_installed_gig_and_scans_none(site):
-    """An installed dist named `scout` (the loader never mounts it: `scout` is a built-in command) replaces nothing."""
+    """An installed dist named `scout` (the loader mounts the gigai dist's `scout` first) replaces nothing."""
 
     _add_declaring_gig(site, "scout", 'normalize_posting_url = "gig_scout:normalize_url"\n')
 

@@ -272,7 +272,7 @@ def test_r4_full_tailor_report_application_journey(
          "--target", str(tmp_path / "target"), "--json"],
     )
     assert answer_cli.exit_code == 0, answer_cli.output
-    answer_result = json.loads(answer_cli.output)
+    answer_result = json.loads(answer_cli.stdout)
     selectors = (
         {"purpose": "experience", "selector": {"family": "scout_record", "record_id": answer_result["record_id"], "revision_id": answer_result["revision_id"], "scope": {"mode": "saved_default", "task_context_id": None}}},
         selectors[2],
@@ -398,7 +398,7 @@ def test_r4_full_tailor_report_application_journey(
          "--gig", resolved.gig_id, "--home", str(tmp_path / "home"), "--target", str(tmp_path / "target"), "--json"],
     )
     assert selection_cli.exit_code == 0, selection_cli.output
-    selected_payload = json.loads(selection_cli.output)
+    selected_payload = json.loads(selection_cli.stdout)
     assert selected_payload["status"] == "recorded"
     persisted_selection = read_final_selection(
         resolved=resolved, opportunity_id=selection.opportunity_id, snapshot_id=selection.snapshot_id
@@ -597,11 +597,11 @@ def test_r4_full_tailor_report_application_journey(
          "--home", str(tmp_path / "home"), "--target", str(tmp_path / "target"), "--json"],
     )
     assert report_status.exit_code == 0, report_status.output
-    assert json.loads(report_status.output)["stale"] is False
+    assert json.loads(report_status.stdout)["stale"] is False
     app_history = CliRunner().invoke(
         cli,
         ["application", "history", "--gig", resolved.gig_id, "--opportunity", selection.opportunity_id,
          "--home", str(tmp_path / "home"), "--target", str(tmp_path / "target"), "--json"],
     )
     assert app_history.exit_code == 0, app_history.output
-    assert json.loads(app_history.output)["current_status"] == "rejected"
+    assert json.loads(app_history.stdout)["current_status"] == "rejected"

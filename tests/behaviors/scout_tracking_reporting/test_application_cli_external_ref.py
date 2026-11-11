@@ -44,7 +44,7 @@ def _record(tmp_path: Path, home: Path, target: Path, gig: str, *, operation: st
         ["application", "record", "--gig", gig, "--home", str(home), "--target", str(target), "--input", str(request), "--confirm", "--json"],
     )
     assert result.exit_code == 0, result.output
-    return json.loads(result.output)
+    return json.loads(result.stdout)
 
 
 @pytest.mark.parametrize(

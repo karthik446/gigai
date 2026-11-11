@@ -25,6 +25,8 @@ from gigai.sdk import GigContext
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "gigs"
 CLI = "import sys; from gigai.cli import cli; cli(sys.argv[1:], prog_name='gigai')"
+# The gigs the gigai dist itself ships (P3c); they mount first on any group, before the installed ones.
+SHIPPED = ("scout",)
 
 
 def _add_dist(site: Path, name: str, version: str, entry_points: dict[str, str], files: dict[str, str]) -> None:
@@ -156,7 +158,7 @@ def test_any_exception_from_gig_code_is_a_cannot_load(mounted_site):
         "gig_boom/gig.toml": '[gig]\nname = "boom"\ndescription = "explodes"\n[commands]\ngroup = "gig_boom:boom"\n',
     })
     group = click.Group("gigai")
-    assert mount_gigs(group) == ("boom",)
+    assert mount_gigs(group) == (*SHIPPED, "boom")
     runner = CliRunner()
     result = runner.invoke(group, ["boom"], prog_name="gigai")
     assert result.exit_code == 1
@@ -203,7 +205,7 @@ def test_collision_rule_on_any_group(mounted_site, capsys):
     def core_hello():
         click.echo("core hello")
 
-    assert mount_gigs(group) == ()
+    assert mount_gigs(group) == SHIPPED
     assert group.commands["hello"] is core_hello
     assert capsys.readouterr().err.count("not mounted") == 1
 
@@ -278,7 +280,7 @@ def test_unparsable_gig_toml_is_listed_as_cannot_load(mounted_site):
         "gig_badtoml/gig.toml": "[gig\nname = \n",
     })
     group = click.Group("gigai")
-    assert mount_gigs(group) == ("badtoml",)
+    assert mount_gigs(group) == (*SHIPPED, "badtoml")
     runner = CliRunner()
     listing = runner.invoke(group, ["--help"], prog_name="gigai")
     assert listing.exit_code == 0
@@ -297,7 +299,7 @@ def test_two_gigs_with_one_name_mount_one_and_name_the_winner(mounted_site, caps
             f"{package}/gig.toml": f'[gig]\nname = "dup"\ndescription = "from {dist}"\n[commands]\ngroup = "{package}:dup"\n',
         })
     group = click.Group("gigai")
-    assert mount_gigs(group) == ("dup",)
+    assert mount_gigs(group) == (*SHIPPED, "dup")
     winner = group.commands["dup"].entry_point.dist.name
     loser = ({"gig-dup-a", "gig-dup-b"} - {winner}).pop()
     assert capsys.readouterr().err.splitlines() == [
@@ -341,7 +343,7 @@ def test_system_exit_at_gig_import_is_a_cannot_load(mounted_site):
 def test_malformed_entry_point_value_is_named(mounted_site):
     _add_dist(mounted_site, "gig-badval", "1.0", {"badval": "not a valid!! value"}, {})
     group = click.Group("gigai")
-    assert mount_gigs(group) == ("badval",)
+    assert mount_gigs(group) == (*SHIPPED, "badval")
     runner = CliRunner()
     listing = runner.invoke(group, ["--help"], prog_name="gigai")
     assert listing.exit_code == 0
@@ -349,3 +351,74 @@ def test_malformed_entry_point_value_is_named(mounted_site):
     result = runner.invoke(group, ["badval"], prog_name="gigai")
     assert result.exit_code == 1
     assert "gigai badval: cannot load (invalid entry point value 'not a valid!! value')" in result.stderr
+
+
+def test_the_gigai_dists_own_gig_wins_over_an_impostor_earlier_on_the_path(mounted_site):
+    from importlib.metadata import entry_points
+
+    from gigai.gigs.loader import mountable
+
+    _add_dist(mounted_site, "gig-impostor", "9.9", {"scout": "gig_impostor:cli"}, {
+        "gig_impostor/__init__.py": "raise AssertionError('must not be imported')\n",
+        "gig_impostor/gig.toml": '[gig]\nname = "scout"\n[commands]\ngroup = "gig_impostor:cli"\n',
+    })
+    found = tuple(entry_points(group="gigai.gigs"))
+    assert [ep.dist.name for ep in found if ep.name == "scout"][0] == "gig-impostor"  # first on the path
+
+    assert mountable(found)["scout"].dist.name == "gigai"
+    group = click.Group("gigai")
+    mount_gigs(group)
+    assert group.commands["scout"].entry_point.value == "gigai.scout.gig:cli"
+    assert "gig_impostor" not in sys.modules
+
+
+@pytest.mark.parametrize(("manifest_dir", "module"), [
+    ("gig_outer/inner", "gig_outer.inner.cli"),  # the entry point module's own package
+    ("gig_outer", "gig_outer.inner.cli"),  # the nearest parent package that has one
+    ("gig_outer/inner/cli", "gig_outer.inner.cli"),  # the module is itself a package
+])
+def test_a_nested_gig_manifest_is_found_without_importing_any_of_its_packages(mounted_site, manifest_dir, module):
+    from importlib.metadata import entry_points
+
+    from gigai.gigs.loader import manifest_location, read_manifest
+
+    raising = "raise AssertionError('must not be imported')\n"
+    package_files = {"gig_outer/__init__.py": raising, "gig_outer/inner/__init__.py": raising}
+    if manifest_dir.endswith("/cli"):
+        package_files["gig_outer/inner/cli/__init__.py"] = raising
+    else:
+        package_files["gig_outer/inner/cli.py"] = raising
+    package_files[f"{manifest_dir}/gig.toml"] = f'[gig]\nname = "nested"\n[commands]\ngroup = "{module}:cli"\n'
+    _add_dist(mounted_site, "gig-nested", "1.0", {"nested": f"{module}:cli"}, package_files)
+    (entry_point,) = [ep for ep in entry_points(group="gigai.gigs") if ep.name == "nested"]
+
+    assert manifest_location(entry_point) == mounted_site / manifest_dir / "gig.toml"
+    assert read_manifest(entry_point)["gig"]["name"] == "nested"
+    assert not [name for name in sys.modules if name.startswith("gig_outer")]
+
+
+def test_a_gig_the_gigai_dist_ships_is_walked_by_group_commands_and_another_dists_is_not(mounted_site):
+    """agent-context walks `Group.commands`; core's commands.yaml documents Scout's verbs, never a third party's."""
+
+    _add_fixture(mounted_site, "hello")
+    group = click.Group("gigai")
+    mount_gigs(group)
+
+    assert group.commands["hello"].commands == {}
+    assert "gig_hello" not in sys.modules
+    assert {"install", "resume", "learning"} <= set(group.commands["scout"].commands)
+
+
+def test_mountable_before_any_mount_keeps_core_names_and_imports_no_gig():
+    """A process that never ran `mount_gigs` (a hook or `gig check` path) still refuses core's names, Scout unloaded."""
+
+    code = (
+        "import sys; from importlib.metadata import EntryPoint; from gigai.gigs import loader; "
+        "assert loader._core_commands is None; "
+        "found = [EntryPoint('gig', 'x:cli', 'gigai.gigs'), EntryPoint('tidy', 'y:cli', 'gigai.gigs')]; "
+        "print(sorted(loader.mountable(found))); print(sorted(m for m in sys.modules if m.startswith('gigai.scout')))"
+    )
+    completed = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False)
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "['tidy']\n[]\n"

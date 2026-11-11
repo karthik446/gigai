@@ -43,18 +43,7 @@ from .runtime_comparison import (
 from .diagnostics import journal_repair_refusal, render_report_json, run_doctor, run_journal_repair, run_live_doctor
 from .default_init import DefaultInitError, initialize_defaults
 from .evaluation import EvaluationError, load_manifest, score_behavior, write_report
-from .external_cli import external_group
-from .capability_cli import capability_group
 from .native_records_cli import native_record_group
-from .application_cli import application_group
-from .scout.report_cli import report_group
-from .scout.documents_cli import document_group
-from .scout.answer_cli import answer_group
-from .scout.acquisition_cli import acquisition_group
-from .scout.interview_cli import interview_group
-from .scout.learning_cli import learning_group
-from .scout.scout_cli import scout_group
-from .private_transfer_cli import transfer_group
 from .secrets_cli import secrets_group
 from .index import JournalIndexError, JournalProjection, read_index
 from .listing import GigListingError, list_gigs
@@ -3739,10 +3728,15 @@ def _workpad_list_options(command):
     )(command)
 
 
-def _deprecated_alias(old: str, new: str, *, as_json: bool) -> None:
-    """One line for an old spelling kept until the legacy verbs go (the meta-drop release): stdout, or stderr under --json."""
+def _deprecated_alias(old: str, new: str | None, *, as_json: bool) -> None:
+    """One line for an old spelling kept until the legacy verbs go (the meta-drop release): stdout, or stderr under --json.
 
-    click.echo(f"`gigai {old}` is deprecated; use `gigai {new}`.", err=as_json)
+    ``new`` is the spelling to use instead; ``None`` when there is none (decision 34's root groups)."""
+
+    if new is None:
+        click.echo(f"`gigai {old}` is deprecated and will be removed at the meta-drop release (0.4.0 or later).", err=as_json)
+    else:
+        click.echo(f"`gigai {old}` is deprecated; use `gigai {new}`.", err=as_json)
 
 
 @click.command("list")
@@ -4084,7 +4078,7 @@ def plan_command(
 
 @cli.group("workpad")
 def workpad_group() -> None:
-    """List, select and locate registered workpads."""
+    """List, switch between and locate registered workpads."""
 
 
 workpad_group.add_command(workpad_list_command)
@@ -4394,22 +4388,69 @@ def _require_supported_platform() -> None:
         )
 
 
-cli.add_command(external_group)
-cli.add_command(capability_group)
-cli.add_command(application_group)
-cli.add_command(report_group)
-cli.add_command(document_group)
-cli.add_command(answer_group)
-cli.add_command(acquisition_group)
-cli.add_command(acquisition_group, name="scout-import")
-cli.add_command(interview_group)
-# Debt: this registration seam (a core module importing and registering a
-# gig's Click group) is the accepted pattern for now, matching every other
-# scout_*_cli group above; a real gig-plugin registration mechanism is
-# 0.2.0 roadmap Workstream 3 scope, not built here.
-scout_group.add_command(learning_group)  # 0.1.11.10: `gigai scout learning list | show | open | import`
-cli.add_command(scout_group)
-cli.add_command(transfer_group)
+class _DeprecatedRootGroup(click.Group):
+    """A root group kept by decision 34 as a hidden alias until the meta-drop release (0.4.0 or later).
+
+    Its module is imported on first use. Every invocation through it (its own ``--help``, a subcommand's ``--help``,
+    real use) prints one deprecation line, then the group itself parses and runs exactly as before.
+    """
+
+    def __init__(self, name: str, target: str) -> None:
+        super().__init__(name=name, hidden=True)
+        self._target_path = target
+        self._target: click.Group | None = None
+
+    def _group(self) -> click.Group:
+        if self._target is None:
+            import importlib
+
+            module, _, attribute = self._target_path.partition(":")
+            self._target = getattr(importlib.import_module(module), attribute)
+        return self._target
+
+    @property  # type: ignore[override]
+    def commands(self) -> dict[str, click.Command]:
+        """The group's own commands (``agent-context`` walks ``Group.commands``); reading it imports the group."""
+
+        return self._group().commands
+
+    @commands.setter
+    def commands(self, value: dict[str, click.Command]) -> None:
+        """``click.Group.__init__`` assigns ``{}``; the commands are the aliased group's."""
+
+    def make_context(
+        self,
+        info_name: str | None,
+        args: list[str],
+        parent: click.Context | None = None,
+        **extra: object,
+    ) -> click.Context:
+        if not extra.get("resilient_parsing"):
+            _deprecated_alias(info_name or self.name or "", None, as_json="--json" in args)
+        return self._group().make_context(info_name, args, parent=parent, **extra)
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        return self._group().get_command(ctx, cmd_name)
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        return self._group().list_commands(ctx)
+
+
+# Decision 34: the ten root groups registered next to `scout` until 0.2 stay as hidden aliases, imported on use.
+# Seven are Scout's; `gigai scout` is a gig now (`gigai.scout.gig`, mounted by the loader below).
+for _name, _target in (
+    ("external", "gigai.external_cli:external_group"),
+    ("capability", "gigai.capability_cli:capability_group"),
+    ("application", "gigai.application_cli:application_group"),
+    ("scout-report", "gigai.scout.report_cli:report_group"),
+    ("scout-documents", "gigai.scout.documents_cli:document_group"),
+    ("scout-answer", "gigai.scout.answer_cli:answer_group"),
+    ("scout-acquisition", "gigai.scout.acquisition_cli:acquisition_group"),
+    ("scout-import", "gigai.scout.acquisition_cli:acquisition_group"),
+    ("scout-interview", "gigai.scout.interview_cli:interview_group"),
+    ("scout-transfer", "gigai.private_transfer_cli:transfer_group"),
+):
+    cli.add_command(_DeprecatedRootGroup(_name, _target))
 cli.add_command(secrets_group)
 cli.add_command(agent_context_command)
 cli.add_command(agent_skill_command)

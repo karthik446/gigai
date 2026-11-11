@@ -173,6 +173,7 @@ def test_gig_list_reports_each_status_without_importing_any_gig(tmp_path: Path, 
     assert result.returncode == 0, result.stderr
     assert '"status": "incompatible"' in result.stdout
     rows = {row["name"]: row for row in json.loads(result.stdout)["gigs"]}
+    assert rows.pop("scout")["dist"] == "gigai"  # the gig gigai ships (P3c); its status follows the core version
     assert {name: rows[name]["status"] for name in rows} == {
         "bare": "cannot load",
         "fine": "ok",
@@ -201,11 +202,13 @@ def test_gig_list_reports_each_status_without_importing_any_gig(tmp_path: Path, 
     assert "fine  ok  1.2.3  gigai-test-fine  Test-only gig fine" in human.stdout
 
 
-def test_gig_list_with_no_installed_gigs(tmp_path: Path, site: Path) -> None:
+def test_gig_list_with_no_installed_gigs_lists_only_the_gigs_gigai_ships(tmp_path: Path, site: Path) -> None:
     result = _run(tmp_path, site, "gig", "list")
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout == "No installed gigs.\n"
+    lines = result.stdout.splitlines()
+    assert lines[0] == "NAME  STATUS  VERSION  DIST  DETAIL"
+    assert [line.split("  ")[0::3] for line in lines[1:]] == [["scout", "gigai"]]
 
 
 def test_gig_info_shows_an_installed_gig_without_importing_it(tmp_path: Path, site: Path) -> None:

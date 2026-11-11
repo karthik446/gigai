@@ -392,7 +392,7 @@ def test_an_answer_of_16001_characters_is_refused_before_anything_is_read(tmp_pa
 
     over = CliRunner().invoke(cli, base)
 
-    assert over.exit_code != 0 and json.loads(over.output)["error"]["code"] == "answer_invalid", over.output
+    assert over.exit_code != 0 and json.loads(over.stdout)["error"]["code"] == "answer_invalid", over.stdout
     answer.write_text("y" * 16_000, encoding="utf-8")
     at_limit = CliRunner().invoke(cli, base)
-    assert at_limit.exit_code != 0 and json.loads(at_limit.output)["error"]["code"] != "answer_invalid", at_limit.output
+    assert at_limit.exit_code != 0 and json.loads(at_limit.stdout)["error"]["code"] != "answer_invalid", at_limit.stdout

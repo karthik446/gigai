@@ -8,7 +8,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai application history --gig scout --opportunity opp-1"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "application record": {
       "summary": "Record an application outcome from an explicit input file (needs --confirm).",
@@ -18,7 +20,9 @@
       "examples": [
         "gigai application record --gig scout --input outcome.json --confirm"
       ],
-      "notes": "Write requires direct operator --confirm."
+      "notes": "Write requires direct operator --confirm.",
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "application status": {
       "summary": "Show the current application state for one Gig, optionally for one opportunity.",
@@ -27,7 +31,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai application status --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "approve": {
       "summary": "Seal one pending proposal as an offline approved Gig version.",
@@ -46,7 +52,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai capability prepare-successor --gig scout --base-version 1 --base-proposal-id prop-1 --capability-id write_workpad --reviewed-manifest-id man-1 --operation-key op-1"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "capability review": {
       "summary": "Record reviewer judgment for the write_workpad capability from an input file (needs --confirm).",
@@ -55,7 +63,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai capability review --gig scout --base-version 1 --base-proposal-id prop-1 --manifest-id man-1 --capability-id write_workpad --operation-key op-1 --input review.json --confirm"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "catalog inspect": {
       "summary": "Show one bundled catalog entry.",
@@ -179,7 +189,9 @@
       "examples": [
         "gigai external cancel --gig scout --stdin"
       ],
-      "notes": "No provider runs; protocol for agents that perform the work themselves."
+      "notes": "No provider runs; protocol for agents that perform the work themselves.",
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "external checkpoint": {
       "summary": "Record an external checkpoint under an approved Gig.",
@@ -189,7 +201,9 @@
       "examples": [
         "gigai external checkpoint --gig scout --stdin"
       ],
-      "notes": "No provider runs."
+      "notes": "No provider runs.",
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "external graphs": {
       "summary": "List the approved Graphs an external agent may work under.",
@@ -198,7 +212,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai external graphs --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "external inspect": {
       "summary": "Inspect the state of an external run (or the Gig).",
@@ -207,7 +223,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai external inspect --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "external plan": {
       "summary": "Record an external plan under an approved Gig.",
@@ -217,7 +235,9 @@
       "examples": [
         "gigai external plan --gig scout --stdin"
       ],
-      "notes": "No provider runs."
+      "notes": "No provider runs.",
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "external requirements": {
       "summary": "Show the requirements of one approved Graph for external work.",
@@ -226,7 +246,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai external requirements --gig scout --graph tailor-application"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "external start": {
       "summary": "Start recording an externally performed run under an approved Gig.",
@@ -236,7 +258,9 @@
       "examples": [
         "gigai external start --gig scout --stdin"
       ],
-      "notes": "No provider runs."
+      "notes": "No provider runs.",
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "external submit": {
       "summary": "Submit the result of an externally performed run under an approved Gig.",
@@ -246,7 +270,9 @@
       "examples": [
         "gigai external submit --gig scout --stdin"
       ],
-      "notes": "No provider runs."
+      "notes": "No provider runs.",
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "feedback": {
       "summary": "Record verbatim operator feedback for one pending proposal.",
@@ -1663,7 +1689,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-acquisition import --batch-id b1 --rows-file rows.json --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-acquisition resume": {
       "summary": "Resume the exact committed input snapshot for a partial batch.",
@@ -1672,7 +1700,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-acquisition resume --batch-id b1 --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-acquisition status": {
       "summary": "Read one journal-authenticated batch and its cumulative outcome ledger.",
@@ -1681,7 +1711,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-acquisition status --batch-id b1 --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-answer save": {
       "summary": "Append one answered question to an existing native experience record (needs --confirm).",
@@ -1690,7 +1722,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-answer save --record-id rec-1 --parent-revision rev-1 --question-id q-1 --answer-file a.json --operation-key op-1 --confirm --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-documents final-select": {
       "summary": "Persist a final document selection after authenticating its completed Tailor Run (needs --confirm).",
@@ -1699,7 +1733,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-documents final-select --document doc-1 --run-id run-1 --goal-id g-1 --invocation-id inv-1 --output-sha256 abc123 --operation-key op-1 --confirm --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-documents read-selection": {
       "summary": "Read one authenticated immutable final selection.",
@@ -1708,7 +1744,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-documents read-selection --opportunity opp-1 --snapshot snap-1 --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-import import": {
       "summary": "Alias of `scout-acquisition import`.",
@@ -1718,7 +1756,9 @@
       "examples": [
         "gigai scout-import import --batch-id b1 --gig scout"
       ],
-      "aliasOf": "scout-acquisition import"
+      "aliasOf": "scout-acquisition import",
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-import resume": {
       "summary": "Alias of `scout-acquisition resume`.",
@@ -1728,7 +1768,9 @@
       "examples": [
         "gigai scout-import resume --batch-id b1 --gig scout"
       ],
-      "aliasOf": "scout-acquisition resume"
+      "aliasOf": "scout-acquisition resume",
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-import status": {
       "summary": "Alias of `scout-acquisition status`.",
@@ -1738,7 +1780,9 @@
       "examples": [
         "gigai scout-import status --batch-id b1 --gig scout"
       ],
-      "aliasOf": "scout-acquisition status"
+      "aliasOf": "scout-acquisition status",
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-interview feedback": {
       "summary": "Save user practice feedback as a new immutable revision.",
@@ -1747,7 +1791,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-interview feedback --record-id rec-1 --parent-revision rev-1 --feedback-file f.json --operation-key op-1 --home ~/.gigai --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-interview list": {
       "summary": "List interview preparation metadata without private content.",
@@ -1756,7 +1802,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-interview list --home ~/.gigai --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-interview prepare": {
       "summary": "Create interview preparation, or execute it through the approved prepare-interview Graph.",
@@ -1766,7 +1814,9 @@
       "examples": [
         "gigai scout-interview prepare --selection-file sel.json --content-file c.json --operation-key op-1 --home ~/.gigai --gig scout"
       ],
-      "notes": "Without --run it only stores the supplied content. --run --confirm executes the Graph (external=model)."
+      "notes": "Without --run it only stores the supplied content. --run --confirm executes the Graph (external=model).",
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-interview read": {
       "summary": "Read one committed interview preparation revision.",
@@ -1775,7 +1825,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-interview read --record-id rec-1 --home ~/.gigai --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-interview revise": {
       "summary": "Append revised interview preparation content after a fresh session.",
@@ -1784,7 +1836,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-interview revise --record-id rec-1 --parent-revision rev-1 --content-file c.json --operation-key op-1 --home ~/.gigai --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-report generate": {
       "summary": "Generate a complete atomic report bundle from committed history.",
@@ -1793,7 +1847,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-report generate --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-report status": {
       "summary": "Inspect the selected report and whether its journal cursor is stale.",
@@ -1802,7 +1858,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-report status --gig scout"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-transfer backup-private": {
       "summary": "Back up a workpad's private records into an archive (needs --confirm).",
@@ -1812,7 +1870,9 @@
       "examples": [
         "gigai scout-transfer backup-private --workpad wp --archive backup.tar --confirm"
       ],
-      "notes": "Writes private content; keep the archive private."
+      "notes": "Writes private content; keep the archive private.",
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-transfer export-definition": {
       "summary": "Export a workpad's shareable definition (no private records) to an archive.",
@@ -1821,7 +1881,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-transfer export-definition --workpad wp --archive def.tar"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-transfer import-definition": {
       "summary": "Import a definition archive into a destination.",
@@ -1830,7 +1892,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-transfer import-definition --archive def.tar --destination dest"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "scout-transfer restore-private": {
       "summary": "Restore private records from a backup archive (needs --confirm).",
@@ -1839,7 +1903,9 @@
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
         "gigai scout-transfer restore-private --archive backup.tar --destination dest --confirm"
-      ]
+      ],
+      "hidden": true,
+      "hiddenReason": "Deprecated in 0.2.0 (decision 34): root group kept as a hidden alias; prints a deprecation line and is removed at the meta-drop release (0.4.0 or later)."
     },
     "secrets add": {
       "summary": "Store a credential for a service (read from --stdin, never echoed).",
