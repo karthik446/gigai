@@ -22,6 +22,51 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.3.0
+
+This release adds spending limits in US dollars and two more tools for measuring a gig's model steps. It is
+additive: nothing in your data changes.
+
+#### Added
+
+- **Dollar limits per gig, key and call.** A gig lists the keys it uses in its manifest and can give each key an
+  alias and a daily limit in calls or dollars. `gigai <gig> status --json` now prints a `budget` object (what was
+  spent today and what is left) and the key aliases, and a call over a limit is refused before anything is sent.
+  Spending is kept in the gig's own folder (`<home>/gigs/<gig>/spend.json`), never in `config.toml`. The key for an
+  alias is read from the environment variable `<NAME>_<ALIAS>`; a provider-side limit on OpenRouter keys is
+  supported by the code but not yet checked against the live service.
+- **A limit per click.** `gigai <gig> steps set <step> --cap-usd 0.05` caps what one call of a step may cost. GigAI
+  estimates the cost from a price table kept at `<home>/prices.json` (fetched from OpenRouter's model list the first
+  time it is needed and flagged as stale after seven days) and refuses a call whose estimate is over the cap, saying
+  `estimated $0.06 > cap $0.05` and making no call. A stored call now carries its cost when the provider reports
+  it, or `unavailable` with the estimate for a command-line model.
+- **Ablations.** `gigai <gig> eval ablate --axis temperature --design ofat --prereg <file>` runs one factor at a time
+  (or `--design l9`, nine runs for four three-level factors) over a model's settings, prompt variants, few-shot
+  examples, model and judge model, and prints a table with Holm-adjusted p-values and the smallest effect the data
+  could have shown. The pre-registration file is hashed before the first run and the command stops with
+  "pre-registration changed" if it is edited afterwards. An axis the model target cannot move is refused up front, so
+  a null result is never reported for a setting that did not change. `--max-calls` caps paid calls only.
+- **Check a judge before you trust it.** `gigai <gig> eval validate-judge --step <judge> --against <labels.jsonl>`
+  measures how well a judge agrees with human labels (Cohen's kappa with an interval, plus a position-swap check) and
+  records the result. A judge used as a scorer is refused, naming it, until a validation passes (kappa 0.6 or more
+  over at least 126 labelled items, and swap consistency 0.90 or more when measured). `--against judgebench` and
+  `--against mtbench_human` run the same check on public sets; those results are recorded but do not unlock a judge.
+  The nine autoevals templates and two openevals prompts the check uses ship with GigAI under their licences.
+
+#### Changed
+
+- `eval list` shows whether a judge is validated.
+- `eval run` refuses a capped step whose output alone would exceed its cap, before the first call.
+
+#### Upgrade notes
+
+- Additive: no database migration and no `config.toml` change. A gig with no `alias` or `spend_cap` behaves as
+  before. Rollback is `uv tool install --reinstall gigai==0.2.0`; spend files and stored prices stay in place and
+  are ignored by the older version.
+- Three axes (`reasoning_effort`, `max_output_tokens`, `timeout`) cannot be ablated yet; they need request fields the
+  model port does not carry.
+- The existing `gigai gigs`, `gigai gig use` and top-level Scout aliases keep their deprecation lines.
+
 ### 0.2.0
 
 This is the first stable release of GigAI 2. It adds the commands to make, install and update gigs, and two example
