@@ -85,16 +85,27 @@ CREATE TABLE scores (
 CREATE INDEX scores_by_trace ON scores (trace_id, scorer_id);
 
 -- A reference label for one item (human or dataset), used to score and to validate judges.
+-- A person's label on one traced row (`eval label`) also names the run, step and round; a dataset label leaves them NULL.
 CREATE TABLE labels (
     label_id TEXT PRIMARY KEY,
     dataset_id TEXT NOT NULL,
     item_id TEXT NOT NULL,
     item_version TEXT NOT NULL,
-    label TEXT NOT NULL,  -- JSON
-    source TEXT NOT NULL,  -- who or what gave the label
-    recorded_at TEXT NOT NULL
+    label TEXT NOT NULL,  -- JSON; `eval label` stores "met", "not met" or "unknown"
+    source TEXT NOT NULL,  -- who or what gave the label ('human' for `eval label`)
+    recorded_at TEXT NOT NULL,
+    run_id TEXT REFERENCES runs (run_id),  -- the run whose trace was labelled
+    step_id TEXT,
+    critique TEXT,  -- the labeller's one-line reason
+    rubric TEXT,  -- the rubric the labeller applied
+    who TEXT,  -- the labeller's login
+    at TEXT,  -- when the labeller answered (UTC)
+    round INTEGER CHECK (round >= 1),  -- 1 for a first label; a relabel is its original's round + 1
+    blind INTEGER CHECK (blind IN (0, 1)),  -- 1: the labeller did not see which run, arm or model gave the row
+    relabel_of TEXT REFERENCES labels (label_id)  -- the label this one repeats (`eval label --relabel`)
 );
 CREATE INDEX labels_by_item ON labels (dataset_id, item_id, item_version);
+CREATE UNIQUE INDEX labels_once ON labels (run_id, item_id, step_id, who, at, round);
 
 -- One agreement check of a judge against labels.
 CREATE TABLE judge_validations (

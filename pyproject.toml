@@ -44,6 +44,9 @@ test = [
   "pytest>=8.3",
   "pytest-xdist>=3.6",
 ]
+# `gigai <gig> eval report --export inspect`. inspect-ai is pinned to the release the export is shaped for;
+# agent-client-protocol 1.0 removed acp.helpers, which that release imports.
+inspect = ["inspect-ai==0.3.288", "agent-client-protocol<1"]
 
 # Release screenshots (tools/media, `make media`). A dependency group, not an extra: it is
 # never part of the published package's metadata and nothing installs it by default.

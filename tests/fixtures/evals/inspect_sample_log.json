@@ -1,0 +1,121 @@
+{
+  "version": 2,
+  "status": "success",
+  "eval": {
+    "run_id": "run_sample",
+    "created": "2026-03-01T00:00:00+00:00",
+    "task": "eval-fixture-solve",
+    "task_id": "run-sample",
+    "dataset": {
+      "name": "release.jsonl",
+      "samples": 2
+    },
+    "model": "deterministic-a",
+    "config": {
+      "epochs": 1
+    },
+    "metadata": {
+      "gigai": {
+        "gig": "eval-fixture",
+        "step": "solve",
+        "suite": "release",
+        "dataset_sha256": "sha256:b0a23ac9b8057a03bfee67687978cf4f9a0891990bb86a09ffea5b5042298443"
+      }
+    }
+  },
+  "plan": {
+    "name": "plan",
+    "steps": []
+  },
+  "results": {
+    "total_samples": 2,
+    "completed_samples": 2,
+    "scores": [
+      {
+        "name": "answer_marker",
+        "scorer": "gig_eval_fixture.scorers:answer_marker",
+        "metrics": {
+          "mean": {
+            "name": "mean",
+            "value": 0.5
+          }
+        }
+      },
+      {
+        "name": "match",
+        "scorer": "gigai.evals.contracts:match",
+        "metrics": {
+          "mean": {
+            "name": "mean",
+            "value": 0.25
+          }
+        }
+      }
+    ]
+  },
+  "stats": {
+    "started_at": "2026-03-01T00:00:00+00:00"
+  },
+  "samples": [
+    {
+      "id": "r01",
+      "epoch": 1,
+      "input": "sha256:23fb22357a7eaf4e13a7482d1540aee55bfc253178c3ebeaa8395f71794bc23b",
+      "target": "",
+      "output": {
+        "model": "deterministic-a",
+        "choices": [
+          {
+            "message": {
+              "role": "assistant",
+              "content": "sha256:bdd64be49ce8f5ab6a43b22345891bca714698bd5dc57f7f3ca2b0fbcf273927"
+            },
+            "stop_reason": "stop"
+          }
+        ]
+      },
+      "scores": {
+        "answer_marker": {
+          "value": 0.5
+        },
+        "match": {
+          "value": 1.0
+        }
+      },
+      "metadata": {
+        "cluster": "c01",
+        "trace": "trace_c794e17b-50b5-43e5-9dd7-68f80b95493f"
+      }
+    },
+    {
+      "id": "r02",
+      "epoch": 1,
+      "input": "sha256:02dbc2ff544b4d79b7af6dd2501261f8984a124ee773011a1ecc331ba948b225",
+      "target": "",
+      "output": {
+        "model": "deterministic-a",
+        "choices": [
+          {
+            "message": {
+              "role": "assistant",
+              "content": "sha256:370565f43c7f912909fd31aa57a6954099d5682eb6a3476b1aa6435dba27c4d9"
+            },
+            "stop_reason": "stop"
+          }
+        ]
+      },
+      "scores": {
+        "answer_marker": {
+          "value": 0.5
+        },
+        "match": {
+          "value": 1.0
+        }
+      },
+      "metadata": {
+        "cluster": "c02",
+        "trace": "trace_3de94acf-36be-4b08-9c6b-318bf30dbcb3"
+      }
+    }
+  ]
+}

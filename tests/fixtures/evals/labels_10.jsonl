@@ -1,0 +1,10 @@
+{"run_id": "run_label-b", "item_id": "item-03", "step_id": "solve", "label": "met", "critique": "names the total", "rubric": "gigai-met-1", "who": "fixture-labeller", "at": "2026-01-31T09:30:07Z", "round": 1}
+{"run_id": "run_label-a", "item_id": "item-01", "step_id": "solve", "label": "met", "critique": "shows the working", "rubric": "gigai-met-1", "who": "fixture-labeller", "at": "2026-01-31T09:30:00Z", "round": 1}
+{"run_id": "run_label-a", "item_id": "item-04", "step_id": "solve", "label": "not met", "critique": "drops the remainder", "rubric": "gigai-met-1", "who": "fixture-labeller", "at": "2026-01-31T09:30:03Z", "round": 1}
+{"run_id": "run_label-b", "item_id": "item-01", "step_id": "solve", "label": "unknown", "critique": "", "rubric": "gigai-met-1", "who": "fixture-labeller", "at": "2026-01-31T09:30:05Z", "round": 1}
+{"run_id": "run_label-a", "item_id": "item-02", "step_id": "solve", "label": "met", "critique": "naïve but right", "rubric": "gigai-met-1", "who": "fixture-labeller", "at": "2026-01-31T09:30:01Z", "round": 1}
+{"run_id": "run_label-b", "item_id": "item-05", "step_id": "solve", "label": "not met", "critique": "wrong unit", "rubric": "gigai-met-1", "who": "fixture-labeller", "at": "2026-01-31T09:30:09Z", "round": 1}
+{"run_id": "run_label-a", "item_id": "item-05", "step_id": "solve", "label": "met", "critique": "correct", "rubric": "gigai-met-1", "who": "fixture-labeller", "at": "2026-01-31T09:30:04Z", "round": 1}
+{"run_id": "run_label-b", "item_id": "item-02", "step_id": "solve", "label": "not met", "critique": "adds instead of subtracts", "rubric": "gigai-met-1", "who": "fixture-labeller", "at": "2026-01-31T09:30:06Z", "round": 1}
+{"run_id": "run_label-a", "item_id": "item-03", "step_id": "solve", "label": "unknown", "critique": "cannot tell from the reply", "rubric": "gigai-met-1", "who": "fixture-labeller", "at": "2026-01-31T09:30:02.250Z", "round": 1}
+{"run_id": "run_label-b", "item_id": "item-04", "step_id": "solve", "label": "met", "critique": "right total", "rubric": "gigai-met-1", "who": "fixture-labeller", "at": "2026-01-31T09:30:08Z", "round": 1}
