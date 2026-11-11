@@ -1,0 +1,69 @@
+# Base run report template
+
+`gigai <gig> eval base --report PATH` writes this layout from the run's `--json` output
+(`gigai.evals.base.render_markdown`). Every cell comes from the JSON; the report names rungs,
+sets, run ids and numbers only, never item text. Angle brackets mark the filled values.
+
+```markdown
+# Base run: <gig>
+
+- Tier: <gate|judge|full>, <ci|release> slices[ (deterministic)]
+- Ladder sha256: `<64-hex sha256 of src/gigai/evals/ladder.toml>`
+- Calls made: <model calls: calls to every rung but the deterministic one>
+
+## Rungs
+
+| Rung | Adapter | Model | Price in/out ($/M) | Rank (source, date) | Knobs | Status | Calls | Suite |
+|---|---|---|---|---|---|---|---|---|
+| <name> | <adapter> | <model name> | <in> / <out> | <rank> (<source URL>, <date>) | <knobs, or why none> | <ran, or skipped: reason> | <calls> | <suite points, or n/a> |
+
+## Sets
+
+| Set | K-score | Items | Best | Saturated |
+|---|---|---|---|---|
+| <set>[ (approximate IFEval: 15 of 25 instruction types; others unscored; IFBench: not available)] | <0-2> | <items> | <best rung's points> | <yes, not gated / no> |
+
+## Runs
+
+| Rung | Set | Run | Items | Scored | Score | Calls |
+|---|---|---|---|---|---|---|
+| <rung> | <set> | `<run id>` | <items> | <scored items> | <points> | <calls> |
+
+## Gates
+
+| Gate | Measure | Status |
+|---|---|---|
+| a order | tau-b <tau> (min <min>) | <pass/fail/not_validated>[: reason] |
+| b noise | sd <points> points, flip rate <percent>%, n=<items> | <status> |
+| c broken_prompt | drop <points> points, p <p> | <status> |
+| c truncated_context | drop <points> points, p <p> | <status> |
+| c wrong_label | drop <points> points, p <p> | <status> |
+| d judge | <reason> | not_validated |
+| e replay | max abs delta <delta>, <calls> calls | <status> |
+```
+
+## Reading it
+
+- **Suite** is a rung's mean over the gated sets of its per-set score, in points (0-100). A set
+  where the best rung scores at or above `order.saturated_at` (0.97) is flagged and left out of
+  the suite and the gates.
+- **Gate a** passes when Kendall tau-b between the suite scores and the published ranks is at
+  least `order.min_tau` (0.6); fewer than `order.min_rungs` (3) measured rungs, or every rung
+  tied, is `not_validated`.
+- **Gate b** re-asks `noise.items` (100) items on the noise rung (`noise.rung`, else the
+  strongest selected rung). Its main answers are repeat 0, so `noise.k` (3) means two more
+  passes. It passes when the sample SD of the suite score is at most 2.0 points and at most 10%
+  of items flip.
+- **Gate c** passes a canary when its score falls by at least its `min_drop` (10 / 15 / 30
+  points) and the exact McNemar p of the flips is below 0.01. The two calling canaries re-ask
+  their `items` (100 each), spread across their sets, on the canary rung (`canaries.rung`, else
+  the strongest selected rung).
+- **Gate d** (judge agreement with human labels) is not checked by the base run.
+- **Gate e** copies one main run's traces into a replay run with no call, scores them again and
+  passes when the means differ by less than 0.0005 and the replay made 0 calls. It re-scores the
+  same text, so it catches scorer nondeterminism and trace-copy loss, not model variance.
+- **IFEval** is scored approximately: 15 of its 25 instruction types are checked, and an item
+  with any other type is left unscored.
+
+The per-gig eval report (`gigai <gig> eval report`) has its own layout; this template covers the
+base run only.

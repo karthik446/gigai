@@ -61,5 +61,5 @@ datasets.ci = { path = "tinygsm8k.jsonl", source = "tinyBenchmarks/tinyGSM8k @ b
 # core) offline from responses.json; the gates name the step's scorers by metric (match, answer_marker).
 datasets.release = { path = "release.jsonl", source = "synthetic (written for the gigai test suite)", licence = "CC0-1.0", sha256 = "b0a23ac9b8057a03bfee67687978cf4f9a0891990bb86a09ffea5b5042298443" }
 datasets.upgrade = { path = "release.jsonl", source = "synthetic (written for the gigai test suite)", licence = "CC0-1.0", sha256 = "b0a23ac9b8057a03bfee67687978cf4f9a0891990bb86a09ffea5b5042298443" }
-gates.release = { suite = "release", k = 1, paired_to = "last-release", slices = ["easy", "hard", "core"], primary = { metric = "match", min_ci_lower = -0.25 }, guard = { metric = "answer_marker", no_worse = -0.10 } }
+gates.release = { suite = "release", k = 1, paired_to = "last-release", slices = ["easy", "hard", "core"], prereg = { registered_at = "2026-11-09", ladder_sha256 = "30953cb9b2f3b8fb2decad8a1230fc3497723a1b5c9f3b54b8d4a479e79cea12" }, primary = { metric = "match", min_ci_lower = -0.25 }, guard = { metric = "answer_marker", no_worse = -0.10 } }
 gates.upgrade = { suite = "upgrade", k = 2, paired_to = "previous-model", primary = { metric = "match", no_worse = -0.05 } }

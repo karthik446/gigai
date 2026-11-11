@@ -21,6 +21,7 @@ EVAL_VERBS: dict[str, str] = {
     "gate": "gigai.evals.gates:gate_command",
     "label": "gigai.evals.label:label_command",
     "report": "gigai.evals.report:report_command",
+    "base": "gigai.evals.base:base_command",
 }
 
 

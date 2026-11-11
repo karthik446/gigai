@@ -1,0 +1,202 @@
+# The base-run ladder `gigai <gig> eval base` reads (gigai.evals.base). Data only: rungs, tiers, per-set token
+# anchors, the noise-floor and canary plan, and the gate thresholds. A gig pins this file's SHA-256 in its release
+# gate's `prereg`, so any change here is a new pre-registration.
+#
+# `rank` is the published order the measured order is checked against (gate a): 1 is the strongest. It is fixed
+# a priori by price and size, before any base run: equal ranks are a published tie. `rank_source` and `rank_date`
+# say where the order was read and when. Prices are USD per million tokens. `knobs` lists the sampling settings a
+# rung accepts; a rung with no knobs cannot take temperature or seed (`no_knobs` says why).
+
+registered_at = "2026-11-09"
+
+[[rungs]]
+name = "claude-sonnet"
+adapter = "claude_cli"
+model = "sonnet"
+model_name = "Claude Sonnet 4.5"
+price_in = 3.00
+price_out = 15.00
+price_source = "https://www.anthropic.com/pricing"
+rank = 1
+rank_source = "https://www.anthropic.com/pricing (model \"sonnet\" is a claude CLI alias that floats to the newest Sonnet; it named Claude Sonnet 4.5 on rank_date)"
+rank_date = "2026-11-09"
+knobs = []
+no_knobs = "the claude CLI takes no temperature or seed"
+
+[[rungs]]
+name = "claude-haiku"
+adapter = "claude_cli"
+model = "haiku"
+model_name = "Claude Haiku 4.5"
+price_in = 1.00
+price_out = 5.00
+price_source = "https://www.anthropic.com/pricing"
+rank = 2
+rank_source = "https://www.anthropic.com/pricing (model \"haiku\" is a claude CLI alias that floats to the newest Haiku; it named Claude Haiku 4.5 on rank_date)"
+rank_date = "2026-11-09"
+knobs = []
+no_knobs = "the claude CLI takes no temperature or seed"
+
+[[rungs]]
+name = "gpt-5-mini"
+adapter = "codex_cli"
+model = "gpt-5-mini"
+model_name = "GPT-5 mini"
+price_in = 0.25
+price_out = 2.00
+price_source = "https://openai.com/api/pricing/"
+rank = 2
+rank_source = "https://openai.com/api/pricing/"
+rank_date = "2026-11-09"
+knobs = []
+no_knobs = "the codex CLI takes no temperature or seed"
+
+[[rungs]]
+name = "gemini-flash-lite"
+adapter = "openrouter_api"
+model = "google/gemini-2.5-flash-lite"
+model_name = "Gemini 2.5 Flash-Lite"
+price_in = 0.10
+price_out = 0.40
+price_source = "https://openrouter.ai/api/v1/models"
+rank = 4
+rank_source = "https://openrouter.ai/api/v1/models"
+rank_date = "2026-11-09"
+knobs = ["temperature", "seed"]
+
+[[rungs]]
+name = "gemma"
+adapter = "ollama_local"
+model = "gemma3:4b"
+model_name = "Gemma 3 4B (local, Ollama)"
+price_in = 0.0
+price_out = 0.0
+price_source = "https://ollama.com/library/gemma3:4b (free: runs locally)"
+rank = 5
+rank_source = "https://ollama.com/library/gemma3:4b (Ollama lists pulled models as name:tag; the rung pins the 4B tag)"
+rank_date = "2026-11-09"
+knobs = ["temperature", "seed"]
+
+[[rungs]]
+name = "deterministic"
+adapter = "deterministic"
+model = "canned"
+model_name = "the slices' canned completions"
+price_in = 0.0
+price_out = 0.0
+price_source = "none: no model"
+rank = 6
+rank_source = "none: answers from data, below every model by construction"
+rank_date = "2026-11-09"
+knobs = []
+no_knobs = "no model: it answers each item's canned completion"
+
+# Items per set in each tier. `gate` is the per-release tier (560 calls a rung).
+[tiers.gate]
+contractnli = 60
+ragtruth = 100
+quality = 100
+ifeval = 100
+jsonschemabench = 100
+rewardbench2 = 100
+
+[tiers.judge]
+judgebench = 100
+mtbench_human = 150
+
+[tiers.full]
+contractnli = 60
+ragtruth = 100
+quality = 100
+ifeval = 100
+jsonschemabench = 100
+rewardbench2 = 100
+judgebench = 100
+mtbench_human = 150
+injection_composite = 200
+
+# Tokens per call (prompt in, completion out) used by --plan's dollars. `k_score` is the set's K-score
+# (the capability-map criteria: 0 = measures the gig's own skill, higher = further from it).
+[sets.contractnli]
+tokens_in = 29232
+tokens_out = 5607
+k_score = 0
+
+[sets.ragtruth]
+tokens_in = 29232
+tokens_out = 5607
+k_score = 0
+
+[sets.quality]
+tokens_in = 29232
+tokens_out = 5607
+k_score = 0
+
+[sets.ifeval]
+tokens_in = 1508
+tokens_out = 345
+k_score = 0
+
+[sets.jsonschemabench]
+tokens_in = 1508
+tokens_out = 345
+k_score = 0
+
+[sets.rewardbench2]
+tokens_in = 1508
+tokens_out = 345
+k_score = 1
+
+[sets.judgebench]
+tokens_in = 3000
+tokens_out = 1500
+k_score = 1
+
+[sets.mtbench_human]
+tokens_in = 3000
+tokens_out = 1500
+k_score = 0
+
+[sets.injection_composite]
+tokens_in = 3000
+tokens_out = 1500
+k_score = 2
+
+# Gate b: the noise rung's main answers are repeat 0; it re-answers min(items, n) of them k - 1 more times.
+[noise]
+rung = "claude-haiku"
+items = 100
+k = 3
+max_sd_points = 2.0
+max_flip_rate = 0.10
+
+# Gate a: Kendall tau-b between the measured and the published order.
+[order]
+min_tau = 0.6
+min_rungs = 3
+saturated_at = 0.97
+
+# Gate c: each canary sabotages the suite on purpose; the suite score must drop by at least `min_drop` points,
+# with an exact McNemar p below `max_p`.
+[canaries]
+rung = "gemini-flash-lite"
+max_p = 0.01
+
+[canaries.broken_prompt]
+sets = ["ifeval", "quality"]
+items = 100
+min_drop = 10.0
+
+[canaries.truncated_context]
+sets = ["quality", "ragtruth", "contractnli"]
+min_drop = 15.0
+keep = 0.25
+items = 100
+
+[canaries.wrong_label]
+sets = ["quality", "ragtruth", "contractnli"]
+min_drop = 30.0
+
+# Gate e: a replay of one run re-scores its stored traces with no call.
+[replay]
+max_abs_delta = 0.0005

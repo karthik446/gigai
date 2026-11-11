@@ -802,6 +802,27 @@
         "snapshot": {
           "type": "string",
           "description": "Package-relative replay snapshot the `ci` gate's numbers must equal."
+        },
+        "prereg": {
+          "type": "object",
+          "required": [
+            "registered_at",
+            "ladder_sha256"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "registered_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+              "description": "The day the gig fixed its base-run ladder and pass rules, before any base run."
+            },
+            "ladder_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "SHA-256 of the shipped `gigai/evals/ladder.toml` the gig registered; `eval base` refuses a different ladder."
+            }
+          },
+          "description": "`release` gates: the pre-registration `gigai <gig> eval base` checks before it runs."
         }
       }
     }
