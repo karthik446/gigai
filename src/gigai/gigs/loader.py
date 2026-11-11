@@ -383,7 +383,9 @@ def _server_verbs(gig: LazyGig) -> dict[str, click.Command]:
         except (process.ProcessServerError, OSError, ValueError) as exc:
             _server_failed(name, exc)
         if as_json:
-            click.echo(json.dumps(result.to_json(), indent=2, sort_keys=True))
+            from ..sdk.budget import status_fields
+
+            click.echo(json.dumps({**result.to_json(), **status_fields(home, name, gig.manifest)}, indent=2, sort_keys=True))
         elif result.state is None:
             click.echo("stopped (removed a stale state file)" if result.cleaned_stale else "stopped")
         else:

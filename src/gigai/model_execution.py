@@ -101,26 +101,40 @@ class InvocationPolicy:
 
 @dataclass
 class InvocationBudget:
-    """Mutable per-Run model-call/token ledger with fail-closed reservation."""
+    """Mutable per-Run model-call/token ledger with fail-closed reservation.
+
+    P12 adds an optional USD dimension: ``max_usd`` is ``None`` (not
+    tracked) unless a caller sets it, and ``reserve`` only charges ``usd``
+    when told to, so every existing ledger behaves exactly as before.
+    """
 
     max_model_calls: int
     max_tokens: int
     model_calls: int = 0
     tokens: int = 0
+    max_usd: float | None = None
+    usd: float = 0.0
 
     def __post_init__(self) -> None:
         if self.max_model_calls < 0 or self.max_tokens < 0:
             raise ModelExecutionError("budget limits must be non-negative")
+        if (self.max_usd is not None and self.max_usd < 0) or self.usd < 0:
+            raise ModelExecutionError("budget limits must be non-negative")
 
-    def reserve(self, requested_output_tokens: int) -> bool:
+    def reserve(self, requested_output_tokens: int, *, usd: float = 0.0) -> bool:
         if requested_output_tokens <= 0:
             raise ModelExecutionError("budget reservation requires positive output tokens")
+        if usd < 0:
+            raise ModelExecutionError("budget reservation requires a non-negative usd amount")
         if self.model_calls >= self.max_model_calls:
             return False
         if self.tokens + requested_output_tokens > self.max_tokens:
             return False
+        if self.max_usd is not None and self.usd + usd > self.max_usd:
+            return False
         self.model_calls += 1
         self.tokens += requested_output_tokens
+        self.usd += usd
         return True
 
 

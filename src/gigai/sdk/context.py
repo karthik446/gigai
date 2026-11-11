@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +14,7 @@ from .store import GigStore
 if TYPE_CHECKING:
     from ..adapters.port import InvocationResult
     from ..evals.records import ItemRef, Postprocess, ReplayRow, RunRecord, TraceRecord
+    from .budget import GigBudget
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,14 @@ class GigContext:
         """``ctx.store.db(gig, name)`` opens ``<home>/gigs/<gig>/<name>.sqlite`` (see ``gigai.sdk.store``)."""
 
         return GigStore(self.home, self.name, self.manifest)
+
+    @cached_property
+    def budget(self) -> GigBudget:
+        """The gig's spend caps, today's spend and per-gig key (``gigai.sdk.budget``); one ledger per context (P12)."""
+
+        from .budget import GigBudget
+
+        return GigBudget.for_gig(self.home, self.name, self.manifest)
 
     def trace(self, step_id: str, input: str, output: str, **fields: Any) -> TraceRecord:
         """Record one trace of step ``step_id`` in ``<home>/gigs/<name>/evals.sqlite`` and return it.

@@ -1,7 +1,7 @@
 # Scout's gig manifest. Scout ships inside the gigai wheel (entry point `gigai.gigs: scout = gigai.scout.gig:cli`);
 # the loader reads this file without importing Scout. Trimmed from research packet gigai-hs0-D1's example to what
-# is true of today's code: no [config] [docs] [data] [evals] [hooks] [[keys]] (their files and seams do not exist
-# yet; core reaches Scout objects through the bridge rows in gigai/sdk/hooks.py).
+# is true of today's code: no [config] [docs] [data] [evals] [hooks] (their files and seams do not exist yet; core
+# reaches Scout objects through the bridge rows in gigai/sdk/hooks.py). P12 added the [[keys]] rows below.
 
 [gig]
 manifest_format = 1
@@ -32,3 +32,23 @@ bind = "loopback"
 
 [dependencies]
 python = ">=3.11"
+
+# P12: the keys Scout may use, all optional (Scout runs on local CLIs without any). `status --json` lists them with
+# `present` (by variable name only) and a `budget` object; no `spend_cap`, so nothing here caps Scout. The alias
+# `scout` on openrouter means OPENROUTER_API_KEY_SCOUT is tried first when a caller resolves through
+# `ctx.budget.resolver`; without it the shared OPENROUTER_API_KEY is used exactly as before.
+[[keys]]
+service = "openrouter"
+env = "OPENROUTER_API_KEY"
+required = false
+alias = "scout"
+
+[[keys]]
+service = "openai"
+env = "OPENAI_API_KEY"
+required = false
+
+[[keys]]
+service = "exa"
+env = "EXA_API_KEY"
+required = false

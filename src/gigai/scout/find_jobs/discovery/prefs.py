@@ -15,10 +15,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import json
 
 from .storage import atomic_write, discovery_dir
+
+if TYPE_CHECKING:
+    from gigai.sdk.budget import GigBudget
 
 _SCHEMA_VERSION = "scout-discovery-prefs:1"
 
@@ -145,6 +149,17 @@ class DiscoveryPrefs:
             cadence_days=_positive_int(value.get("cadence_days", 7), "cadence_days"),
             budget_usd_per_session=_positive_float(value.get("budget_usd_per_session", 0.50), "budget_usd_per_session"),
         )
+
+
+def session_budget_usd(prefs: DiscoveryPrefs, budget: GigBudget | None) -> float:
+    """The USD a discovery session may spend: ``prefs.budget_usd_per_session``, lowered to what the gig's own
+    ``spend_cap`` (``ctx.budget``, P12) still allows today. ``None`` or an uncapped budget leaves the pref as it is;
+    the pref itself stays positive and validated exactly as before."""
+
+    if budget is None:
+        return prefs.budget_usd_per_session
+    left = budget.remaining().usd
+    return prefs.budget_usd_per_session if left is None else min(prefs.budget_usd_per_session, left)
 
 
 def _prefs_path(home_root: Path, target: Path) -> Path:

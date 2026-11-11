@@ -46,6 +46,7 @@ import os
 from pathlib import Path
 import re
 import threading
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from .model_tag import BACKFILL_MODELS, tagging_setting
@@ -60,6 +61,9 @@ from .refresh_tick import (
 )
 from .snapshot import snapshot_setting
 from ..pipeline.settings import pipeline_setting
+
+if TYPE_CHECKING:
+    from gigai.sdk.budget import GigBudget
 
 BACKGROUND_SETTINGS_SCHEMA = "scout-background-settings:1"
 MAX_MANIFEST_URL_LENGTH = 2048
@@ -82,6 +86,15 @@ _KEYS: dict[str, dict[str, str]] = {
 }
 #: The most a cap may be set to through the API: a typo must not buy ten thousand model calls.
 MAX_CAP = 1000
+
+
+def max_cap(budget: GigBudget | None = None) -> int:
+    """The most a call cap may be set to: :data:`MAX_CAP`, lowered to the gig's own ``calls_per_day`` when its
+    ``spend_cap`` (``ctx.budget``, P12) is tighter. Without a budget, or an uncapped one, :data:`MAX_CAP` as before."""
+
+    calls = None if budget is None else budget.caps.calls_per_day
+    return MAX_CAP if calls is None else min(MAX_CAP, calls)
+
 
 _WRITE_LOCK = threading.Lock()
 
@@ -184,7 +197,7 @@ def _step_models(name: str, value: object) -> object:
     return models
 
 
-def _value(block: str, key: str, kind: str, value: object) -> object:
+def _value(block: str, key: str, kind: str, value: object, *, most_calls: int = MAX_CAP) -> object:
     name = f"{block}.{key}"
     if kind == "check_times":
         return _check_times(name, value)
@@ -194,7 +207,7 @@ def _value(block: str, key: str, kind: str, value: object) -> object:
         # null puts the default back.
         if value is None:
             return _REMOVE
-        most = 100 if kind == "percent" else MAX_CAP
+        most = 100 if kind == "percent" else most_calls
         if type(value) is not int:
             raise SettingsError("wrong_type", f"{name} must be a whole number or null for the default")
         if not 0 <= value <= most:
@@ -229,8 +242,10 @@ def _value(block: str, key: str, kind: str, value: object) -> object:
     return url
 
 
-def validate_patch(body: object) -> dict[str, dict[str, object]]:
-    """The settings a ``PUT`` body names, checked. Raises :class:`SettingsError`; never touches the file."""
+def validate_patch(body: object, *, budget: GigBudget | None = None) -> dict[str, dict[str, object]]:
+    """The settings a ``PUT`` body names, checked. Raises :class:`SettingsError`; never touches the file.
+
+    ``budget`` (``ctx.budget``, P12) lowers the most a call cap may be set to (:func:`max_cap`); omitted, as before."""
 
     if not isinstance(body, dict):
         raise SettingsError("wrong_type", "request body must be a JSON object")
@@ -248,7 +263,7 @@ def validate_patch(body: object) -> dict[str, dict[str, object]]:
         if extra:
             raise SettingsError("unknown_key", f"{block} has unknown field(s): {extra} (allowed: {', '.join(sorted(keys))})")
         if given:
-            patch[block] = {key: _value(block, key, keys[key], value) for key, value in given.items()}
+            patch[block] = {key: _value(block, key, keys[key], value, most_calls=max_cap(budget)) for key, value in given.items()}
     if not patch:
         raise SettingsError("invalid_value", "name at least one setting to change")
     rank = patch.get("rank", {})

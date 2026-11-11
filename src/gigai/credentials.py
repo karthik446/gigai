@@ -54,8 +54,22 @@ def reference_is_available(reference: CredentialReference) -> bool | None:
     return None
 
 
+def alias_env_name(env: str, alias: str) -> str:
+    """The environment variable a ``[[keys]] alias`` names: ``<ENV>_<ALIAS>`` (alias upper-cased, ``-`` to ``_``).
+
+    A gig's manifest alias (``^[a-z][a-z0-9_-]*$``) ``scout`` on ``OPENROUTER_API_KEY`` is ``OPENROUTER_API_KEY_SCOUT``.
+    The alias key lives beside the shared one in the environment or the secrets store, under this name.
+    """
+
+    if not LOGICAL_NAME.fullmatch(alias):
+        raise CredentialReferenceError("key aliases must use lowercase letters, digits, '_' or '-'")
+    if not ENVIRONMENT_NAME.fullmatch(env):
+        raise CredentialReferenceError(f"key alias {alias!r} needs an environment variable name, not {env!r}")
+    return f"{env}_{alias.upper().replace('-', '_')}"
+
+
 def resolve_reference_value(
-    reference: CredentialReference, *, home_root: Path | None = None
+    reference: CredentialReference, *, home_root: Path | None = None, alias: str | None = None
 ) -> str:
     """Resolve one credential only at the runtime adapter boundary.
 
@@ -64,6 +78,11 @@ def resolve_reference_value(
     default home, regardless of what the caller resolved ``--home`` to).
     Omitting it keeps today's behavior (env, then the default home). The
     environment variable still wins either way.
+
+    ``alias`` (P12, a gig's ``[[keys]] alias``) looks for the per-gig key
+    first -- :func:`alias_env_name` in the environment, then in the secrets
+    store -- and only then for the shared key in today's order. Without an
+    alias nothing changes.
 
     The value must remain transient and must never be returned to a domain,
     configuration, diagnostic, or serialization caller.
@@ -75,9 +94,14 @@ def resolve_reference_value(
             f"credential {reference.name!r} uses {reference.kind!r}, which is not "
             "available to the local G11 runtime resolver"
         )
-    value = os.environ.get(reference.reference) or secrets_store.get(
-        reference.reference, home_root=home_root
-    )
+    value = None
+    if alias is not None:
+        aliased = alias_env_name(reference.reference, alias)
+        value = os.environ.get(aliased) or secrets_store.get(aliased, home_root=home_root)
+    if not value:
+        value = os.environ.get(reference.reference) or secrets_store.get(
+            reference.reference, home_root=home_root
+        )
     if not value:
         raise CredentialUnavailableError(
             f"credential {reference.name!r} is not available in its configured environment reference"
@@ -88,6 +112,7 @@ def resolve_reference_value(
 __all__ = [
     "CredentialReferenceError",
     "CredentialUnavailableError",
+    "alias_env_name",
     "reference_is_available",
     "resolve_reference_value",
     "validate_reference",

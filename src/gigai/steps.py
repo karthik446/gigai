@@ -422,7 +422,10 @@ def step_verbs(verbs: Mapping[str, click.Command]) -> dict[str, click.Command]:
 
         overrides, folder = _overrides(ctx), str(gig_folder(ctx.home, ctx.name))
         if as_json:
-            click.echo(json.dumps({"gig": ctx.name, "folder": folder, "step_overrides": overrides}, indent=2, sort_keys=True))
+            from .sdk.budget import status_fields
+
+            payload = {"gig": ctx.name, "folder": folder, "step_overrides": overrides, **status_fields(ctx.home, ctx.name, ctx.manifest)}
+            click.echo(json.dumps(payload, indent=2, sort_keys=True))
             return
         click.echo(f"gig folder: {folder}")
         click.echo("".join(f"step override: {step} -> {target}\n" for step, target in overrides.items()) or "step overrides: none\n", nl=False)

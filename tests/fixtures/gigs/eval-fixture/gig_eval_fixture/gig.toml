@@ -12,6 +12,15 @@ provides = ["answer", "replay", "note", "ask"]
 name = "notes"
 engine = "sqlite"
 
+# P12: a per-gig key alias with a spend cap, so `status --json` shows `budget` and `keys` and `ctx.budget` has caps.
+# Nothing in this fixture resolves the key (its targets are deterministic).
+[[keys]]
+service = "openrouter"
+env = "OPENROUTER_API_KEY"
+required = false
+alias = "eval-fixture"
+spend_cap = { usd_per_day = 1.0, usd_per_run = 0.25, calls_per_day = 20 }
+
 # BK2: `ctx.model(step)` binds each step to a config.toml model target; the deterministic targets
 # answer from responses.json["<target id>"].
 [steps.answer]

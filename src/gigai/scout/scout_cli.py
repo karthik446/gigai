@@ -1248,6 +1248,16 @@ def stop_command(target_value: Path | None, home_value: Path | None, as_json: bo
     click.echo("Stopped Scout." if stopped else "Scout was not running.")
 
 
+def _scout_manifest() -> dict[str, object]:
+    """Scout's own ``gig.toml`` (the ``[[keys]]`` rows `status --json` reports), parsed here; no gig code imported."""
+
+    import tomllib
+    from importlib.resources import files
+
+    return tomllib.loads(files("gigai.scout").joinpath("gig.toml").read_text(encoding="utf-8"))
+
+
+
 @scout_group.command("status")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
@@ -1282,6 +1292,11 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
     master_file = resumes_folder.master_file(home_root)
     payload = {"ok": True, **current.to_json(), "resumes_folder": folder.to_json(), "jobs_folder": jobs.to_json(), "master_file": master_file.to_json()}
     payload["legacy_pending"] = legacy
+    if as_json:
+        # P12: the gig's spend caps and `[[keys]]` (gig.toml), as core's `status --json` shows them for any gig.
+        from ..sdk.budget import status_fields
+
+        payload.update(status_fields(home_root, "scout", _scout_manifest()))
     if as_json:
         _emit(payload, True, "")
         return
