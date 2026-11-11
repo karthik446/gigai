@@ -61,3 +61,8 @@ def test_the_unpacked_baseline_home_matches_its_counts_and_points_at_itself(home
         assert registry.execute("PRAGMA user_version").fetchone() == (3,)
         (locator,) = registry.execute("SELECT target_locator FROM projects").fetchone()
     assert locator == str(home_0_1_11_13 / "scout")
+
+
+def test_unpacking_the_baseline_leaves_no_apple_double_files(home_0_1_11_13: Path) -> None:
+    # Fails on a Linux runner (GNU tar) if the unpack extracts the `._*` entries the macOS-built tarball carries.
+    assert sorted(path.name for path in home_0_1_11_13.rglob("._*")) == []

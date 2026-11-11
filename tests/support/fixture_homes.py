@@ -151,7 +151,9 @@ def unpack_home(tarball: Path, dest: Path) -> Path:
 
     dest.mkdir(parents=True)
     dest = dest.resolve()
-    subprocess.run(["tar", "--zstd", "-xf", str(tarball), "-C", str(dest)], check=True)
+    # The tarball was packed by macOS tar and carries AppleDouble `._*` entries beside every file (bsdtar hides them
+    # on a Mac; GNU tar on a Linux runner extracts them as real files, and the workpad then looks corrupt).
+    subprocess.run(["tar", "--zstd", "--exclude=._*", "-xf", str(tarball), "-C", str(dest)], check=True)
     relocate(dest, HOME_TOKEN, str(dest))
     return dest
 

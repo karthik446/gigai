@@ -96,7 +96,7 @@ if tar --version 2>/dev/null | grep -q 'GNU tar'; then
 else
   owner=(--uid 0 --gid 0 --uname '' --gname '' -n)
 fi
-tar --zstd -cf "$OUT/$VERSION.tar.zst.tmp" "${owner[@]}" -C "$H" -T "$HOME/pack.list"
+COPYFILE_DISABLE=1 tar --zstd -cf "$OUT/$VERSION.tar.zst.tmp" "${owner[@]}" -C "$H" -T "$HOME/pack.list"
 mv "$OUT/$VERSION.tar.zst.tmp" "$OUT/$VERSION.tar.zst"
 
 echo "tarball: tests/fixtures/homes/$VERSION.tar.zst ($(wc -c < "$OUT/$VERSION.tar.zst" | tr -d ' ') bytes, $(wc -l < "$HOME/pack.list" | tr -d ' ') entries)"
