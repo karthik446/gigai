@@ -6,13 +6,16 @@ import functools
 import json
 import os
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 from pathlib import Path
 import sys
 from dataclasses import replace
 import webbrowser
 
 import click
-import questionary
+
+if TYPE_CHECKING:
+    import questionary
 
 from .config import (
     NO_EDITOR_NOTICE,
@@ -1812,7 +1815,18 @@ def _display_runtime_version(value: str) -> str:
     return value
 
 
+def __getattr__(name: str):
+    # `questionary` pulls in prompt_toolkit (about 30 ms); only the interactive prompts below need it.
+    if name == "questionary":
+        import questionary
+
+        return questionary
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def _setup_prompt_style() -> questionary.Style:
+    import questionary
+
     return questionary.Style(
         [
             ("qmark", "fg:#35c9ff bold"),
@@ -1836,6 +1850,8 @@ def _setup_text_prompt(
         is_tty = sys.stdin.isatty()
     if not is_tty:
         return click.prompt(label, default=default, show_default=True)
+    import questionary
+
     answer = questionary.text(
         label + ":",
         default="",
@@ -1851,6 +1867,8 @@ def _setup_text_prompt(
 def _setup_confirm(label: str, *, default: bool) -> bool:
     if not sys.stdin.isatty():
         return click.confirm(label, default=default)
+    import questionary
+
     answer = questionary.confirm(
         label,
         default=default,
@@ -1874,6 +1892,8 @@ def _select_terminal_create_target(
 
     def one_runtime(values: list[str]) -> bool | str:
         return True if len(values) == 1 else "Choose exactly one Gig creation runtime."
+
+    import questionary
 
     answer = questionary.checkbox(
         "Select Gig creation runtime",
