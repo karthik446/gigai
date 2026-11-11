@@ -10,6 +10,7 @@ Nothing here imports a gig except ``gig check <name>`` items 4-6, which must loa
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -186,8 +187,8 @@ def _result_line(result: Result) -> str:
 
 
 def _resolve(target: str) -> tuple[InstalledGig | None, dict[str, Any] | None, Path | None]:
-    """An installed gig by name, or a manifest file (mapped back to its installed gig when it is one's manifest); a
-    directory stands for the one ``gig.toml`` in it, in a package folder below it, or below its ``src/``."""
+    """An installed gig by name (or distribution name), or a manifest file (mapped back to its installed gig when it is
+    one's manifest); a directory stands for the one ``gig.toml`` in it, in a package folder below it, or below its ``src/``."""
 
     path = Path(target)
     if path.is_dir():
@@ -202,10 +203,17 @@ def _resolve(target: str) -> tuple[InstalledGig | None, dict[str, Any] | None, P
             return None, gig_manifest.read_manifest_file(path), path
         except ManifestError as exc:
             raise click.ClickException(str(exc)) from exc
-    matches = [gig for gig in gig_manifest.discover() if gig.name == target]
+    discovered = gig_manifest.discover()
+    matches = [gig for gig in discovered if gig.name == target]
+    if not matches:  # the distribution name works too (`gig check gigai-eval-book`), as it does for update and uninstall
+        matches = [gig for gig in discovered if gig.dist and _normalized(gig.dist) == _normalized(target)]
     if not matches:
         raise click.ClickException(f"no installed gig named {target!r}; `gigai gig list` shows the installed gigs")
     return matches[0], None, None
+
+
+def _normalized(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def _project_manifest(directory: Path) -> Path:

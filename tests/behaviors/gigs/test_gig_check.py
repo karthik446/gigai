@@ -326,6 +326,15 @@ def test_an_executable_gig_whose_describe_differs_fails_item_6(tmp_path: Path, s
     assert "FAIL     6  `describe` JSON differs from gig.toml" in result.stdout
 
 
+def test_a_gig_is_checked_by_its_distribution_name_too(tmp_path: Path, site: Path) -> None:
+    _add_tidy(site)
+
+    result = _run(tmp_path, site, "gig", "check", "Gigai_Test.Tidy")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[0] == "gigai gig check tidy (gigai-test-tidy)"
+
+
 def test_checking_an_unknown_gig_names_it(tmp_path: Path, site: Path) -> None:
     result = _run(tmp_path, site, "gig", "check", "nope")
 
