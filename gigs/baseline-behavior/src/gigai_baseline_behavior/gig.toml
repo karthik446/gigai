@@ -2,7 +2,7 @@
 manifest_format = 1
 name = "baseline-behavior"
 description = "Capture what an HTTP service answers today as snapshots, diff two snapshots, report"
-core = ">=0.2,<0.3"
+core = ">=0.2,<0.4"
 
 [commands]
 group = "gigai_baseline_behavior.cli:baseline_behavior"

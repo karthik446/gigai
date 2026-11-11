@@ -8,7 +8,7 @@ manifest_format = 1
 name = "scout"
 # The `gigai --help` line of 0.1.11.13's `scout` group (scout_cli.py `scout_group` help), byte for byte.
 description = "Install and configure the Scout gig for this project."
-core = ">=0.2,<0.3"
+core = ">=0.2,<0.4"
 
 [commands]
 group = "gigai.scout.gig:cli"

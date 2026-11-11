@@ -9,7 +9,7 @@
 manifest_format = 1
 name = "baseline-behavior"
 description = "Capture a system's current behaviour, draft characterization tests from it, run and diff them"
-core = ">=0.2,<0.3"
+core = ">=0.2,<0.4"
 
 [commands]
 group = "gigai_baseline_behavior.cli:baseline_behavior"

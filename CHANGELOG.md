@@ -46,7 +46,8 @@ additive: nothing in your data changes.
 - **A limit per click.** `gigai <gig> steps set <step> --cap-usd 0.05` caps what one call of a step may cost. GigAI
   estimates the cost from a price table kept at `<home>/prices.json` (fetched from OpenRouter's model list the first
   time it is needed and flagged as stale after seven days) and refuses a call whose estimate is over the cap, saying
-  `estimated $0.06 > cap $0.05` and making no call. A stored call now carries its cost when the provider reports
+  `estimated $0.06 > cap $0.05` and making no call. The cap is kept in `<home>/gigs/<gig>/caps.toml`, beside
+  `steps.toml`, which keeps only the model targets. A stored call now carries its cost when the provider reports
   it, or `unavailable` with the estimate for a command-line model.
 - **Ablations.** `gigai <gig> eval ablate --axis temperature --design ofat --prereg <file>` runs one factor at a time
   (or `--design l9`, nine runs for four three-level factors) over a model's settings, prompt variants, few-shot
@@ -65,12 +66,15 @@ additive: nothing in your data changes.
 
 - `eval list` shows whether a judge is validated.
 - `eval run` refuses a capped step whose output alone would exceed its cap, before the first call.
+- **Gigs made by `gigai gig new`, the `baseline-behavior` gig and Scout accept GigAI 0.3.** Their declared range was
+  `>=0.2,<0.3`, which refused them on this release; it is now `>=0.2,<0.4`. A gig you made earlier with that range
+  needs the same one-line change in its `gig.toml` and `pyproject.toml`.
 
 #### Upgrade notes
 
 - Additive: no database migration and no `config.toml` change. A gig with no `alias` or `spend_cap` behaves as
-  before. Rollback is `uv tool install --reinstall gigai==0.2.0`; spend files and stored prices stay in place and
-  are ignored by the older version.
+  before. Rollback is `uv tool install --reinstall gigai==0.2.0`; spend files, `caps.toml` and stored prices stay in
+  place and are ignored by the older version, and `steps` and `ctx.model` keep working.
 - Three axes (`reasoning_effort`, `max_output_tokens`, `timeout`) cannot be ablated yet; they need request fields the
   model port does not carry.
 - The existing `gigai gigs`, `gigai gig use` and top-level Scout aliases keep their deprecation lines.

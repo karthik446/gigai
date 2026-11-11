@@ -153,17 +153,31 @@ def _outcomes(stdout: str) -> dict[str, set[str]]:
     return found
 
 
+def test_every_core_range_a_release_ships_admits_the_installed_core(scaffold: Path) -> None:
+    """0.3.0 once scaffolded gigs that needed ``<0.3``: the scaffold, Scout and baseline-behavior must run on this core."""
+
+    installed = gig_manifest.installed_core_version()
+    repo = Path(__file__).resolve().parents[3]
+    for path in (
+        scaffold / "src" / "gigai_demo" / "gig.toml",
+        repo / "src" / "gigai" / "scout" / "gig.toml",
+        repo / "gigs" / "baseline-behavior" / "src" / "gigai_baseline_behavior" / "gig.toml",
+    ):
+        core = tomllib.loads(path.read_text(encoding="utf-8"))["gig"]["core"]
+        assert gig_manifest.core_problem(core, installed) is None, (path, core, installed)
+
+
 def test_the_default_tree_is_the_scaffold_with_its_pins(scaffold: Path) -> None:
     assert _files(scaffold) == DEFAULT_FILES
     manifest = _manifest(scaffold)
     assert gig_manifest.manifest_errors(manifest) == []
     assert manifest["gig"]["name"] == "demo"
-    assert manifest["gig"]["core"] == ">=0.2,<0.3"
+    assert manifest["gig"]["core"] == ">=0.2,<0.4"
     assert manifest["commands"] == {"group": "gigai_demo.cli:demo", "provides": ["capture", "show"]}
     assert "server" not in manifest
     pyproject = tomllib.loads((scaffold / "pyproject.toml").read_text(encoding="utf-8"))
     assert pyproject["project"]["name"] == "gigai-demo"
-    assert "gigai>=0.2.0a1,<0.3" in pyproject["project"]["dependencies"]
+    assert "gigai>=0.2.0a1,<0.4" in pyproject["project"]["dependencies"]
     assert pyproject["project"]["entry-points"] == {"gigai.gigs": {"demo": "gigai_demo.cli:demo"}}
     assert pyproject["project"]["requires-python"] == manifest["dependencies"]["python"]
     assert pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["src/gigai_demo"]

@@ -101,12 +101,12 @@ def test_it_keeps_the_scaffold_pins_and_no_workpad() -> None:
     pyproject = tomllib.loads((GIG / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     assert gig_manifest.manifest_errors(manifest) == []
     assert manifest["gig"]["name"] == "baseline-behavior"
-    assert manifest["gig"]["core"] == ">=0.2,<0.3"
+    assert manifest["gig"]["core"] == ">=0.2,<0.4"
     assert "workpad" not in manifest["gig"]
     assert manifest["commands"]["provides"] == ["init", "capture", "diff", "report", "generate-tests"]
     assert manifest["data"]["stores"] == [{"name": "baseline", "engine": "sqlite"}]
     assert pyproject["name"] == "gigai-baseline-behavior"
-    assert pyproject["dependencies"] == ["gigai>=0.2.0a1,<0.3", "click>=8"]
+    assert pyproject["dependencies"] == ["gigai>=0.2.0a1,<0.4", "click>=8"]
     assert pyproject["entry-points"] == {"gigai.gigs": {"baseline-behavior": "gigai_baseline_behavior.cli:baseline_behavior"}}
     assert pyproject["description"] == manifest["gig"]["description"]
     assert workpad_mentions(GIG) == []

@@ -94,13 +94,13 @@ The tree it writes, for `hello`:
 
 ```
 gigai-hello/
-  pyproject.toml          # dist gigai-hello, depends on gigai>=0.2.0a1,<0.3, entry point gigai.gigs: hello
+  pyproject.toml          # dist gigai-hello, depends on gigai>=0.2.0a1,<0.4, entry point gigai.gigs: hello
   README.md
   AGENTS.md               # the rules for a coding agent working on the gig
   src/gigai_hello/
     __init__.py
     cli.py                # the Click group mounted as `gigai hello`: capture, show
-    gig.toml              # the manifest: [gig] core = ">=0.2,<0.3", commands, config, data, docs
+    gig.toml              # the manifest: [gig] core = ">=0.2,<0.4", commands, config, data, docs
     config.schema.json    # validates [config.defaults]
     docs/index.md         # the gig's page
     docs/commands.yaml    # the gig's CLI manual (JSON)

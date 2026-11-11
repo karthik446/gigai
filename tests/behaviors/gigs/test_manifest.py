@@ -140,13 +140,13 @@ def test_a_malformed_core_range_raises(core: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("installed", "status"), [("0.2.0a1", "ok"), ("0.2.0a2", "ok"), ("0.3.0a1", "incompatible")]
+    ("installed", "status"), [("0.2.0a1", "ok"), ("0.2.0a2", "ok"), ("0.3.0", "ok"), ("0.4.0a1", "incompatible")]
 )
 def test_gig_list_status_follows_the_installed_core(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, installed: str, status: str
 ) -> None:
     site = tmp_path / "site"
-    _add_gig(site, "ranged", _manifest("ranged", ">=0.2,<0.3"))
+    _add_gig(site, "ranged", _manifest("ranged", ">=0.2,<0.4"))
     monkeypatch.syspath_prepend(str(site))
     monkeypatch.setattr(gig_manifest, "installed_core_version", lambda: installed)
 

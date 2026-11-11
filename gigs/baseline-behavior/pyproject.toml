@@ -7,7 +7,7 @@ name = "gigai-baseline-behavior"
 version = "0.1.0"
 description = "Capture what an HTTP service answers today as snapshots, diff two snapshots, report"
 requires-python = ">=3.11"
-dependencies = ["gigai>=0.2.0a1,<0.3", "click>=8"]
+dependencies = ["gigai>=0.2.0a1,<0.4", "click>=8"]
 
 [project.entry-points."gigai.gigs"]
 baseline-behavior = "gigai_baseline_behavior.cli:baseline_behavior"

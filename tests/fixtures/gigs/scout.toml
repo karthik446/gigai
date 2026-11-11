@@ -7,7 +7,7 @@
 manifest_format = 1
 name = "scout"
 description = "Job search: find, assess, tailor, track applications; local server + UI"
-core = ">=0.2,<0.3"
+core = ">=0.2,<0.4"
 
 [commands]
 group = "gigai_scout.cli:scout"   # today: gigai.scout.scout_cli (22 subcommands, scout_cli.py:203)
