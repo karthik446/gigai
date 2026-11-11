@@ -206,20 +206,34 @@ def execute(
     max_calls: int | None = None,
     tag: str | None = None,
     settings: Mapping[str, Any] | None = None,
+    template: str | None = None,
+    prereg: records.Prereg | None = None,
+    targets: Mapping[str, str] | None = None,
+    max_paid_calls: int | None = None,
 ) -> list[str]:
-    """``eval run --step step_id --suite suite``; returns the summary lines."""
+    """``eval run --step step_id --suite suite``; returns the summary lines.
+
+    ``template`` replaces the step's prompt file and ``prereg`` the gate's pre-registration (``eval ablate`` passes
+    the registered prompt variant and the ablation's prereg block); ``settings["schema"]`` stands in for the item's
+    ``expected.schema`` when the item has none. ``targets`` binds steps (the step, its judge) to target names for
+    this run only, over ``steps.toml``; the judge check, the caps and the settings check see the moved target.
+    ``max_paid_calls`` caps the calls on non-deterministic targets alone (``eval ablate --max-calls``), the gate's
+    ``max_calls`` when it is lower.
+    """
 
     entry = _entry(gig, step_id)
     scorers = [resolve_scorer(name) for name in entry.get("scorers") or ()]
     gate = next((g for g in (entry.get("gates") or {}).values() if isinstance(g, dict) and g.get("suite") == suite), {})
     repeats = k or gate.get("k") or 1
-    targets = _targets(gig, _called_steps(step_id, scorers))
+    moved = dict(targets or {})
+    bound = _targets(gig, _called_steps(step_id, scorers), moved)
     budget_cap = getattr(getattr(gig, "budget", None), "max_calls", None)
     caps = [cap for cap in (max_calls, budget_cap) if isinstance(cap, int)]
+    paid_caps = [cap for cap in (gate.get("max_calls"), max_paid_calls) if isinstance(cap, int)]
     calls = CallBudget(
         min(caps) if caps else None,
-        gate.get("max_calls"),
-        {name: target.adapter == "deterministic" for name, target in targets.items()},
+        min(paid_caps) if paid_caps else None,
+        {name: target.adapter == "deterministic" for name, target in bound.items()},
     )
     paid = sorted(name for name, deterministic in calls.deterministic.items() if not deterministic)
     if suite in ("release", "upgrade") and paid and calls.max_calls is None and calls.paid_cap is None:
@@ -227,22 +241,22 @@ def execute(
             f"the {suite} suite has no call cap for step(s) {', '.join(paid)} on a non-deterministic target:"
             f" pass --max-calls N (or give the step {'an' if suite == 'upgrade' else 'a'} {suite} gate with max_calls)"
         )
+    _check_caps(gig, bound)
     data = load_suite(gig, entry, suite)
-    template = _template(gig, entry)
+    template = _template(gig, entry) if template is None else template
     postprocess = _import(entry["postprocess"], "postprocess") if entry.get("postprocess") else None
     # Every prompt and request is built and checked before the run row exists, so a refusal leaves no empty run.
     planned = []
     for item_id, row in data.rows.items():
         prompt = _render(template, row, step_id)
-    _check_caps(gig, targets)
         planned.append((item_id, row, prompt, {**(settings or {}), **_schema_settings(row, settings or {}, prompt)}))
-    _check_settings(targets, step_id, [call_settings for *_, call_settings in planned])
+    _check_settings(bound, step_id, [call_settings for *_, call_settings in planned])
     run = records.RunRecord(
         run_id=records.new_id("run"),
         gig=gig.name,
         manifest_digest=_manifest_digest(gig),
         dataset=data.record,
-        prereg=_prereg(gate, len(data.rows) * repeats),
+        prereg=_prereg(gate, len(data.rows) * repeats) if prereg is None else prereg,
         step_id=step_id,
         suite=suite,
         tag=tag,
@@ -252,7 +266,7 @@ def execute(
     try:
         for spec in scorers:
             if spec.judge_step is not None:
-                check_judge(connection, gig, spec, targets[spec.judge_step].id)
+                check_judge(connection, gig, spec, bound[spec.judge_step].id)
         records.write_run(connection, run)
         try:
             for item_id, row, prompt, call_settings in planned:
@@ -267,10 +281,11 @@ def execute(
                         repeat_index=repeat,
                         postprocess=_guarded(postprocess, prompt, row),
                         **call_settings,
+                        **_moved(moved, step_id),
                     )
 
             def ask(judge_step: str, prompt: str, item: records.ItemRef, repeat_index: int, private: Sequence[object]) -> None:
-                calls.call(gig, judge_step, prompt, private=private, run=run, item=item, repeat_index=repeat_index)
+                calls.call(gig, judge_step, prompt, private=private, run=run, item=item, repeat_index=repeat_index, **_moved(moved, judge_step))
 
             metrics = score_run(connection, run.run_id, step_id, scorers, data.rows, ask=ask)
         finally:
@@ -551,6 +566,8 @@ def _schema_settings(row: Mapping[str, Any], settings: Mapping[str, Any], prompt
         return {}
     expected = row.get("expected")
     schema = expected.get("schema") if isinstance(expected, dict) else None
+    if schema is None:
+        schema = settings.get("schema")
     if not isinstance(schema, dict):
         raise RunRefused(f"input {_input_sha(prompt)} asks for schema output but its item has no expected.schema")
     return {"output_mode": "schema", "schema": schema}
@@ -565,27 +582,27 @@ def _called_steps(step_id: str, scorers: Sequence[ScorerSpec]) -> list[str]:
     return [step_id, *sorted({spec.judge_step for spec in scorers if spec.judge_step is not None})]
 
 
-def _targets(gig: GigContext, step_ids: Sequence[str]) -> dict[str, Target]:
-    """The model target of each step in ``step_ids``; a step or target the config cannot resolve is a refusal."""
+def _moved(moved: Mapping[str, str], step_id: str) -> dict[str, str]:
+    """The ``target=`` call argument when ``execute(targets=)`` moved ``step_id``; nothing otherwise."""
+
+    return {"target": moved[step_id]} if step_id in moved else {}
+
+
+def _targets(gig: GigContext, step_ids: Sequence[str], moved: Mapping[str, str] | None = None) -> dict[str, Target]:
+    """The model target of each step in ``step_ids`` (``moved`` names override per step); a step or target the
+    config cannot resolve is a refusal."""
 
     from ..config import ConfigurationError, load_config
 
     try:
         config = load_config(gig.home)
-        return {name: resolve_target(gig.home, gig.name, gig.manifest, name, config) for name in step_ids}
+        return {
+            name: resolve_target(gig.home, gig.name, gig.manifest, name, config, target_id=(moved or {}).get(name)) for name in step_ids
+        }
     except (StepTargetError, ConfigurationError, KeyError) as exc:
         raise RunRefused(_message(exc)) from exc
 
 
-def _check_settings(targets: Mapping[str, Target], step_id: str, call_settings: Sequence[Mapping[str, Any]]) -> None:
-    """Refuse, before any call, a request setting a target cannot carry (``steps.call`` checks the same per call)."""
-
-    try:
-        for settings in call_settings:
-            check_settings(targets[step_id], {**targets[step_id].settings, **settings})
-        for name, target in targets.items():
-            if name != step_id:
-                check_settings(target, target.settings)
 def _check_caps(gig: GigContext, targets: Mapping[str, Target]) -> None:
     """BK3: refuse, before any call and before the run row, a capped step whose output alone (``max_output_tokens``
     at the completion price, no input) is already over its ``cap_usd``, or whose price is unknown; ``steps.call``
@@ -606,6 +623,15 @@ def _check_caps(gig: GigContext, targets: Mapping[str, Target]) -> None:
             raise RunRefused(str(exc)) from exc
 
 
+def _check_settings(targets: Mapping[str, Target], step_id: str, call_settings: Sequence[Mapping[str, Any]]) -> None:
+    """Refuse, before any call, a request setting a target cannot carry (``steps.call`` checks the same per call)."""
+
+    try:
+        for settings in call_settings:
+            check_settings(targets[step_id], {**targets[step_id].settings, **settings})
+        for name, target in targets.items():
+            if name != step_id:
+                check_settings(target, target.settings)
     except StepTargetError as exc:
         raise RunRefused(str(exc)) from exc
 

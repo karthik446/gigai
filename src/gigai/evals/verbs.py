@@ -23,6 +23,7 @@ EVAL_VERBS: dict[str, str] = {
     "label": "gigai.evals.label:label_command",
     "report": "gigai.evals.report:report_command",
     "base": "gigai.evals.base:base_command",
+    "ablate": "gigai.evals.ablate:ablate_command",
 }
 
 

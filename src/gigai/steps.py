@@ -8,7 +8,9 @@ A gig calls a model by step id, ``ctx.model("judge", text)``. ``resolve_target``
 3. the ``default`` profile's target for the role ``[steps].<id>.role``, or for the step id itself when it is a profile
    role (reviewer and verifier fall back to critic and adjudicator, researcher and gig_creator to planner).
 
-Any other step id is a ``KeyError`` naming the manifest field. A call's request settings are the manifest's
+Any other step id is a ``KeyError`` naming the manifest field. A call's ``settings["target"]`` names the target for
+that one call (``eval ablate`` moves a step's model per run; nothing is written to ``steps.toml``), over all three.
+A call's request settings are the manifest's
 ``[steps].<id>.settings`` under the call's keyword arguments. A claude/codex CLI target carries only ``system``,
 ``output_mode`` and ``schema``, so any other setting (temperature, tools, logprobs, ...) is a ``StepTargetError``,
 both at ``steps set`` time and at call time, before any model call.
@@ -221,8 +223,11 @@ def _manifest_cap(step_id: str, step: Mapping[str, Any]) -> float | None:
         raise StepTargetError(f"step {step_id!r}: {exc}") from exc
 
 
-def resolve_target(home: Path, gig: str, manifest: Mapping[str, Any], step_id: str, config: GigAIConfig) -> Target:
-    """The model target step ``step_id`` of ``gig`` calls (the order is in the module docstring)."""
+def resolve_target(
+    home: Path, gig: str, manifest: Mapping[str, Any], step_id: str, config: GigAIConfig, *, target_id: str | None = None
+) -> Target:
+    """The model target step ``step_id`` of ``gig`` calls (the order is in the module docstring); ``target_id`` is a
+    per-call override over that order."""
 
     declared = _declared(manifest)
     if step_id not in declared and step_id not in ROLES:
@@ -231,7 +236,7 @@ def resolve_target(home: Path, gig: str, manifest: Mapping[str, Any], step_id: s
     settings = dict(step.get("settings") or {})
     overrides, caps = _read_steps_file(home, gig)
     cap = caps[step_id] if step_id in caps else _manifest_cap(step_id, step)
-    override = overrides.get(step_id)
+    override = overrides.get(step_id) if target_id is None else target_id
     if override is not None:
         return _target(config, step_id, override, "override", settings, cap)
     if step.get("target"):
@@ -373,7 +378,8 @@ def call(
     """``ctx.model``: resolve, refuse what the target cannot carry, estimate against the cap, reserve, call, settle,
     and trace when ``evals.sqlite`` exists.
 
-    ``settings["cap_usd"]`` is the call's per-click cap (``None``: no cap for this call), over the step's. A
+    ``settings["cap_usd"]`` is the call's per-click cap (``None``: no cap for this call), over the step's;
+    ``settings["target"]`` names the call's target over the step's binding. A
     ``deterministic`` target is free: no estimate, no ledger. Any other target is metered when the call has a cap or
     the gig declares a key: ``ctx.budget.reserve(estimate, cap_usd=cap)`` before the adapter (``BudgetExhausted`` when
     refused; nothing was called) and ``settle`` after it. Only a capped call is estimated (the price table is fetched
@@ -387,8 +393,8 @@ def call(
     from .model_call import invoke_bounded
 
     config = load_config(ctx.home)
-    target = resolve_target(ctx.home, ctx.name, ctx.manifest, step_id, config)
     settings = dict(settings)
+    target = resolve_target(ctx.home, ctx.name, ctx.manifest, step_id, config, target_id=settings.pop("target", None))
     cap = settings.pop("cap_usd", KEEP)
     if cap is KEEP:
         cap = target.cap_usd

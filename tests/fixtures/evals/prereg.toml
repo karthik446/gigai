@@ -1,0 +1,40 @@
+# Pre-registration of the fixture gig's sampling ablation (`gigai eval-fixture eval ablate --prereg this-file`).
+# Every byte of this file is hashed into each run's prereg block; edit it and the next ablation under this id is
+# refused as "pre-registration changed". A changed plan is a new study: give it a new id.
+id = "solve-sampling"
+registered_at = "2026-11-10"
+step = "solve"
+suite = "ci"
+n_planned = 10
+k = 1
+primary_metric = "match"
+alpha = 0.05
+direction = "two-sided"
+
+[axes.temperature]
+levels = [0.0, 0.5, 1.0]
+
+[axes.top_p]
+levels = [0.1, 0.5, 1.0]
+
+[axes.output_mode]
+levels = ["text", "json", "schema"]
+schema = { type = "object", properties = { answer = { type = "string" } } }
+
+[axes.prompt]
+levels = ["prompts/solve.txt", "prompts/solve-terse.txt", "prompts/solve-steps.txt"]
+
+[axes.model]
+levels = ["deterministic-a", "deterministic-b"]
+
+[[comparisons]]
+axis = "temperature"
+levels = [0.0, 0.5]
+
+[[comparisons]]
+axis = "temperature"
+levels = [0.0, 1.0]
+
+[[comparisons]]
+axis = "temperature"
+levels = [0.5, 1.0]
