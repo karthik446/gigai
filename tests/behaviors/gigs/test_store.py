@@ -1,7 +1,7 @@
 """P4s: a gig's stores live in its gig folder `<home>/gigs/<gig>/`, created on the gig's first run.
 
 `ctx.store.db(gig, name)` opens `<home>/gigs/<gig>/<name>.sqlite` for a store the gig declares under
-`[data] stores`; `gigai.sdk.store.migrate` steps the file's own `user_version` and refuses a newer file. Building
+`[data] stores`; `ctx.store.migrate(name, steps)` steps the file's own `user_version` and refuses a newer file. Building
 the `GigContext` (core does it once the gig's own command line parsed) creates the empty gig folder; `--help`,
 completion and `gig list` do not. Gigs are "installed" the way test_loader.py does it; the fixture dists are
 `tests/fixtures/gigs/storegig/` and `tests/fixtures/gigs/nostoregig/`.
@@ -24,7 +24,7 @@ import pytest
 from gigai.gigs.home import GigNameError, gig_folder, resolve_gig_folder
 from gigai.gigs.loader import LazyGig
 from gigai.sdk import GigContext
-from gigai.sdk.store import GigStore, StoreError, StoreVersionError, declared_stores, migrate, set_version, version
+from gigai.sdk.store import GigStore, StoreError, StoreVersionError, declared_stores
 from tests.behaviors.gigs.test_loader import _add_dist, _add_fixture, _run
 from tests.support.fixture_homes import counts, home_0_1_11_13  # noqa: F401 - pytest fixture
 
@@ -65,12 +65,12 @@ def test_a_declared_store_opens_in_the_gig_folder_and_steps_its_version(tmp_path
     assert opened.stdout == f"{store}\n"
     assert _tree(home) == ["gigs", "gigs/storegig", "gigs/storegig/notes.sqlite"]
     assert stat.S_IMODE(store.stat().st_mode) == 0o600
-    assert version(home, store) == 0
+    assert _context(home).store.version("notes") == 0
     for known in (1, 2):
         stepped = _gigai(tmp_path, site, home, "storegig", "migrate", "--known", str(known))
         assert stepped.returncode == 0, stepped.stderr
         assert stepped.stdout == f"version {known}\n"
-        assert version(home, store) == known
+        assert _context(home).store.version("notes") == known
     added = _gigai(tmp_path, site, home, "storegig", "add", "first note")
     assert added.returncode == 0, added.stderr
     with sqlite3.connect(store) as db:
@@ -79,7 +79,7 @@ def test_a_declared_store_opens_in_the_gig_folder_and_steps_its_version(tmp_path
     older = _gigai(tmp_path, site, home, "storegig", "migrate", "--known", "1")
     assert older.returncode == 1
     assert "notes.sqlite is at version 2, newer than version 1 this gig knows" in older.stderr
-    assert version(home, store) == 2
+    assert _context(home).store.version("notes") == 2
     assert _tree(home) == ["gigs", "gigs/storegig", "gigs/storegig/notes.sqlite"]
 
 
@@ -205,11 +205,11 @@ def test_migrate_steps_zero_one_two_and_reruns_as_a_no_op(tmp_path):
     store = _context(tmp_path).store
     store.db("storegig", "notes").close()
     path = store.path("storegig", "notes")
-    assert migrate(tmp_path, path, STEPS[:1]) == 1
-    assert version(tmp_path, path) == 1
-    assert migrate(tmp_path, path, STEPS) == 2
-    assert version(tmp_path, path) == 2
-    assert migrate(tmp_path, path, STEPS) == 2  # nothing left to run: re-running a step would fail on the existing column
+    assert store.migrate("notes", STEPS[:1]) == 1
+    assert store.version("notes") == 1
+    assert store.migrate("notes", STEPS) == 2
+    assert store.version("notes") == 2
+    assert store.migrate("notes", STEPS) == 2  # nothing left to run: re-running a step would fail on the existing column
     with sqlite3.connect(path) as db:
         assert [row[1] for row in db.execute("PRAGMA table_info(notes)")] == ["id", "text", "pinned"]
 
@@ -217,13 +217,12 @@ def test_migrate_steps_zero_one_two_and_reruns_as_a_no_op(tmp_path):
 def test_migrate_refuses_a_file_newer_than_the_gig_knows_and_changes_nothing(tmp_path):
     store = _context(tmp_path).store
     store.db("storegig", "notes").close()
-    path = store.path("storegig", "notes")
-    set_version(tmp_path, path, 3)
+    store.set_version("notes", 3)
     ran = []
     with pytest.raises(StoreVersionError, match="at version 3, newer than version 2 this gig knows"):
-        migrate(tmp_path, path, (ran.append, ran.append))
+        store.migrate("notes", (ran.append, ran.append))
     assert ran == []
-    assert version(tmp_path, path) == 3
+    assert store.version("notes") == 3
 
 
 def test_a_failing_step_rolls_back_with_its_version(tmp_path):
@@ -236,8 +235,8 @@ def test_a_failing_step_rolls_back_with_its_version(tmp_path):
         raise RuntimeError("step 2 failed")
 
     with pytest.raises(RuntimeError, match="step 2 failed"):
-        migrate(tmp_path, path, (STEPS[0], broken))
-    assert version(tmp_path, path) == 1
+        store.migrate("notes", (STEPS[0], broken))
+    assert store.version("notes") == 1
     with sqlite3.connect(path) as db:
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert tables == {"notes"}
@@ -274,20 +273,22 @@ def test_only_the_gigs_own_declared_sqlite_stores_open(tmp_path):
     assert declared_stores({}) == frozenset()
 
 
-def test_the_version_helper_opens_only_existing_gig_store_files(tmp_path):
-    registry = tmp_path / "registry.sqlite"
-    sqlite3.connect(registry).close()
-    for path in (registry, tmp_path / "gigs" / "registry.sqlite", tmp_path / "gigs" / "x" / "notes.db"):
-        with pytest.raises(StoreError, match="not a gig store file"):
-            version(tmp_path, path)
-        with pytest.raises(StoreError, match="not a gig store file"):
-            set_version(tmp_path, path, 1)
-    missing = tmp_path / "gigs" / "storegig" / "notes.sqlite"
-    with pytest.raises(StoreError, match="no store file"):
-        migrate(tmp_path, missing, STEPS)
-    assert not missing.exists()
+def test_the_version_methods_open_only_this_gigs_existing_declared_store_files(tmp_path):
+    # gigai-3hz: the methods take a store name, never a path or a home.
+    sqlite3.connect(tmp_path / "registry.sqlite").close()
+    manifest = {"gig": {"name": "storegig"}, "data": {"stores": [
+        {"name": "notes", "engine": "sqlite"}, {"name": "registry", "engine": "sqlite"},
+    ]}}
+    store = _context(tmp_path, manifest=manifest).store
+    _helpers_refuse(store, "registry", "reserved for core")
+    _helpers_refuse(store, "undeclared", "not declared")
+    for name in ("../registry", "notes.sqlite", ""):
+        with pytest.raises(GigNameError):
+            store.version(name)
+    _helpers_refuse(store, "notes", "no store file")
+    assert not (tmp_path / "gigs").exists()
     with pytest.raises(ValueError, match="invalid store version"):
-        set_version(tmp_path, missing, -1)
+        store.set_version("notes", -1)
 
 
 def _sqlite_at(path: Path, user_version: int) -> Path:
@@ -297,28 +298,34 @@ def _sqlite_at(path: Path, user_version: int) -> Path:
     return path
 
 
-def _helpers_refuse(home: Path, path: Path, match: str) -> None:
+def _helpers_refuse(store: GigStore, name: str, match: str) -> None:
     with pytest.raises(StoreError, match=match):
-        version(home, path)
+        store.version(name)
     with pytest.raises(StoreError, match=match):
-        set_version(home, path, 9)
+        store.set_version(name, 9)
     with pytest.raises(StoreError, match=match):
-        migrate(home, path, STEPS * 5)
+        store.migrate(name, STEPS * 5)
 
 
-def test_a_0_1_11_13_workpad_state_file_and_another_homes_store_are_refused(tmp_path):
+def test_a_0_1_11_13_workpad_state_file_and_another_gigs_or_homes_store_are_out_of_reach(tmp_path):
+    # gigai-3hz (P4s re-check R1/R2): a workpad state file, another gig's store and another home's store.
     home = tmp_path / "home"
-    # Shaped like a gig store (`.../gigs/<a>/<b>.sqlite`), but it is core's and Scout's workpad file.
     state = _sqlite_at(home / "workpads" / "projects" / "p1" / "gigs" / "gig_0a1b2c3d" / "state.sqlite", 3)
-    _helpers_refuse(home, state, "not a gig store file")
+    store = _context(home).store
+    _helpers_refuse(store, "state", "not declared")
+    other_gig = _context(home, "othergig").store
+    other_gig.db("othergig", "notes").close()
+    other_gig.set_version("notes", 5)
+    _helpers_refuse(store, "notes", "no store file")  # storegig's own notes, not othergig's
+    assert other_gig.version("notes") == 5
     other = tmp_path / "other-home"
     other_store = _context(other).store
     other_store.db("storegig", "notes").close()
-    _helpers_refuse(home, other_store.path("storegig", "notes"), "not a gig store file")
-    assert version(other, other_store.path("storegig", "notes")) == 0
+    _helpers_refuse(store, "notes", "no store file")
+    assert other_store.version("notes") == 0
     with sqlite3.connect(state) as db:
         assert db.execute("PRAGMA user_version").fetchone() == (3,)
-    assert not (home / "gigs").exists()
+    assert _tree(home / "gigs") == ["othergig", "othergig/notes.sqlite"]
 
 
 def test_symlinks_in_the_gig_folder_are_refused(tmp_path):
@@ -329,14 +336,13 @@ def test_symlinks_in_the_gig_folder_are_refused(tmp_path):
     # A store file that is a symlink to registry.sqlite.
     link = home / "gigs" / "storegig" / "notes.sqlite"
     link.symlink_to(registry)
-    _helpers_refuse(home, link, "refusing a symlink in the gig folder")
+    _helpers_refuse(store, "notes", "refusing a symlink in the gig folder")
     with pytest.raises(StoreError, match="refusing a symlink in the gig folder"):
         store.db("storegig", "notes")
     # A gig folder that is a symlink to the home.
     _sqlite_at(home / "notes.sqlite", 4)
     (home / "gigs" / "viahome").symlink_to(home)
-    _helpers_refuse(home, home / "gigs" / "viahome" / "notes.sqlite", "refusing a symlink in the gig folder")
-    _helpers_refuse(home, home / "gigs" / "viahome" / "registry.sqlite", "not a gig store file")
+    _helpers_refuse(_context(home, "viahome").store, "notes", "refusing a symlink in the gig folder")
     with pytest.raises(StoreError, match="refusing a symlink in the gig folder"):
         _context(home, "viahome").store.db("viahome", "notes")
     # A `gigs` folder that is a symlink.
@@ -345,7 +351,7 @@ def test_symlinks_in_the_gig_folder_are_refused(tmp_path):
     linked_home = tmp_path / "linked-home"
     linked_home.mkdir()
     (linked_home / "gigs").symlink_to(elsewhere / "gigs")
-    _helpers_refuse(linked_home, linked_home / "gigs" / "storegig" / "notes.sqlite", "refusing a symlink")
+    _helpers_refuse(_context(linked_home).store, "notes", "refusing a symlink")
     with pytest.raises(StoreError, match="refusing a symlink"):
         _context(linked_home).store.db("storegig", "notes")
     with sqlite3.connect(registry) as db:
@@ -385,7 +391,7 @@ def test_two_runs_at_once_apply_each_step_once(tmp_path):
 
     def run() -> None:
         try:
-            results.append(migrate(tmp_path, path, (step_0, step_1)))
+            results.append(store.migrate("notes", (step_0, step_1)))
         except BaseException as exc:  # noqa: BLE001 - reported by the assertion below
             results.append(exc)
 
@@ -402,7 +408,7 @@ def test_two_runs_at_once_apply_each_step_once(tmp_path):
     assert sorted(ran) == ["0", "1"]
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT text FROM notes").fetchall() == [("from step 0",), ("from step 1",)]
-    assert version(tmp_path, path) == 2
+    assert store.version("notes") == 2
 
 
 @pytest.mark.parametrize("step", [
@@ -412,10 +418,9 @@ def test_two_runs_at_once_apply_each_step_once(tmp_path):
 def test_a_step_that_ends_the_transaction_itself_is_an_error(tmp_path, step):
     store = _context(tmp_path).store
     store.db("storegig", "notes").close()
-    path = store.path("storegig", "notes")
     with pytest.raises(StoreError, match="a step committed on its own"):
-        migrate(tmp_path, path, (step,))
-    assert version(tmp_path, path) == 0
+        store.migrate("notes", (step,))
+    assert store.version("notes") == 0
 
 
 def test_a_fixture_gig_run_leaves_the_0_1_11_13_home_as_it_was(tmp_path, site, home_0_1_11_13):

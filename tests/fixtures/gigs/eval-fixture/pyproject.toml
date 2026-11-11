@@ -1,0 +1,17 @@
+# Test-only gig (V1 eval store tests): one [evals] step `answer` over a 6-row synthetic dataset, answered by the
+# deterministic adapter from the gig's own response table. Never published.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gigai-test-gig-eval-fixture"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["click>=8"]
+
+[project.entry-points."gigai.gigs"]
+eval-fixture = "gig_eval_fixture:eval_fixture"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gig_eval_fixture"]

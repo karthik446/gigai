@@ -2,7 +2,7 @@
 
 import click
 
-from gigai.sdk.store import StoreError, migrate
+from gigai.sdk.store import StoreError
 
 # STEPS[i] moves the notes store from version i to i + 1.
 STEPS = (
@@ -31,7 +31,7 @@ def migrate_store(ctx, known):
     """Open the notes store and walk it up to version KNOWN."""
     ctx.store.db(ctx.name, "notes").close()
     try:
-        click.echo(f"version {migrate(ctx.home, ctx.store.path(ctx.name, 'notes'), STEPS[:known])}")
+        click.echo(f"version {ctx.store.migrate('notes', STEPS[:known])}")
     except StoreError as exc:
         raise click.ClickException(str(exc)) from exc
 

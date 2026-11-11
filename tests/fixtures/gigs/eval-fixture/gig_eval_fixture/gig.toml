@@ -1,0 +1,34 @@
+[gig]
+manifest_format = 1
+name = "eval-fixture"
+description = "Test-only gig: answers synthetic questions and traces each call to evals.sqlite"
+core = ">=0.2.0a2"
+
+[commands]
+group = "gig_eval_fixture:eval_fixture"
+provides = ["answer", "replay", "note"]
+
+[[data.stores]]
+name = "notes"
+engine = "sqlite"
+
+[evals]
+cluster = "fixture"
+
+[[evals.steps]]
+id = "answer"
+model_target = "offline-default"
+prompt = { id = "answer", version = "1", file = "prompts/answer.txt" }
+postprocess = "gig_eval_fixture:postprocess"
+scorers = ["gig_eval_fixture.scorers:exact_match", "step:judge"]
+datasets.ci = { path = "dataset.jsonl", source = "synthetic (written for the gigai test suite)", licence = "CC0-1.0", sha256 = "1900380cb28eab5800ad3d25fa3d08fe6e8284a6f7d67536c0fbb094d66cc655" }
+datasets.release = { path = "{data}/datasets/answer-release.jsonl", source = "the operator's own questions", licence = "private", sha256 = "3c1e5a7b9d0f2a4c6e8b0d1f3a5c7e9b1d3f5a7c9e0b2d4f6a8c0e1b3d5f7a9c" }
+gates.ci = { suite = "ci", max_calls = 0, primary = { metric = "exact_match", min_ci_lower = 0.5 } }
+
+[[evals.steps]]
+id = "judge"
+model_target = "offline-default"
+prompt = { id = "judge", version = "1", file = "prompts/judge.txt" }
+grades = "answer"
+dimension = "correctness"
+validation = { against = "dataset.jsonl", min_n = 3, min_kappa = 0.6, report = ["tpr", "tnr", "kappa"] }

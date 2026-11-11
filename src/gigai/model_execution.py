@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping
 import uuid
 
-from .adapters.factory import AdapterFactoryError, resolve_model_adapter
+from .adapters.factory import AdapterFactoryError, adapter_identity, resolve_model_adapter
 from .adapters.port import (
     REQUEST_SETTINGS,
     InvocationResult,
@@ -369,7 +369,7 @@ def run_model_invocation(
         configured_selector=model_target,
         endpoint_identity=endpoint.name,
         resolved_model=result.resolved_model if result else None,
-        adapter_identity=f"{type(binding.port).__module__}.{type(binding.port).__qualname__}:1",
+        adapter_identity=adapter_identity(binding.port),
         selected_refs=selected_refs,
         request_ref=request_ref,
         request_sha256=digest_imported_bytes(request_bytes),

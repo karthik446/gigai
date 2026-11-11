@@ -14,7 +14,9 @@ that executable, and when ``gig.toml`` carries no description, ``<executable> de
 JSON) supplies it. No schema validation beyond the TOML parse happens here.
 
 A gig whose manifest says ``[server] mode = "process"`` (and whose commands are a Click group) also gets core's ``run``,
-``stop`` and ``status`` (``gigai.sdk.process``, the supervisor); a command of the same name in the gig's own group wins.
+``stop`` and ``status`` (``gigai.sdk.process``, the supervisor). Every in-process group gig another distribution ships
+also gets core's ``export``, which writes its gig folder (its stores and ``evals.sqlite``) to one ``.tar.gz``. A
+command of the same name in the gig's own group wins.
 """
 
 from __future__ import annotations
@@ -195,8 +197,12 @@ class LazyGig(click.Group):
                 raise GigLoadError(_reason(exc)) from exc
             if not isinstance(target, click.Command):
                 raise GigLoadError(f"{self.entry_point.value} is not a Click command")
-            if executable is None and isinstance(target, click.Group) and _process_server(self.manifest):
-                target = _with_server_verbs(target, self)
+            if executable is None and isinstance(target, click.Group):
+                verbs = _server_verbs(self) if _process_server(self.manifest) else {}
+                if _dist_name(self.entry_point) != CORE_DIST:
+                    verbs["export"] = _export_verb(self)
+                if verbs:
+                    target = _with_core_verbs(target, verbs)
             self._target = target
         return self._target
 
@@ -301,14 +307,12 @@ def _process_server(manifest: dict[str, Any] | None) -> bool:
     return is_process_server(manifest)
 
 
-def _with_server_verbs(group: click.Group, gig: LazyGig) -> click.Group:
-    """A copy of ``group`` that falls back to core's ``run``/``stop``/``status``; the gig's group object is not changed."""
+def _with_core_verbs(group: click.Group, verbs: dict[str, click.Command]) -> click.Group:
+    """A copy of ``group`` that falls back to core's ``verbs``; the gig's group object is not changed."""
 
     import copy
 
-    verbs = _server_verbs(gig)
-
-    class ProcessGig(type(group)):  # type: ignore[misc] - the gig's own Group class, so its lookup stays first
+    class CoreVerbsGig(type(group)):  # type: ignore[misc] - the gig's own Group class, so its lookup stays first
         def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
             command = super().get_command(ctx, cmd_name)
             return command if command is not None else verbs.get(cmd_name)
@@ -318,7 +322,7 @@ def _with_server_verbs(group: click.Group, gig: LazyGig) -> click.Group:
             return [*own, *sorted(set(verbs) - set(own))]
 
     wrapped = copy.copy(group)
-    wrapped.__class__ = ProcessGig
+    wrapped.__class__ = CoreVerbsGig
     return wrapped
 
 
@@ -399,6 +403,104 @@ def _server_verbs(gig: LazyGig) -> dict[str, click.Command]:
             click.echo("not running (removed a stale state file)" if result.cleaned_stale else "not running")
 
     return {"run": run, "status": status, "stop": stop}
+
+
+def _export_verb(gig: LazyGig) -> click.Command:
+    """Core's ``export`` for an in-process gig: its gig folder as one ``.tar.gz``; ``ctx.obj`` is its ``GigContext``."""
+
+    name = gig.name or ""
+
+    @click.command("export")
+    @click.option(
+        "-o",
+        "--output",
+        type=click.Path(dir_okay=False, path_type=Path),
+        default=None,
+        help="Where to write the archive; it must not exist yet. Default: ./<gig>-export-<UTC time>.tar.gz.",
+    )
+    def export(output: Path | None) -> None:
+        """Write this gig's gig folder (its stores and evals.sqlite) to one .tar.gz.
+
+        Each SQLite file goes in as a consistent copy taken with SQLite's backup; any other regular file goes in as
+        it is, and symlinks are left out. The archive is created with mode 0600: it may hold private text. A
+        symlinked gig folder (or ``<home>/gigs``) is refused, and so is an archive path inside the gig folder.
+        """
+
+        import stat
+
+        from .home import gig_folder
+
+        folder = gig_folder(click.get_current_context().obj.home, name)
+        for part in (folder.parent, folder):
+            if part.is_symlink() or (part.exists() and not stat.S_ISDIR(part.lstat().st_mode)):
+                click.echo(f"gigai {name}: refusing to export {folder}: {part} is not a real directory", err=True)
+                raise click.exceptions.Exit(1)
+        if not folder.is_dir():
+            click.echo(f"gigai {name}: nothing to export (no gig folder at {folder})", err=True)
+            raise click.exceptions.Exit(1)
+        if output is None:
+            from datetime import UTC, datetime
+
+            output = Path(f"{name}-export-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.tar.gz")
+        if output.absolute().parent.resolve().is_relative_to(folder.resolve()):
+            click.echo(f"gigai {name}: cannot export to {output} (it is inside the gig folder {folder})", err=True)
+            raise click.exceptions.Exit(1)
+        try:
+            _write_export(folder, name, output)
+        except (OSError, ValueError) as exc:
+            click.echo(f"gigai {name}: cannot export to {output} ({_reason(exc)})", err=True)
+            raise click.exceptions.Exit(1) from exc
+        click.echo(f"exported {folder} to {output}")
+
+    return export
+
+
+def _write_export(folder: Path, name: str, output: Path) -> None:
+    """Tar ``folder`` as ``<name>/...`` into the new file ``output`` (gzip, mode 0600); removes it on failure."""
+
+    import sqlite3
+    import stat
+    import tarfile
+    import tempfile
+
+    descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as handle, tarfile.open(fileobj=handle, mode="w:gz") as tar:
+            with tempfile.TemporaryDirectory() as scratch:
+                for directory, subdirectories, files in os.walk(folder):
+                    subdirectories.sort()
+                    base = Path(directory)
+                    for file_name in sorted(files):
+                        path = base / file_name
+                        arcname = f"{name}/{path.relative_to(folder).as_posix()}"
+                        if not stat.S_ISREG(path.lstat().st_mode) or file_name.endswith(_SQLITE_SIDE_FILES):
+                            continue  # a symlink, or a journal SQLite's backup below already folds in
+                        if file_name.endswith(".sqlite"):
+                            copy = Path(scratch) / "copy.sqlite"
+                            source = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=30)
+                            target = sqlite3.connect(copy)
+                            try:
+                                source.backup(target)
+                            finally:
+                                target.close()
+                                source.close()
+                            tar.add(copy, arcname=arcname, recursive=False, filter=_owner_only)
+                            copy.unlink()
+                        else:
+                            tar.add(path, arcname=arcname, recursive=False, filter=_owner_only)
+    except BaseException:
+        output.unlink(missing_ok=True)
+        raise
+
+
+_SQLITE_SIDE_FILES = (".sqlite-journal", ".sqlite-wal", ".sqlite-shm")
+
+
+def _owner_only(info: Any) -> Any:
+    """Every archived file unpacks as mode 0600, like the gig folder's own stores."""
+
+    info.mode = 0o600
+    return info
 
 
 def _server_failed(name: str, exc: BaseException) -> NoReturn:

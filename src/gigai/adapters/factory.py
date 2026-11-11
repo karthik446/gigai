@@ -23,6 +23,13 @@ class AdapterFactoryError(ValueError):
     code = "adapter_factory_failed"
 
 
+def adapter_identity(port: object) -> str:
+    """The adapter class identity an invocation record and an eval trace name for ``port``: ``<module>.<qualname>:1``."""
+
+    kind = type(port)
+    return f"{kind.__module__}.{kind.__qualname__}:1"
+
+
 @dataclass(frozen=True)
 class ModelAdapterBinding:
     """A resolved target and its port, without exposing provider choice upstream."""
@@ -63,6 +70,19 @@ class ModelAdapterBinding:
             reasoning_effort=self.current.target.reasoning_effort,
             timeout_seconds=timeout_seconds,
         )
+
+    def argv(self, request: InvocationRequest) -> tuple[str, ...]:
+        """The child command line ``request`` runs as, for an eval trace (``gigai.evals.records``); ``()`` otherwise.
+
+        The executable is named by its file name only (its absolute path names the operator's home). Only Claude's is
+        known without running the call: an API port spawns nothing, and Codex builds its argv per call around a
+        temporary workspace and a probe of the installed codex, so both give ``()``.
+        """
+
+        if isinstance(self.port, ClaudeCLIAdapter):
+            executable, *rest = self.port.argv(request)
+            return (Path(executable).name, *rest)
+        return ()
 
 
 def resolve_model_adapter(

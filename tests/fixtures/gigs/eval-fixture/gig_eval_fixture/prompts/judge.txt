@@ -1,0 +1,4 @@
+Grade the answer against the reference. Reply with one JSON object {{"correct": true|false}}.
+Question: {question}
+Reference: {reference}
+Answer: {answer}

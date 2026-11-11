@@ -1,0 +1,6 @@
+{"id": "q1", "version": "1", "cluster": "sums", "question": "What is 2 + 2?", "expected": "4"}
+{"id": "q2", "version": "1", "cluster": "sums", "question": "What is 3 + 5?", "expected": "8"}
+{"id": "q3", "version": "1", "cluster": "colours", "question": "Which colour do you get mixing blue and yellow?", "expected": "green"}
+{"id": "q4", "version": "1", "cluster": "colours", "question": "Which colour do you get mixing red and white?", "expected": "pink"}
+{"id": "q5", "version": "1", "cluster": "letters", "question": "Which letter comes after C?", "expected": "D"}
+{"id": "q6", "version": "1", "cluster": "letters", "question": "Which letter comes before B?", "expected": "A"}

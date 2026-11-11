@@ -1,0 +1,2 @@
+Answer the question with one JSON object {{"answer": <text>}}.
+Question: {question}
