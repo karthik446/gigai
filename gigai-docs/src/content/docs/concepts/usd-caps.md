@@ -39,9 +39,10 @@ per-click cap below are what `ctx.budget` enforces.
 ## Per-click caps (`cap_usd`)
 
 A step may carry a per-click USD cap: `cap_usd` on its `[steps]` row in
-`gig.toml`, `gigai <gig> steps set <step> --cap-usd 0.05` in `steps.toml`
-(`[caps]`, over the manifest's; `--cap-usd -` removes it), or `cap_usd=` on the
-`ctx.model` call itself (over both; `None` lifts it for that call). `steps
+`gig.toml`, `gigai <gig> steps set <step> --cap-usd 0.05` (written to
+`<home>/gigs/<gig>/caps.toml`, over the manifest's; `--cap-usd -` removes it;
+`steps.toml` keeps only the target overrides, as 0.2.0 reads it), or `cap_usd=`
+on the `ctx.model` call itself (over both; `None` lifts it for that call). `steps
 --json` shows the cap that applies as `cap_usd`. Before a capped call reaches
 any adapter, core estimates its worst case from a price table: the prompt's
 characters divided by four at the model's prompt price plus `max_output_tokens`

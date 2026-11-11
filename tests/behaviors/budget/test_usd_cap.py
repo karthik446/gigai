@@ -44,7 +44,7 @@ from gigai.sdk.budget import (
     fetch_prices,
 )
 from gigai.setup import build_config, run_setup
-from gigai.steps import StepTargetError, StepsFileError, listing, resolve_target, set_override, stale_overrides, step_verbs, steps_path
+from gigai.steps import StepTargetError, StepsFileError, caps_path, listing, resolve_target, set_override, stale_overrides, step_verbs, steps_path
 from tests.behaviors.gigs.test_loader import FIXTURES
 
 GIG = "eval-fixture"
@@ -358,10 +358,11 @@ def test_the_cap_comes_from_the_call_then_steps_toml_then_the_manifest(ctx: GigC
     assert resolve_target(home, GIG, manifest, "answer", config).cap_usd == 0.05
     with pytest.raises(BudgetExhausted, match=r"^estimated \$0\.06 > cap \$0\.05$"):
         gig.model("answer", PROMPT)
-    # steps.toml's [caps] wins over the manifest; the call argument wins over both (None lifts the cap for one call).
-    assert set_override(home, GIG, manifest, "answer", cap_usd="0.01") == f"answer: cap_usd 0.01 (written to {steps_path(home, GIG)})"
+    # caps.toml wins over the manifest; the call argument wins over both (None lifts the cap for one call).
+    assert set_override(home, GIG, manifest, "answer", cap_usd="0.01") == f"answer: cap_usd 0.01 (written to {caps_path(home, GIG)})"
     assert resolve_target(home, GIG, manifest, "answer", config).cap_usd == 0.01
-    assert tomllib.loads(steps_path(home, GIG).read_text(encoding="utf-8")) == {"steps": {"answer": "openrouter:fake"}, "caps": {"answer": 0.01}}
+    assert tomllib.loads(caps_path(home, GIG).read_text(encoding="utf-8")) == {"caps": {"answer": 0.01}}
+    assert _parses_under_0_2_0(steps_path(home, GIG)) == {"answer": "openrouter:fake"}, "steps.toml stays [steps]-only"
     with pytest.raises(BudgetExhausted, match=r"cap \$0\.01"):
         gig.model("answer", PROMPT)
     assert provider.calls == 0
@@ -395,16 +396,46 @@ def test_steps_set_cap_usd_shows_in_steps_json(ctx: GigContext, home: Path) -> N
     assert runner.invoke(steps, ["set", "nosuch", "--cap-usd", "1"], obj=ctx).exit_code != 0
 
 
-def test_a_bad_cap_in_steps_toml_or_the_manifest_is_refused(ctx: GigContext, home: Path) -> None:
-    path = steps_path(home, GIG)
+def _parses_under_0_2_0(path: Path) -> dict[str, str]:
+    """0.2.0's ``read_overrides`` rule (steps.py:119 there), applied verbatim: anything but one ``[steps]`` table of
+    non-empty strings is refused, so a rollback after ``steps set --cap-usd`` must still read the file."""
+
+    payload = tomllib.loads(path.read_text(encoding="utf-8"))
+    table = payload.get("steps", {})
+    if set(payload) - {"steps"} or not isinstance(table, dict) or any(type(v) is not str or not v for v in table.values()):
+        raise AssertionError(f'{path} must hold only a [steps] table of step = "<model target>" lines')
+    return table
+
+
+def test_steps_set_cap_usd_never_touches_steps_toml_so_a_rollback_to_0_2_0_still_reads_it(ctx: GigContext, home: Path) -> None:
+    assert set_override(home, GIG, MANIFEST, "judge", cap_usd=0.05) == f"judge: cap_usd 0.05 (written to {caps_path(home, GIG)})"
+    assert not steps_path(home, GIG).exists(), "a cap alone writes no steps.toml"
+    set_override(home, GIG, MANIFEST, "judge", "deterministic-a")
+    before = steps_path(home, GIG).read_bytes()
+    assert before == b'# gigai eval-fixture steps set: per-step model target overrides\n[steps]\n"judge" = "deterministic-a"\n'
+    set_override(home, GIG, MANIFEST, "judge", cap_usd=0.02)
+    set_override(home, GIG, MANIFEST, "answer", cap_usd=1)
+    set_override(home, GIG, MANIFEST, "judge", cap_usd=None)
+    assert steps_path(home, GIG).read_bytes() == before and _parses_under_0_2_0(steps_path(home, GIG)) == {"judge": "deterministic-a"}
+    assert tomllib.loads(caps_path(home, GIG).read_text(encoding="utf-8")) == {"caps": {"answer": 1.0}}
+    assert stat.S_IMODE(caps_path(home, GIG).stat().st_mode) == 0o600
+    assert sorted(p.name for p in steps_path(home, GIG).parent.iterdir() if p.suffix == ".toml") == ["caps.toml", "steps.toml"]
+
+
+def test_a_bad_cap_in_caps_toml_or_the_manifest_is_refused(ctx: GigContext, home: Path) -> None:
+    path = caps_path(home, GIG)
     path.parent.mkdir(parents=True)
-    for content in ('[caps]\nanswer = "0.05"\n', "[caps]\nanswer = -1\n", "[caps]\nanswer = true\n", "[caps]\nanswer = inf\n"):
+    for content in ('[caps]\nanswer = "0.05"\n', "[caps]\nanswer = -1\n", "[caps]\nanswer = true\n", "[caps]\nanswer = inf\n", "[steps]\nanswer = 1\n"):
         path.write_text(content, encoding="utf-8")
         path.chmod(0o600)
-        with pytest.raises(StepsFileError, match=r"only a \[steps\] table .* and a \[caps\] table of step = <usd> lines"):
+        with pytest.raises(StepsFileError, match=r"caps\.toml must hold only a \[caps\] table of step = <usd> lines"):
             ctx.model("answer", "2+2")
     path.write_text("[caps]\nnosuch = 1\n", encoding="utf-8")
-    assert stale_overrides(home, GIG, MANIFEST) == [f"steps.toml caps step 'nosuch', which the manifest's [steps] lacks; run `gigai {GIG} steps set nosuch --cap-usd -`"]
+    path.chmod(0o664)
+    with pytest.raises(StepsFileError, match="writable by group or others"):
+        ctx.model("answer", "2+2")
+    path.chmod(0o600)
+    assert stale_overrides(home, GIG, MANIFEST) == [f"caps.toml caps step 'nosuch', which the manifest's [steps] lacks; run `gigai {GIG} steps set nosuch --cap-usd -`"]
     path.unlink()
 
     manifest = json.loads(json.dumps(MANIFEST))

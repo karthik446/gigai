@@ -19,10 +19,12 @@ A ``deterministic`` target answers from the standard pack plus the gig package's
 the target, ``{"<target id>": {"<prompt>": "<text>"}}``: one offline gig can bind two steps to two targets that answer
 differently.
 
-``steps.toml`` is one ``[steps]`` table of ``step = "<target>"`` and one ``[caps]`` table of ``step = <usd>`` (the
-per-click cap ``gigai <gig> steps set <step> --cap-usd <usd>`` writes; it wins over the manifest's
-``[steps].<id>.cap_usd``, and a call's ``cap_usd=`` argument wins over both). It is written lock-free by an atomic
-replace (two concurrent ``steps set`` leave one of the two files), with mode 0600 and never through a symlink.
+``steps.toml`` is one ``[steps]`` table of ``step = "<target>"``, exactly as 0.2.0 wrote and reads it: nothing else is
+ever written there, so a rollback keeps reading it. The per-click cap ``gigai <gig> steps set <step> --cap-usd <usd>``
+writes lives beside it in ``caps.toml``, one ``[caps]`` table of ``step = <usd>`` (0.2.0 never reads it); it wins over
+the manifest's ``[steps].<id>.cap_usd``, and a call's ``cap_usd=`` argument wins over both. Each file is written
+lock-free by an atomic replace (two concurrent ``steps set`` leave one of the two files), with mode 0600 and never
+through a symlink.
 
 A call on a priced target (anything but ``deterministic``) with a cap is estimated first (``GigBudget.estimate``:
 the price table ``<home>/prices.json``, ``ceil(chars / 4)`` input tokens, ``max_output_tokens`` output tokens) and
@@ -42,7 +44,7 @@ import os
 import stat
 import tomllib
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 from pathlib import Path
@@ -60,6 +62,7 @@ if TYPE_CHECKING:
     from .sdk.context import GigContext
 
 STEPS_FILE = "steps.toml"
+CAPS_FILE = "caps.toml"
 ROLES = ("planner", "critic", "adjudicator", "reviewer", "verifier", "researcher", "gig_creator")
 _ROLE_FALLBACK = {"reviewer": "critic", "verifier": "adjudicator", "researcher": "planner", "gig_creator": "planner"}
 _CLI_ADAPTERS = frozenset({"claude_cli", "codex_cli"})
@@ -73,13 +76,13 @@ class StepTargetError(ValueError):
 
 
 class StepsFileError(ValueError):
-    """``steps.toml`` cannot be used: not TOML, an unknown key, a symlink, or writable by group or others."""
+    """``steps.toml`` or ``caps.toml`` cannot be used: not TOML, an unknown key, a symlink, or writable by group or others."""
 
 
 @dataclass(frozen=True)
 class Target:
     """The model target step ``step`` resolved to, where from (``override``, ``manifest``, ``role:<role>``), and its
-    per-click cap (``steps.toml`` ``[caps]`` over the manifest's ``[steps].<id>.cap_usd``; ``None`` when neither)."""
+    per-click cap (``caps.toml`` over the manifest's ``[steps].<id>.cap_usd``; ``None`` when neither)."""
 
     step: str
     id: str
@@ -107,6 +110,12 @@ def steps_path(home: Path, gig: str) -> Path:
     return gig_folder(home, gig) / STEPS_FILE
 
 
+def caps_path(home: Path, gig: str) -> Path:
+    """``<home>/gigs/<gig>/caps.toml``; checks the gig name and creates nothing."""
+
+    return gig_folder(home, gig) / CAPS_FILE
+
+
 def _declared(manifest: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     steps = manifest.get("steps")
     return steps if isinstance(steps, dict) else {}
@@ -119,15 +128,16 @@ def _refuse_symlinks(path: Path) -> None:
                 raise StepsFileError(f"refusing a symlink in the gig folder: {part}")
 
 
-def _read_steps_file(home: Path, gig: str) -> tuple[dict[str, str], dict[str, float]]:
-    """``steps.toml``'s ``[steps]`` targets and ``[caps]`` caps; two empty tables when there is no file."""
+def _read_table(home: Path, gig: str, filename: str, table: str, valid: Callable[[Any], bool], lines: str) -> dict[str, Any]:
+    """The one ``[table]`` of ``<home>/gigs/<gig>/<filename>`` whose values all pass ``valid``; ``{}`` without the
+    file. Refused (``StepsFileError``) through a symlink, group/other-writable, not TOML, or holding anything else."""
 
-    path = steps_path(home, gig)
+    path = gig_folder(home, gig) / filename
     _refuse_symlinks(path)
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
-        return {}, {}
+        return {}
     with os.fdopen(descriptor, "rb") as handle:
         if os.fstat(handle.fileno()).st_mode & 0o022:
             raise StepsFileError(f"{path} is writable by group or others; run chmod 600 on it")
@@ -135,69 +145,74 @@ def _read_steps_file(home: Path, gig: str) -> tuple[dict[str, str], dict[str, fl
             payload = tomllib.load(handle)
         except tomllib.TOMLDecodeError as exc:
             raise StepsFileError(f"{path} is not TOML: {exc}") from exc
-    table, caps = payload.get("steps", {}), payload.get("caps", {})
-    if (
-        set(payload) - {"steps", "caps"}
-        or not isinstance(table, dict)
-        or any(type(v) is not str or not v for v in table.values())
-        or not isinstance(caps, dict)
-        or any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in caps.values())
-    ):
-        raise StepsFileError(
-            f'{path} must hold only a [steps] table of step = "<model target>" lines and a [caps] table of step = <usd> lines'
-        )
-    return table, {step: float(cap) for step, cap in caps.items()}
+    entries = payload.get(table, {})
+    if set(payload) - {table} or not isinstance(entries, dict) or not all(valid(v) for v in entries.values()):
+        raise StepsFileError(f"{path} must hold only a [{table}] table of {lines}")
+    return entries
+
+
+def _write_table(home: Path, gig: str, filename: str, table: str, header: str, entries: Mapping[str, str]) -> None:
+    """Replace ``<home>/gigs/<gig>/<filename>`` with one ``[table]`` of the ``entries`` (already TOML-formatted
+    values), atomically, mode 0600, never through a symlink."""
+
+    folder = ensure_gig_folder(home, gig)
+    _refuse_symlinks(folder / filename)
+    lines = "".join(f"{json.dumps(step)} = {value}\n" for step, value in sorted(entries.items()))
+    temporary = folder / f".{filename}.{uuid.uuid4().hex}.tmp"
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(f"# gigai {gig} steps set: {header}\n[{table}]\n{lines}")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, folder / filename)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def read_overrides(home: Path, gig: str) -> dict[str, str]:
     """The step target overrides in ``steps.toml``; ``{}`` when there is none."""
 
-    return _read_steps_file(home, gig)[0]
+    return _read_table(home, gig, STEPS_FILE, "steps", lambda v: type(v) is str and bool(v), 'step = "<model target>" lines')
 
 
 def read_caps(home: Path, gig: str) -> dict[str, float]:
-    """The per-click caps in ``steps.toml``'s ``[caps]``; ``{}`` when there is none."""
+    """The per-click caps in ``caps.toml``; ``{}`` when there is none."""
 
-    return _read_steps_file(home, gig)[1]
+    caps = _read_table(home, gig, CAPS_FILE, "caps", lambda v: type(v) in (int, float) and math.isfinite(v) and v >= 0, "step = <usd> lines")
+    return {step: float(cap) for step, cap in caps.items()}
 
 
 KEEP: Any = object()  # ``set_override``: leave the target (or the cap) as it is
 
 
-def _write_steps(home: Path, gig: str, step_id: str, target_id: str | None, cap_usd: float | None) -> tuple[bool, bool]:
-    """Set (or, for ``None``, remove; ``KEEP`` leaves) one step's target and cap by an atomic replace; whether each
-    changed anything (``False`` when there was nothing to remove)."""
+def _write_override(home: Path, gig: str, step_id: str, target_id: str | None) -> bool:
+    """Set (or, for ``None``, remove) one override by an atomic replace of ``steps.toml`` (written exactly as 0.2.0
+    writes it); ``False`` when there was nothing to remove."""
 
     _refuse_symlinks(steps_path(home, gig))
-    overrides, caps = _read_steps_file(home, gig)
-    changed_target = changed_cap = False
-    if target_id is None:
-        changed_target = overrides.pop(step_id, None) is not None
-    elif target_id is not KEEP:
-        overrides[step_id], changed_target = target_id, True
-    if cap_usd is None:
-        changed_cap = caps.pop(step_id, None) is not None
-    elif cap_usd is not KEEP:
-        caps[step_id], changed_cap = cap_usd, True
-    if not (changed_target or changed_cap):
-        return False, False
-    folder = ensure_gig_folder(home, gig)
-    _refuse_symlinks(folder / STEPS_FILE)
-    lines = "".join(f"{json.dumps(step)} = {json.dumps(target)}\n" for step, target in sorted(overrides.items()))
-    cap_lines = "".join(f"{json.dumps(step)} = {cap!r}\n" for step, cap in sorted(caps.items()))
-    temporary = folder / f".{STEPS_FILE}.{uuid.uuid4().hex}.tmp"
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            caps_table = f"\n[caps]\n{cap_lines}" if cap_lines else ""
-            handle.write(f"# gigai {gig} steps set: per-step model target overrides and per-click USD caps\n[steps]\n{lines}{caps_table}")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, folder / STEPS_FILE)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
-    return changed_target, changed_cap
+    overrides = read_overrides(home, gig)
+    if target_id is None and overrides.pop(step_id, None) is None:
+        return False
+    if target_id is not None:
+        overrides[step_id] = target_id
+    _write_table(home, gig, STEPS_FILE, "steps", "per-step model target overrides", {s: json.dumps(t) for s, t in overrides.items()})
+    return True
+
+
+def _write_cap(home: Path, gig: str, step_id: str, cap_usd: float | None) -> bool:
+    """Set (or, for ``None``, remove) one per-click cap by an atomic replace of ``caps.toml``; ``False`` when there
+    was nothing to remove. ``steps.toml`` is not touched."""
+
+    _refuse_symlinks(caps_path(home, gig))
+    caps = read_caps(home, gig)
+    if cap_usd is None and caps.pop(step_id, None) is None:
+        return False
+    if cap_usd is not None:
+        caps[step_id] = cap_usd
+    _write_table(home, gig, CAPS_FILE, "caps", "per-step per-click USD caps", {s: repr(c) for s, c in caps.items()})
+    return True
 
 
 def _target(config: GigAIConfig, step_id: str, target_id: str, source: str, settings: dict[str, Any], cap_usd: float | None = None) -> Target:
@@ -234,7 +249,7 @@ def resolve_target(
         raise KeyError(f"step {step_id!r} is not declared in the gig manifest's [steps] table ([steps].{step_id})")
     step = declared.get(step_id, {})
     settings = dict(step.get("settings") or {})
-    overrides, caps = _read_steps_file(home, gig)
+    overrides, caps = read_overrides(home, gig), read_caps(home, gig)
     cap = caps[step_id] if step_id in caps else _manifest_cap(step_id, step)
     override = overrides.get(step_id) if target_id is None else target_id
     if override is not None:
@@ -270,7 +285,8 @@ def check_settings(target: Target, settings: Mapping[str, Any]) -> None:
 
 
 def set_override(home: Path, gig: str, manifest: Mapping[str, Any], step_id: str, target_id: str | None = KEEP, *, cap_usd: float | None = KEEP) -> str:
-    """``gigai <gig> steps set``: check the step, the target and the cap, then write ``steps.toml``; what changed.
+    """``gigai <gig> steps set``: check the step, the target and the cap, then write ``steps.toml`` (the target) and
+    ``caps.toml`` (the cap); what changed.
 
     ``target_id``/``cap_usd``: a value sets it, ``None`` removes it, ``KEEP`` (the default) leaves it.
     """
@@ -288,32 +304,33 @@ def set_override(home: Path, gig: str, manifest: Mapping[str, Any], step_id: str
 
         target = _target(load_config(home), step_id, target_id, "override", dict(_declared(manifest)[step_id].get("settings") or {}))
         check_settings(target, target.settings)
-    changed_target, changed_cap = _write_steps(home, gig, step_id, target_id, cap_usd)
-    path = steps_path(home, gig)
+    changed_target = target_id is not KEEP and _write_override(home, gig, step_id, target_id)
+    changed_cap = cap_usd is not KEEP and _write_cap(home, gig, step_id, cap_usd)
     changes = []
     if target_id is None:
         changes.append(f"{step_id}: override removed" if changed_target else f"{step_id}: no override to remove")
     elif target_id is not KEEP:
-        changes.append(f"{step_id} -> {target_id} (written to {path})")
+        changes.append(f"{step_id} -> {target_id} (written to {steps_path(home, gig)})")
     if cap_usd is None:
         changes.append(f"{step_id}: cap removed" if changed_cap else f"{step_id}: no cap to remove")
     elif cap_usd is not KEEP:
-        changes.append(f"{step_id}: cap_usd {cap_usd} (written to {path})")
+        changes.append(f"{step_id}: cap_usd {cap_usd} (written to {caps_path(home, gig)})")
     return "; ".join(changes)
 
 
 def stale_overrides(home: Path, gig: str, manifest: Mapping[str, Any]) -> list[str]:
-    """``gigai gig check`` warnings: an unreadable ``steps.toml``, an override or cap of a step the manifest lacks."""
+    """``gigai gig check`` warnings: an unreadable ``steps.toml`` or ``caps.toml``, an override or cap of a step the
+    manifest lacks."""
 
     try:
-        overrides, caps = _read_steps_file(home, gig)
+        overrides, caps = read_overrides(home, gig), read_caps(home, gig)
     except (ValueError, OSError) as exc:
         return [str(exc)]
     return [
         f"{STEPS_FILE} overrides step {step!r}, which the manifest's [steps] lacks; run `gigai {gig} steps set {step} -`"
         for step in sorted(set(overrides) - set(_declared(manifest)))
     ] + [
-        f"{STEPS_FILE} caps step {step!r}, which the manifest's [steps] lacks; run `gigai {gig} steps set {step} --cap-usd -`"
+        f"{CAPS_FILE} caps step {step!r}, which the manifest's [steps] lacks; run `gigai {gig} steps set {step} --cap-usd -`"
         for step in sorted(set(caps) - set(_declared(manifest)))
     ]
 
