@@ -8,7 +8,7 @@ folder, `<home>/gigs/<gig>/`) and says whether B differs from A. `gigai <gig> ev
 applies the gate a step declares for suite `S` and exits 0 (pass), 1 (fail) or 2 (cannot compare).
 Neither command calls a model, and neither writes to the store.
 
-The statistics behind both are described in [Eval statistics](/concepts/eval-statistics/).
+The statistics behind both are described in [Eval statistics](../eval-statistics/).
 
 ## Compare two runs
 

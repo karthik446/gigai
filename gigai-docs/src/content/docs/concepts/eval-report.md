@@ -39,12 +39,12 @@ run run_01JA…: step solve, suite release, k 1, 12 items, 10 clusters, 12 calls
   When the dataset changed since the run, or cannot be read, the report says so instead; a path
   under the gigai home is written `<home>/…`, so the line does not name your user folder.
 - **Gate.** The verdict of the gate the run's step declares for the run's suite, worked out the
-  way [`eval gate`](/concepts/eval-compare/#apply-a-gate) works it out: a `release` or `upgrade`
+  way [`eval gate`](../eval-compare/#apply-a-gate) works it out: a `release` or `upgrade`
   gate judges the newest run of the suite, so every run of that step and suite shows the same
   verdict. A step without such a gate prints `no gate`. A gate that cannot be checked, for
   example the first release run with nothing to pair it with, prints `cannot check` and why; the
   report itself still exits 0.
-- **Labels.** Counts of the first-round labels [`eval label`](/concepts/eval-label/) gave the
+- **Labels.** Counts of the first-round labels [`eval label`](../eval-label/) gave the
   run's traces, by value; relabels are counted apart. A run without labels prints no label line.
 
 `--run R` reports only run `R`.
