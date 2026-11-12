@@ -36,7 +36,7 @@ ASK = (
 
 def items(raw: Path) -> list[Item]:
     groups: dict[tuple, list[dict]] = {}
-    for row in parquet_rows(raw / _FILE, "mtbench_human"):
+    for row in parquet_rows(raw / _FILE):
         groups.setdefault((row["question_id"], row["turn"], row["model_a"], row["model_b"]), []).append(row)
     out = []
     for (question, turn, model_a, model_b), rows in sorted(groups.items()):

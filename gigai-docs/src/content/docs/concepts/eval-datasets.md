@@ -8,9 +8,8 @@ Some GigAI eval steps score a model on a public dataset instead of on synthetic 
 one prompt string plus its gold answer, keeps the upstream ids so a reader can find the item in
 the source files, and records the recipe that picked it. The module uses only the Python
 standard library, with one exception: several sets ship their upstream files as parquet, and
-building their `release` slice reads them with `pyarrow`, an optional install
-(`uv tool install --with pyarrow gigai`). Without it that build exits with code 2 and prints that
-hint. The committed `ci` slices need nothing extra.
+building their `release` slice reads them with `pyarrow`, which a plain `uv tool install gigai`
+installs with GigAI. Loading the committed `ci` slices never imports it.
 
 Each dataset has two slices, both drawn with `seed = 20261109`:
 

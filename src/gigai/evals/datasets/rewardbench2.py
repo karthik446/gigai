@@ -39,7 +39,7 @@ ASK = (
 
 
 def items(raw: Path) -> list[Item]:
-    rows = [row for row in parquet_rows(raw / _FILE, "rewardbench2") if row["subset"] in SUBSETS]
+    rows = [row for row in parquet_rows(raw / _FILE) if row["subset"] in SUBSETS]
     out = []
     for row in sorted(rows, key=lambda row: int(row["id"])):
         responses = list(zip([*row["chosen"], *row["rejected"]], row["models"], strict=True))

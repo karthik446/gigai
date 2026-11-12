@@ -33,7 +33,7 @@ _ANSWER = re.compile(r"####\s*(-?[\d,]+(?:\.\d+)?)\s*$")
 
 def items(raw: Path) -> list[Item]:
     out = []
-    for index, row in enumerate(parquet_rows(raw / _FILE, "tinygsm8k")):
+    for index, row in enumerate(parquet_rows(raw / _FILE)):
         answer = row["answer"].strip()
         match = _ANSWER.search(answer)
         if not match:

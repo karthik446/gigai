@@ -17,6 +17,7 @@ import os
 import random
 import re
 import sys
+import tomllib
 from collections import Counter
 from pathlib import Path
 
@@ -29,8 +30,9 @@ from tests.behaviors.ci_tooling import test_no_real_fixture_data as fixture_guar
 
 PACKAGE = Path(datasets.__file__).parent
 SETS = [name for name in datasets.SETS if (datasets.CI_DIR / f"{name}.jsonl").is_file()]
-#: The sets whose upstream files are parquet, read with the optional pyarrow in a release build only.
+#: The sets whose upstream files are parquet, read with ``pyarrow`` (a core dependency) in a release build.
 PARQUET_SETS = [name for name in SETS if any(file.endswith(".parquet") for file in datasets.loader(name).SOURCES)]
+PYPROJECT = Path(__file__).resolve().parents[3] / "pyproject.toml"
 MAX_SLICE_LINES = 60
 MAX_LOADER_BODY = 30
 #: Derived sets, built from a public source and the repository's own fixtures: their loader is bounded per function.
@@ -66,7 +68,7 @@ def test_rewardbench2_ids_and_clusters_are_unique_across_subsets(
         for subset in (*module.SUBSETS, "Math")
         for number in range(50)
     ]
-    monkeypatch.setattr(module, "parquet_rows", lambda path, set_name: rows)
+    monkeypatch.setattr(module, "parquet_rows", lambda path: rows)
     release = datasets.build("rewardbench2", tmp_path, "release")
     assert len(release) == 100
     assert len({item.id for item in release}) == len({item.cluster_id for item in release}) == 100
@@ -177,30 +179,36 @@ def test_release_without_network_exits_2_with_the_download_hint(
     assert not (tmp_path / "datasets" / f"{name}-release.jsonl").exists()
 
 
-@pytest.mark.parametrize("name", PARQUET_SETS)
-def test_release_without_pyarrow_exits_2_with_the_install_hint(
-    name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    module = datasets.loader(name)
-    raw = tmp_path / "datasets" / "raw" / name
+def test_pyarrow_is_a_core_dependency() -> None:
+    """A plain install (no extra, no ``--with``) builds every parquet set's release slice (``eval base``)."""
+    dependencies = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]["dependencies"]
+    names = {re.match(r"[A-Za-z0-9._-]+", dependency).group(0).lower() for dependency in dependencies}
+    assert PARQUET_SETS and "pyarrow" in names
+
+
+def test_parquet_rows_reads_a_parquet_file(tmp_path: Path) -> None:
+    from pyarrow import parquet, table
+
+    rows = [{"id": "1", "choices": ["a", "b"], "turn": 1}, {"id": "2", "choices": ["c"], "turn": 2}]
+    parquet.write_table(table({key: [row[key] for row in rows] for key in rows[0]}), tmp_path / "rows.parquet")
+    assert datasets.parquet_rows(tmp_path / "rows.parquet") == rows
+
+
+def test_release_slice_of_a_parquet_set_builds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """tinyGSM8k from a 100-row parquet written here, pinned to its own sha256: no network, the real pyarrow."""
+    from pyarrow import parquet, table
+
+    module = datasets.loader("tinygsm8k")
+    ((file, (url, _pinned)),) = module.SOURCES.items()
+    raw = tmp_path / "datasets" / "raw" / "tinygsm8k"
     raw.mkdir(parents=True)
-    sources = {}
-    for file, (url, _pinned) in module.SOURCES.items():
-        (raw / file).write_bytes(b"PAR1 placeholder")
-        sources[file] = (url, datasets.file_sha256(raw / file))
-    monkeypatch.setattr(module, "SOURCES", sources)
-    monkeypatch.setitem(sys.modules, "pyarrow", None)
-    with pytest.raises(SystemExit) as exit_info:
-        datasets.download_release(name, tmp_path)
-    assert exit_info.value.code == 2
-    err = capsys.readouterr().err
-    assert err.startswith(f"gigai: {name}: reading ") and "needs pyarrow" in err and "--with pyarrow gigai" in err
-    assert not (tmp_path / "datasets" / f"{name}-release.jsonl").exists()
-
-
-def test_ci_slices_load_without_pyarrow(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "pyarrow", None)
-    assert all(datasets.load_ci(name) for name in SETS)
+    numbers = range(1000, 1100)
+    columns = {"question": [f"Question {n}?" for n in numbers], "answer": [f"Add <<1+1=2>>2.\n#### {n:,}" for n in numbers]}
+    parquet.write_table(table(columns), raw / file)
+    monkeypatch.setattr(module, "SOURCES", {file: (url, datasets.file_sha256(raw / file))})
+    items = {item.id: item for item in datasets.read_slice(datasets.download_release("tinygsm8k", tmp_path))}
+    assert len(items) == 100
+    assert items["tinygsm8k-007"].expected == "1007" and items["tinygsm8k-007"].completion == "Add 2.\nANSWER: 1007"
 
 
 @pytest.mark.parametrize("name", SETS)
@@ -217,18 +225,18 @@ def test_slice_holds_no_private_fixture_strings(name: str) -> None:
         assert not hits, f"{name}.jsonl holds denylist lines {hits} (entry text withheld)"
 
 
-#: The one non-stdlib import the package may make: ``parquet_rows`` reads upstream parquet with the optional pyarrow,
-#: inside the function, so importing the package or loading a ci slice never needs it.
-OPTIONAL_IMPORT = ("__init__.py", "parquet_rows", "pyarrow")
+#: The one non-stdlib import the package makes: ``parquet_rows`` imports pyarrow (a core dependency) inside the
+#: function, because importing it costs about 1 s on a cold start; importing the package or loading a ci slice never does.
+LAZY_IMPORT = ("__init__.py", "parquet_rows", "pyarrow")
 
 
 def test_dataset_modules_import_only_the_standard_library() -> None:
     for path in sorted(PACKAGE.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        optional = {
+        lazy = {
             id(node)
             for function in tree.body
-            if isinstance(function, ast.FunctionDef) and (path.name, function.name) == OPTIONAL_IMPORT[:2]
+            if isinstance(function, ast.FunctionDef) and (path.name, function.name) == LAZY_IMPORT[:2]
             for node in ast.walk(function)
         }
         for node in ast.walk(tree):
@@ -238,7 +246,7 @@ def test_dataset_modules_import_only_the_standard_library() -> None:
                 roots = {node.module.split(".")[0]}
             else:
                 continue
-            extra = {OPTIONAL_IMPORT[2]} if id(node) in optional else set()
+            extra = {LAZY_IMPORT[2]} if id(node) in lazy else set()
             allowed = sys.stdlib_module_names | {"__future__"} | extra
             assert roots <= allowed, f"{path.name}: {roots}"
 

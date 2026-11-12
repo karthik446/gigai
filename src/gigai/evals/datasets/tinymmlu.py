@@ -32,7 +32,7 @@ ASK = (
 
 def items(raw: Path) -> list[Item]:
     out = []
-    for index, row in enumerate(parquet_rows(raw / _FILE, "tinymmlu")):
+    for index, row in enumerate(parquet_rows(raw / _FILE)):
         choices = "\n".join(f"{LETTERS[i]}) {choice}" for i, choice in enumerate(row["choices"]))
         out.append(
             Item(

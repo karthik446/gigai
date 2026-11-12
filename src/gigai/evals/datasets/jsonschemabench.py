@@ -45,7 +45,7 @@ def items(raw: Path) -> list[Item]:
             source_ids={"unique_id": row["unique_id"], "subset": "Github_medium", "split": "test"},
             tags=("output_mode:schema",),
         )
-        for row in sorted(parquet_rows(raw / _FILE, "jsonschemabench"), key=lambda row: row["unique_id"])
+        for row in sorted(parquet_rows(raw / _FILE), key=lambda row: row["unique_id"])
     ]
 
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gigai"
-version = "0.3.0"
+version = "0.3.1"
 description = "Contract-first foundations for a local, user-controlled agent runtime"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,9 @@ dependencies = [
   "httpx>=0.27",
   "jsonschema>=4.23",
   "openpyxl>=3.1",
+  # `gigai <gig> eval base`: five eval sets ship their upstream files as parquet. 18 is the first release with
+  # cp311-cp313 wheels on macOS arm64/x86_64 and manylinux.
+  "pyarrow>=18",
   "pycountry>=24",
   "pypdf>=5",
   "python-dotenv>=1.0",

@@ -11,9 +11,9 @@ Each set has one loader module (``contractnli``, ``ragtruth``, ``quality``, ``if
 A ``ci`` slice lives in ``tests/fixtures/evals/ci/<set>.jsonl`` next to ``<set>.sha256``. Its rows carry a canned
 completion, so a ``ci`` run makes 0 model calls. ``release`` slices are never committed: ``download_release``
 builds one under ``{data}/datasets/`` from the upstream files, downloading them only when they are absent. Licences
-and attribution are in ``NOTICES.md`` next to this file. The package needs only the standard library; a loader
-module is imported the first time its set is used. Upstream parquet files are read with ``pyarrow``, an optional
-install that only a ``release`` build of a parquet set needs (``parquet_rows``).
+and attribution are in ``NOTICES.md`` next to this file. A loader module is imported the first time its set is used.
+Upstream parquet files are read with ``pyarrow`` (``parquet_rows``), imported only when a ``release`` build reads one,
+so importing the package or loading a ``ci`` slice does not load it.
 """
 
 from __future__ import annotations
@@ -185,13 +185,10 @@ def _unavailable(message: str) -> SystemExit:
     return SystemExit(2)
 
 
-def parquet_rows(path: Path, set_name: str) -> list[dict[str, Any]]:
-    """The rows of the parquet file at ``path``; exits 2 with an install hint when ``pyarrow`` is absent."""
-    try:
-        from pyarrow import parquet  # optional: only a release build reads parquet
-    except ImportError as error:
-        hint = "install pyarrow next to gigai (uv tool install --with pyarrow gigai) and run again"
-        raise _unavailable(f"{set_name}: reading {path.name} needs pyarrow; {hint}") from error
+def parquet_rows(path: Path) -> list[dict[str, Any]]:
+    """The rows of the parquet file at ``path``."""
+    from pyarrow import parquet  # here, not at the top: importing pyarrow costs about 1 s on a cold start
+
     return parquet.read_table(path).to_pylist()
 
 
