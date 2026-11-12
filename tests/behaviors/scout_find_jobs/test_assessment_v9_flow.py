@@ -356,9 +356,11 @@ def test_an_unclear_must_have_the_model_never_asks_about_is_stored_pending_with_
     # The answers store takes the id as it is, and the answer is found under it again.
     record_answer(home_root=fx.home_root, requested_target=fx.target, question_id=question_id, prompt=asked, answer="Three years running EKS clusters at Acme.")
     assert read_answers(home_root=fx.home_root, requested_target=fx.target)[question_id].answer == "Three years running EKS clusters at Acme."
-    # Assessed again: the same row, the same question id.
+    # Assessed again: the same row; 0.3.2 gyl: its question is answered, so it is NOT asked again and the row reads
+    # ``answered`` (test_answered_line covers what follows: the gate suggests, a line is drafted).
     again, _prompt = _assess(fx, _v9_answer(fx, kubernetes="unclear", said="matched_above_threshold"))
-    assert again.result.matrix[1].id == kubernetes.id and [question.question_id for question in again.result.structured_questions] == ["tooling:helm", question_id]
+    assert again.result.matrix[1].id == kubernetes.id and [question.question_id for question in again.result.structured_questions] == ["tooling:helm"]
+    assert again.result.matrix[1].status.value == "answered" and f"A {question_id}" in again.result.matrix[1].sources
     # An optional row left unclear with no question (Helm, were its question dropped) is never asked about and never holds: test_resume_gate.
 
 

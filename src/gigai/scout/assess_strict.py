@@ -20,7 +20,9 @@ T4  a degree row is ``met`` with the ``e-`` id when a degree's field matches, or
 T5  any other ``met`` row resting only on buried lines (summary, skills, Other, an old role) is ``unclear``; a
     spoken-language or collaboration-style row ("Strong English communication", "written and verbal
     communication", "teamwork", "self-starter") is a claim no resume line settles and keeps the model's status.
-T6  a ``met`` row resting only on answers or stories is ``answered``: the candidate said yes; no line shows it.
+T6  a ``met`` row resting only on answers or stories, or an ``unclear`` row citing one (0.3.2 gyl: the model kept
+    asking what was answered), is ``answered``: the candidate said yes; no line shows it. A line is drafted from the
+    answer (``drafted_line``); the gate no longer holds on it.
 T7  an ``unmet`` row that cites nothing is ``unclear``: a silence is a question, not a gap.
 T8  a programming language the candidate declares (a name of a skills line, or of a saved answer the row cites that
     does not deny it) is a fact about the candidate, not a dated one (operator decision 2026-10-30, dossier-A): a row
@@ -498,6 +500,12 @@ def _only_answers(sources: Sequence[str]) -> bool:
     return bool(sources) and all(item.startswith(_ANSWER_PREFIX) for item in sources)
 
 
+def _cites_answer(sources: Sequence[str]) -> bool:
+    """Whether one of ``sources`` is the candidate's own answer or story (``A <question_id>``, ``A story:<slug>``)."""
+
+    return any(item.startswith(_ANSWER_PREFIX) for item in sources)
+
+
 def _step_sources(row: MutableMapping[str, object], master: StrictMaster) -> tuple[str, str] | None:
     """T5 over a met row's sources; ``None`` when a clear line is among them."""
 
@@ -685,9 +693,11 @@ def strict_rows(matrix: Sequence[MutableMapping[str, object]], master: StrictMas
                 step_note = _step_years(row, years[0], years[1], tools, matcher)
             elif not tools and not _SOFT_CLAIM.search(requirement):
                 step_note = _step_sources(row, master)
-            if _only_answers(sources) and (row["status"] == UNCLEAR or step_note is None):
-                # T6: the row rested on a yes answer alone (no line of the master showed it): the candidate said so.
-                _lower(row, ANSWERED, "Strict read (T6): you said yes, and no resume line shows it; add a line to your resume.")
+            if (row["status"] == UNCLEAR and _cites_answer(sources)) or (_only_answers(sources) and step_note is None):
+                # T6: the candidate's answer or story says so and no line of the master shows it (0.3.2 gyl: also when the
+                # row cited a master line beside the answer that the steps above did not accept). The answer is on file,
+                # so the row is never asked again: it is ``answered``, and the job's suggestions draft the line.
+                _lower(row, ANSWERED, "Strict read (T6): you said yes, and no line of your master shows it; a line is drafted from your answer.")
                 step_note = ("T6", str(row["code_note"]))
         elif before == UNMET and not _cites_resume(row) and not _answered(row):
             _lower(row, UNCLEAR, "Strict read (T7): the row says unmet and cites no resume line; a silence is a question, not a gap.")

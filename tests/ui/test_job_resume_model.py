@@ -42,6 +42,11 @@ out.sentences = {
   questions: m.holdSentence({ decision: "hold_question", reasons: [{ code: "question_open", requirement: "req-000002" }, { code: "question_open", requirement: "req-000003" }] }, A),
   oneQuestion: m.holdSentence({ decision: "hold_question", reasons: [] }, input.pending),
   notAMatch: m.holdSentence({ decision: "not_a_match", reasons: [] }, { not_a_match_reason: "The role is on site in Lisbon.", matrix: [] }),
+  // 0.3.2 (83r): a must-have you said yes to waits for a line on your master, not for an answer. `Said` holds one
+  // answered row and one row still asked; the 0.3.1 record names the answered row as an `answered` reason.
+  saidAndAsked: m.holdSentence({ decision: "hold_question", reasons: [{ code: "answered", requirement: "req-0000a1" }, { code: "question_open", requirement: "req-0000a2" }] }, input.said),
+  saidOnly: m.holdSentence({ decision: "hold_question", reasons: [{ code: "answered", requirement: "req-0000a1" }] }, { ...input.said, matrix: input.said.matrix.slice(0, 1), structured_questions: [] }),
+  gapAndSaid: m.holdSentence({ decision: "hold_unmet", reasons: [{ code: "askable_unmet", requirement: "req-0000a3" }] }, { ...input.said, matrix: [...input.said.matrix, { id: "req-0000a3", requirement: "Terraform", class: "askable", status: "unmet" }] }),
 };
 
 // The header's chip, and the state a held match reads.
@@ -152,6 +157,12 @@ out.proposed = [m.proposedChange({ proposed: input.proposed }, input.stored), m.
 // Suggestions, the two brief commands, Apply, no master.
 out.suggestions = m.suggestionRows({ record: input.record, assessment: A, lineText: (id) => (id === "b-000001" ? "Ran the Postgres fleet." : "") });
 out.unstored = m.suggestionRows({ assessment: { ...A, structured_suggestions: [{ kind: "gap", requirement: "req-000003", why: "Only an answer can close this." }] } });
+// 0.3.2 (gyl): an open master_line suggestion carries the line drafted from the answer (GET derives it); a closed one shows none.
+const draft = { text: "Worked with Agile, TDD and CI/CD: shipped weekly behind tests.", entry_id: "r-000001", backed: "answer:requirement:req-0000a1" };
+out.drafted = m.suggestionRows({ record: { suggestions: [
+  { id: "sg-1", kind: "master_line", line: null, requirement: "req-0000a1", why: "You said yes.", source: "assessment", status: "open", draft },
+  { id: "sg-2", kind: "master_line", line: null, requirement: "req-0000a1", why: "You said yes.", source: "assessment", status: "done", resolved: { by: "operator", at: "2026-10-05T10:06:00Z", how: "master_line", ref: "b-000009" }, draft },
+] }, assessment: input.said }).map((row) => [row.id, row.draft]);
 out.brief = [m.briefCommands("https://jobs.example.test/a?b=1&c='x'", "profile_1"), m.briefCommands("https://jobs.example.test/a", null).map((item) => item.command), m.briefCommands(null, "p")];
 const apply = (codes, stored = input.stored) => m.applyState({ stored, items: m.staleItems(codes) });
 out.apply = [apply([]), apply(["master_newer"]), apply(["picked_line_changed"]), apply(["assessment_stale:older_prompt", "picked_line_changed"]), apply(["assessment_newer"]), apply([], null)];
@@ -198,6 +209,15 @@ PENDING = {
     "structured_questions": [{"question_id": "cloud:gcp", "question": "Which cloud?", "requirement": "GCP"}],
 }
 GAP_GATE = {"decision": "hold_unmet", "reasons": [{"code": "askable_unmet", "requirement": "req-000004"}]}
+#: 0.3.2 (83r): one must-have the user said yes to that no line shows (``answered``), one still asked.
+SAID = {
+    "verdict": "pending_user_answers",
+    "matrix": [
+        {"id": "req-0000a1", "requirement": "Agile, TDD and CI/CD", "class": "askable", "status": "answered", "sources": ["A requirement:req-0000a1"]},
+        {"id": "req-0000a2", "requirement": "GCP", "class": "askable", "status": "unclear", "sources": []},
+    ],
+    "structured_questions": [{"question_id": "cloud:gcp", "question": "Which cloud?", "requirement": "GCP"}],
+}
 
 
 def _copy(item: str, text: str, line: int) -> dict:
@@ -339,7 +359,7 @@ def out() -> dict:
     urls = [(UI_SRC / name).as_uri() for name in ("jobResumeModel.js", "jobStateModel.js")]
     payload = json.dumps({
         "assessment": ASSESSMENT, "pending": PENDING, "gapGate": GAP_GATE, "stored": STORED, "picked": PICKED, "entries": ENTRIES, "changed": CHANGED, "record": RECORD,
-        "conflicts": CONFLICTS, "added": ADDED, "skills": SKILLS, "proposed": PROPOSED, "served": SERVED, "pickView": PICK_VIEW, "pickCodes": PICK_CODES,
+        "conflicts": CONFLICTS, "added": ADDED, "skills": SKILLS, "proposed": PROPOSED, "served": SERVED, "pickView": PICK_VIEW, "pickCodes": PICK_CODES, "said": SAID,
     })
     done = subprocess.run([node, "--input-type=module", "-e", SCRIPT.replace("__URLS__", json.dumps(urls)), payload], capture_output=True, text=True, check=False, timeout=60)
     assert done.returncode == 0, done.stderr
@@ -357,7 +377,19 @@ def test_the_gate_is_the_records_then_the_assessments_then_the_verdicts(out: dic
         "questions": "2 must-have requirements wait for your answer",
         "oneQuestion": "1 must-have requirement waits for your answer",
         "notAMatch": "Not a match: The role is on site in Lisbon.",
+        "saidAndAsked": "1 must-have requirement waits for your answer; 1 drafted line to add to your master",
+        "saidOnly": "1 drafted line waits to be added to your master",
+        "gapAndSaid": "Has a gap: Terraform; 1 drafted line to add to your master",
     }
+
+
+def test_an_open_master_line_suggestion_shows_the_drafted_line_and_a_closed_one_none(out: dict) -> None:
+    """0.3.2 (gyl): the line drafted from the user's answer, as GET /api/jobs/suggestions derives it on an open item."""
+
+    assert out["drafted"] == [
+        ["sg-1", {"text": "Worked with Agile, TDD and CI/CD: shipped weekly behind tests.", "entryId": "r-000001", "backed": "answer:requirement:req-0000a1"}],
+        ["sg-2", None],
+    ]
 
 
 def test_a_match_the_gate_holds_reads_has_a_gap_and_the_header_has_one_chip(out: dict) -> None:

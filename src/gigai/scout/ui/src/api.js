@@ -584,8 +584,9 @@ export function getJobSuggestions({ jobIdentity, profileId, expect = false }) {
 }
 
 // Done (`action: "resolve"`, with `how`), Dismiss (`action: "dismiss"`). Written as the operator: this is the page.
-export function postJobSuggestion({ jobUrl, profileId, action, id, how }) {
-  return request("POST", "/api/jobs/suggestions", { job_url: jobUrl, profile_id: profileId, actor: "operator", action, suggestion_id: id, ...(how ? { how } : {}) });
+// 0.3.2: Add to my master (`action: "add_line"`, optional `text`): a master_line suggestion's drafted line.
+export function postJobSuggestion({ jobUrl, profileId, action, id, how, text }) {
+  return request("POST", "/api/jobs/suggestions", { job_url: jobUrl, profile_id: profileId, actor: "operator", action, suggestion_id: id, ...(how ? { how } : {}), ...(text ? { text } : {}) });
 }
 
 export function postJobResumePick({ jobUrl, profileId, action }) {

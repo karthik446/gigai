@@ -1,8 +1,10 @@
 """0.1.11 N5 (SPEC 4.4): the job routes of the chat step.
 
 * ``GET /api/jobs/suggestions?url=&profile_id=&status=``: one job's suggestions, as stored.
-* ``POST /api/jobs/suggestions`` ``{job_url, action: add | resolve | dismiss, ...}``: an agent or the user adds
-  one, sets one to done (with what settled it) or dismisses one. Resolving is recorded, never a delete.
+* ``POST /api/jobs/suggestions`` ``{job_url, action: add | resolve | dismiss | add_line, ...}``: an agent or the user adds
+  one, sets one to done (with what settled it) or dismisses one. Resolving is recorded, never a delete. 0.3.2:
+  ``add_line`` adds the drafted line of a ``master_line`` suggestion (``draft`` on the GET) to the master, backed by the
+  answer it comes from, and settles the job on it in code (``job_actions.add_line``).
 * ``POST /api/job-resumes/pick`` ``{job_url, action: refresh | draft | use_proposed | dismiss_proposed}``: one
   explicit step on the job's resume; the answer is what is stored after it.
 * ``GET /api/jobs/brief?url=&part=yours|posting&profile_id=``: one part of the agent's brief. Two parts, never
@@ -36,7 +38,10 @@ from ..contracts import FindJobsContractError
 _UNPROCESSABLE = (
     "invalid_value", "wrong_type", "unknown_key", "bad_enum", "personal_info_refused", "unknown_line", "unknown_requirement", "job_input_invalid",
 )
-_NOT_FOUND = ("assessment_missing", "suggestions_not_found", "suggestion_not_found", "no_proposed_resume", "target_unavailable", "profile_not_found")
+_NOT_FOUND = (
+    "assessment_missing", "suggestions_not_found", "suggestion_not_found", "no_proposed_resume", "target_unavailable", "profile_not_found",
+    "answer_not_found", "story_not_found",
+)
 _NOT_IMPLEMENTED = ("pick_not_available",)
 _ERROR_STATUS: dict[str, HTTPStatus] = {
     **dict.fromkeys(_UNPROCESSABLE, HTTPStatus.UNPROCESSABLE_ENTITY),
@@ -44,14 +49,15 @@ _ERROR_STATUS: dict[str, HTTPStatus] = {
     **dict.fromkeys(_NOT_IMPLEMENTED, HTTPStatus.NOT_IMPLEMENTED),
 }
 
-_SUGGESTION_ACTIONS = ("add", "resolve", "dismiss")
-_SUGGESTION_KEYS = frozenset({"job_url", "profile_id", "action", "actor", "kind", "why", "line", "requirement", "posting_phrase", "suggestion_id", "how", "ref"})
+_SUGGESTION_ACTIONS = ("add", "resolve", "dismiss", "add_line")
+_SUGGESTION_KEYS = frozenset({"job_url", "profile_id", "action", "actor", "kind", "why", "line", "requirement", "posting_phrase", "suggestion_id", "how", "ref", "text"})
 _PICK_KEYS = frozenset({"job_url", "profile_id", "action"})
 #: What each suggestion action reads besides the job (a key of another action is ``invalid_value``, never ignored).
 _ACTION_KEYS: dict[str, frozenset[str]] = {
     "add": frozenset({"kind", "why", "line", "requirement", "posting_phrase"}),
     "resolve": frozenset({"suggestion_id", "how", "ref"}),
     "dismiss": frozenset({"suggestion_id"}),
+    "add_line": frozenset({"suggestion_id", "text"}),
 }
 _ERRORS = (job_actions.JobActionError, job_brief.BriefError, NotBuilt, QuickAssessError, StoryBankError, FindJobsContractError, LabelError)
 
@@ -159,6 +165,10 @@ class JobSuggestionsRoutesMixin:
                 answer = job_actions.resolve_suggestion(
                     home_root, target, job_url, str(body.get("suggestion_id") or ""), how=str(body.get("how") or ""), actor=actor, profile_id=profile_id,  # type: ignore[arg-type]
                     ref=body.get("ref") or None,  # type: ignore[arg-type]
+                )
+            elif action == "add_line":
+                answer = job_actions.add_line(
+                    home_root, target, job_url, str(body.get("suggestion_id") or ""), text=body.get("text") or None, actor=actor, profile_id=profile_id,  # type: ignore[arg-type]
                 )
             else:
                 answer = job_actions.dismiss_suggestion(home_root, target, job_url, str(body.get("suggestion_id") or ""), actor=actor, profile_id=profile_id)  # type: ignore[arg-type]

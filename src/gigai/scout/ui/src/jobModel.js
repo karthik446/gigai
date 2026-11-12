@@ -59,8 +59,10 @@ export const MODE_LABELS = { remote: "Remote", hybrid: "Hybrid", onsite: "On-sit
 // uat-batch1 (N8): the requirement class and status in the operator's words.
 // 0110-10-03: `list_item` is one tool of a list a single sentence names
 // ("Docker, Helm, and Kubernetes"): it weighs less than a requirement of its own.
-export const CLASS_LABELS = { hard: "Required", askable: "Nice to have", list_item: "One of a list", nice_to_have: "Bonus" };
-export const STATUS_LABELS = { met: "Met", unmet: "Not met", unclear: "Unclear", partial: "Partial", gap: "Gap" };
+// 0.3.2 (83r): an `askable` row is a must-have the user can answer, so it reads "Required" like a hard one; "Nice to
+// have" is gone (`nice_to_have` is the genuinely optional row, "Bonus"). `answered`: the user said yes, no line shows it.
+export const CLASS_LABELS = { hard: "Required", askable: "Required", list_item: "One of a list", nice_to_have: "Bonus" };
+export const STATUS_LABELS = { met: "Met", unmet: "Not met", unclear: "Unclear", answered: "You said yes", partial: "Partial", gap: "Gap" };
 
 const CLASS_RANK = { hard: 0, askable: 1, list_item: 2, nice_to_have: 3 };
 // Rows that never hold a match up by themselves (the server's requirement_weights.MINOR_CLASSES).
@@ -689,6 +691,9 @@ export function triggerLabel(trigger, promptFor) {
     const id = trigger.slice("answer:".length);
     const prompt = typeof promptFor === "function" ? promptFor(id) : null;
     return prompt ? `Re-assessed after you answered “${prompt}”` : `Re-assessed after you answered ${id}`;
+  }
+  if (typeof trigger === "string" && trigger.startsWith("master_line:")) {
+    return "Settled after you added a line to your master";
   }
   return trigger || "";
 }

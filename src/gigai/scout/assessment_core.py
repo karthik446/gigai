@@ -79,6 +79,7 @@ from .resume_gate import (
     gate,
     is_authorization_question,
     is_authorization_row,
+    is_mandatory,
     says_no_sponsorship,
     unasked_message,
     unasked_rows,
@@ -1285,6 +1286,49 @@ def row_question(row_id: str, requirement: str) -> dict[str, object]:
     return {"question_id": row_question_id(row_id), "question": _ROW_QUESTION.format(requirement=words), "requirement": requirement}
 
 
+#: 0.3.2 gyl: an answer on file that starts by saying no ("No", "Never", "I have not ...") settles its row unmet: a true gap
+#: (``assess_strict`` T7's sense), not a question to ask again.
+_ANSWER_SAYS_NO = re.compile(r"\A\W*(?:no|nope|never|not\s+really|i\s+(?:have\s+not|haven['’]t|do\s+not|don['’]t|did\s+not|didn['’]t))\b", re.IGNORECASE)
+
+
+def settle_answered_rows(
+    matrix: list[dict[str, object]], questions: list[object], answers: Mapping[str, str], id_of_row: Mapping[int, str],
+) -> tuple[list[object], list[object], list[tuple[str, str]]]:
+    """0.3.2 gyl: an answered question is never asked again. ``(questions kept, questions dropped, (row id, status) settled)``.
+
+    ``answers``: the answers on file by lowercased question id (``Boundary.answers``). A question whose id is one of
+    them is dropped. A must-have row still ``unclear`` whose own question (:func:`row_question_id`) or a dropped
+    question on it was answered reads ``answered`` (the answer is cited as ``A <question_id>``; the job's suggestions
+    draft its line), or ``unmet`` when the answer says no. ``matrix`` rows are changed in place. No model is called.
+    """
+
+    if not answers:
+        return list(questions), [], []
+    dropped = [item for item in questions if isinstance(item, dict) and str(item.get("question_id") or "").lower() in answers]
+    kept = [item for item in questions if not any(item is gone for gone in dropped)]
+    settled: list[tuple[str, str]] = []
+    for row in matrix:
+        if row.get("status") != "unclear" or not is_mandatory(row) or is_authorization_row(row):
+            continue
+        row_id = row["id"] if isinstance(row.get("id"), str) else id_of_row.get(id(row))
+        requirement = fold(str(row.get("requirement") or ""))
+        ids = [row_question_id(row_id).lower()] if row_id else []
+        ids += [str(item["question_id"]).lower() for item in dropped if fold(str(item.get("requirement") or "")) == requirement]  # type: ignore[index]
+        on_file = next((question_id for question_id in ids if question_id in answers), None)
+        if on_file is None:
+            continue
+        says_no = bool(_ANSWER_SAYS_NO.search(answers[on_file]))
+        row["status"] = "unmet" if says_no else "answered"
+        cited = [str(item) for item in row.get("sources") or () if isinstance(item, str)]  # type: ignore[union-attr]
+        row["sources"] = [*cited, f"A {on_file}"] if f"A {on_file}" not in cited else cited
+        row["code_note"] = (
+            "Your answer on file says no: a gap, not a question to ask again."
+            if says_no else "You said yes, and no line of your master shows it; a line is drafted from your answer."
+        )
+        settled.append((row_id or "", str(row["status"])))
+    return kept, dropped, settled
+
+
 def _unasked(matrix: list[Mapping[str, object]], questions: list[object], verdict: object, boundary: Boundary) -> list[tuple[str, Mapping[str, object]]]:
     """``(id, row)`` for each unclear must-have row of a v9 ``matrix`` that holds the verdict with no question on it.
 
@@ -1911,6 +1955,16 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
             structured_questions.append(asked)
             plain_at[id(asked)] = len(plain_questions)
             plain_questions.append(str(asked["question"]))
+
+    # 0.3.2 gyl: an answered question is never asked again, whoever asked it (the model, or code for a row the strict
+    # read lowered): the question goes, and its unclear must-have row reads ``answered`` (or ``unmet`` on an explicit no).
+    if is_v9 and boundary.answers:
+        structured_questions, on_file, settled_answered = settle_answered_rows(normalized_matrix, structured_questions, boundary.answers, id_of_row)  # type: ignore[arg-type]
+        gone = sorted(plain_at.pop(id(item)) for item in on_file if id(item) in plain_at)
+        plain_questions = [text for index, text in enumerate(plain_questions) if index not in gone]
+        plain_at = {key: at - sum(1 for index in gone if index < at) for key, at in plain_at.items()}
+        strict_rows_changed += [(row_id, "T6" if status == "answered" else "T7", status) for row_id, status in settled_answered]
+        strict_lifted = strict_lifted or any(status == "answered" for _row_id, status in settled_answered)
 
     said = _normalize_verdict(decoded.get("verdict")) if "verdict" in decoded else None
     # Orchestrator #14: at most three questions on one-of-a-list rows, those of the rows first in the matrix; the rest

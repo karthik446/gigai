@@ -52,7 +52,7 @@ function QuestionBox({ question, state, value, onChange, disabled, showRequireme
 }
 
 // uat-batch1 (N8, operator decision: option A): a row's class and status
-// are one chip, "Required: Met" / "Nice to have: Unclear" / "Bonus: Met".
+// are one chip, "Required: Met" / "Required: You said yes" / "Bonus: Met" (0.3.2 83r: an askable row reads "Required").
 //
 // 0.1.11 N6 (SPEC section 6, item 2): a `met` row also says where its
 // evidence is on the job's resume: "in the resume", "not in the resume" (with

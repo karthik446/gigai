@@ -5,14 +5,14 @@ The shown fit (``fit.shown_fit``) is the raw percent (``fit.fit_percent``, uncha
 ``unmet`` or a ``hard`` or ``askable`` row is ``unclear`` or ``answered``; the lower cap wins, optional rows never cap,
 and a raw percent below
 the cap stays as it is. ``fit.fit_cap`` names the row and says why. An ``answered`` must-have (the user said yes, no
-resume line says it) also holds the resume at ``hold_question`` (``test_resume_gate``).
+resume line says it) no longer holds the resume (0.3.2 gyl): the gate suggests and the job's suggestions draft the line.
 """
 
 from __future__ import annotations
 
 from gigai.scout import fit, resume_gate
 from gigai.scout.find_jobs.contracts import MatrixStatus, RequirementClass, RequirementMatrixRow
-from gigai.scout.resume_gate import HOLD_QUESTION, gate
+from gigai.scout.resume_gate import SUGGEST, gate
 
 HARD, ASKABLE, LIST_ITEM, NICE = RequirementClass.HARD, RequirementClass.ASKABLE, RequirementClass.LIST_ITEM, RequirementClass.NICE_TO_HAVE
 MET, UNMET, UNCLEAR, ANSWERED = MatrixStatus.MET, MatrixStatus.UNMET, MatrixStatus.UNCLEAR, MatrixStatus.ANSWERED
@@ -42,15 +42,16 @@ def test_an_unclear_askable_row_caps_the_shown_fit_at_69() -> None:
     assert fit.fit_cap(rows).to_json() == {"row": "req-00000a", "reason": "An askable requirement is unclear, so the fit shows at most 69%."}  # type: ignore[union-attr]
 
 
-def test_an_answered_hard_row_caps_the_fit_at_69_and_holds_the_resume() -> None:
+def test_an_answered_hard_row_caps_the_fit_at_69_and_suggests_the_resume() -> None:
     rows = [*_met(9), _row(10, HARD, ANSWERED)]
     assert (fit.fit_percent(rows), fit.shown_fit(rows)) == (90, 69)
     assert fit.fit_cap(rows).to_json() == {  # type: ignore[union-attr]
         "row": "req-00000a", "reason": "A hard requirement is answered yes but not on your resume, so the fit shows at most 69%.",
     }
+    # 0.3.2 gyl: the cap limits the shown fit only; the answered row no longer holds the resume.
     found = gate(rows, [], "matched_above_threshold")
-    assert found.decision == HOLD_QUESTION
-    assert [(reason.code, reason.requirement_id) for reason in found.reasons] == [("answered", "req-00000a")]
+    assert found.decision == SUGGEST
+    assert found.reasons == ()
 
 
 def test_the_lower_cap_wins_whatever_the_row_order() -> None:

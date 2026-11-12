@@ -1,6 +1,6 @@
 """0.1.11 N5 (SPEC 2.1, 2.4, 4.4, 5.3): what the job commands and the job routes both call, so they cannot drift.
 
-``gigai scout suggestions add | resolve | dismiss | list`` and ``GET`` / ``POST /api/jobs/suggestions``;
+``gigai scout suggestions add | resolve | dismiss | add-line | list`` and ``GET`` / ``POST /api/jobs/suggestions``;
 ``gigai scout resume pick`` and ``POST /api/job-resumes/pick``; the part of ``gigai scout resume store`` that
 follows the stored hand-back.  One function per action, each answering one JSON object.
 
@@ -185,7 +185,7 @@ def list_suggestions(
     record = store.read_record(_record_path(home_root, target, job))
     if record is None:
         raise _missing(job)
-    body = _suggestions_body(record, status=status)
+    body = _with_drafts(_suggestions_body(record, status=status), home_root, target, job)
     if with_view:
         view = pick_view(home_root, target, job_url, profile_id=job.profile_id)
         body.update({key: view[key] for key in OPEN_KEYS})
@@ -206,7 +206,7 @@ def _change(home_root: Path, target: Path, job_url: str, profile_id: str | None,
             store.save_record(record)
     except store.SuggestionError as exc:
         raise _refused(exc) from exc
-    return _suggestions_body(record)
+    return _with_drafts(_suggestions_body(record), home_root, target, job)
 
 
 def add_suggestion(
@@ -264,6 +264,199 @@ def dismiss_suggestion(
     (name,) = suggestion_ids([suggestion_id]) or ("",)
     body = _change(home_root, target, job_url, profile_id, lambda record: store.resolve_suggestion(record, name, by=by, how=HOW_DISMISSED, now=now or _clock()))
     return {**body, "dismissed": name}
+
+
+# --- 0.3.2 gyl: the drafted line of a must-have the user said yes to --------------------------------------------
+
+#: The trigger of the history entry ``add_line`` writes on the stored assessment: ``master_line:<line id>``.
+TRIGGER_MASTER_LINE = "master_line"
+
+
+def _matrix_rows(job: job_brief.StoredJob) -> dict[str, object]:
+    """The stored assessment's matrix rows that carry an id, by id."""
+
+    matrix = getattr(getattr(job.assessment, "result", None), "matrix", None) or ()
+    return {row.id: row for row in matrix if getattr(row, "id", None)}
+
+
+def _answered_rows(job: job_brief.StoredJob) -> dict[str, object]:
+    """The stored assessment's ``answered`` rows (the user said yes; no line of the master shows it), by row id."""
+
+    return {row_id: row for row_id, row in _matrix_rows(job).items() if job_brief._word(getattr(row, "status", None)) == "answered"}  # noqa: SLF001 - the brief's own reading of an enum
+
+
+def _row_draft(home_root: Path, target: Path, row: object, master: object | None):  # noqa: ANN202 - drafted_line.Draft | None
+    """The line drafted from the answer or story ``row`` rests on (``drafted_line``), or ``None``: it is no longer there."""
+
+    from . import drafted_line, stories, story_bank
+
+    question_id, story_id = drafted_line.answer_ref(tuple(getattr(row, "sources", ()) or ()))
+    said: str | None = None
+    try:
+        if question_id is not None:
+            entry = story_bank.get_answer(home_root=home_root, target=target, question_id=question_id, with_jobs=False)
+            said = None if entry is None else entry.answer
+        elif story_id is not None:
+            story = stories.get_story(home_root=home_root, target=target, story_id=story_id)
+            said = None if story is None else story.text()
+    except Exception:  # noqa: BLE001 - a read never fails on a story bank it cannot read: no line is drafted then
+        said = None
+    return drafted_line.draft_for(row, master, said, question_id=question_id, story_id=story_id)
+
+
+def _with_drafts(body: dict[str, object], home_root: Path, target: Path, job: job_brief.StoredJob) -> dict[str, object]:
+    """``body`` with ``draft`` ({text, entry_id, backed}) on each open ``master_line`` suggestion of an ``answered`` row.
+
+    Derived on this read from the answer or story and the stored master, and stored nowhere (a suggestion record holds
+    ids only). No draft (no answer to draft from, no master) leaves the suggestion as it is stored.
+    """
+
+    rows = _answered_rows(job)
+    wanted = {
+        str(item["requirement"]) for item in body["suggestions"]  # type: ignore[union-attr]
+        if item.get("kind") == "master_line" and item.get("status") == "open" and item.get("requirement") in rows
+    }
+    if not wanted:
+        return body
+    from .tailor_master import stored_master
+
+    stored = stored_master(Path(home_root), Path(target))
+    master = None if stored is None else stored.master
+    drafts = {row_id: _row_draft(Path(home_root), Path(target), rows[row_id], master) for row_id in wanted}
+    body["suggestions"] = [
+        {**item, "draft": drafts[item["requirement"]].to_json()} if item.get("requirement") in wanted and item.get("status") == "open"
+        and item.get("kind") == "master_line" and drafts[item["requirement"]] is not None else item
+        for item in body["suggestions"]  # type: ignore[union-attr]
+    ]
+    return body
+
+
+def _rechecked_row(row: object, line_id: str, stored: object):  # noqa: ANN202 - RequirementMatrixRow
+    """``row`` read again by the strict check with the new line among its sources: ``met`` when the line shows it, else as it was."""
+
+    from .assess_master import strict_master
+    from .assess_strict import strict_rows
+    from .find_jobs.assess_contracts import RequirementMatrixRow
+
+    candidate = {**row.to_json(), "status": "met", "sources": [line_id, *row.sources]}  # type: ignore[attr-defined]
+    candidate.pop("code_note", None)
+    strict_rows([candidate], strict_master(stored.master.markdown(ids=True)))  # type: ignore[attr-defined]
+    return RequirementMatrixRow.from_json(candidate) if candidate["status"] == "met" else row
+
+
+def _added_before(master: object, backed: str, text: str) -> str | None:
+    """The id of a line of ``master`` that says ``text`` and is backed by ``backed``: what an earlier ``add_line`` of the
+    same suggestion wrote before it stopped (the master was written, a later step was not), or ``None``."""
+
+    said = " ".join(text.split()).casefold()
+    items = getattr(master, "items", {}).values()
+    return next((item.id for item in items if backed in item.backed and " ".join(item.text.split()).casefold() == said), None)
+
+
+def add_line(
+    home_root: Path, target: Path, job_url: str, suggestion_id: str, *, text: str | None = None, actor: str = "operator",
+    profile_id: str | None = None, now: str | None = None,
+) -> dict[str, object]:
+    """0.3.2 gyl: add the drafted line of an open ``master_line`` suggestion to the master, then settle the job on it. No model call.
+
+    ``text``: the user's own words for the line (the draft when not given). The line is written by ``master_edit.add_line``
+    under the newest role, backed by the answer or story (``master_edit.evidence_for``): the revision and backing
+    ``gigai scout resume master add`` makes. Then, in code: the row is read again by the strict check against the new
+    master (``met`` when the line shows it), the gate is decided again, the stored assessment is written back with a
+    history entry ``master_line:<line id>``, the suggestion is resolved (``how: master_line``, ``ref``: the line id) and
+    the resume is picked again (``refresh``). A pick that is refused (the gate holds on another row, an old assessment)
+    is said in ``repick``; the line and the assessment stay written.
+
+    Failure semantics: the steps run master, assessment, suggestion, pick, and no step undoes an earlier one. Each is
+    safe to run again, so the same call run again finishes what a failed one left: a line this suggestion already wrote
+    (same words, backed by the same answer or story) is taken as written (no second line, no ``near_duplicate``), an
+    assessment whose history has ``master_line:<line id>`` is not written again, and the resolve and the pick repeat
+    as they do on their own.
+
+    Raises ``JobActionError``: ``suggestion_not_found``, ``invalid_value`` (not an open master_line of an answered row),
+    ``no_master``, ``answer_not_found``, ``near_duplicate`` (nothing written), and ``master_edit``'s own codes.
+    """
+
+    from dataclasses import replace
+    import json
+
+    from . import master_edit, quick_assess
+    from .find_jobs.assess_contracts import VerdictHistoryEntry
+    from .find_jobs.discovery.storage import atomic_write
+    from .requirement_weights import settled_verdict
+    from .resume_gate import gate
+    from .tailor_master import stored_master
+
+    by = _actor(actor)
+    (name,) = suggestion_ids([suggestion_id]) or ("",)
+    home_root, target = Path(home_root), Path(target)
+    job = _job(home_root, target, job_url, profile_id)
+    record = store.read_record(_record_path(home_root, target, job))
+    if record is None:
+        raise _missing(job)
+    item = next((suggestion for suggestion in record.suggestions if suggestion.id == name), None)
+    if item is None:
+        raise JobActionError("suggestion_not_found", f"this job has no suggestion {name} (`gigai scout suggestions list --job-url URL` lists them)")
+    row = _matrix_rows(job).get(item.requirement or "") if item.kind == "master_line" and item.status == "open" else None
+    state = None if row is None else job_brief._word(getattr(row, "status", None))  # noqa: SLF001 - the brief's own reading of an enum
+    # ``met``: only when an earlier add_line of this suggestion settled the row and stopped before the resolve (below).
+    if row is None or state not in ("answered", "met"):
+        raise JobActionError("invalid_value", f"{name} has no drafted line: a line is added for an open master_line suggestion on a must-have you said yes to")
+    stored = stored_master(home_root, target)
+    if stored is None:
+        raise JobActionError("no_master", "there is no master resume to add the line to: build it first (`gigai scout resume master init`)")
+    draft = _row_draft(home_root, target, row, stored.master)
+    if draft is None and state == "answered":
+        raise JobActionError("answer_not_found", "the answer or story this requirement rests on is no longer in your story bank, so no line is drafted from it")
+    line_text = (text.strip() if isinstance(text, str) and text.strip() else draft.text) if draft is not None else ""
+    earlier = None if draft is None else _added_before(stored.master, draft.backed, line_text)
+    if state == "met" and (earlier is None or earlier not in row.sources):  # type: ignore[union-attr]
+        raise JobActionError("invalid_value", f"{name} has no drafted line: its requirement is met by a line of your master already")
+    assert draft is not None
+    if earlier is not None:
+        line_id, written, warnings = earlier, stored, ()
+    else:
+        try:
+            evidence = master_edit.evidence_for(home_root=home_root, target=target, question_id=draft.question_id, story_id=draft.story_id)
+            write = master_edit.add_line(home_root=home_root, target=target, text=line_text, entry_id=draft.entry_id, evidence=evidence, actor=by)
+        except master_edit.MasterStoreError as exc:
+            raise _refused(exc) from exc
+        if write.status == "near_duplicate" or not write.ids:
+            near = ", ".join(str(getattr(line, "id", "")) for line in write.near_duplicates if getattr(line, "id", None))
+            raise JobActionError(
+                "near_duplicate",
+                "your master has a line like this one already" + (f" ({near})" if near else "") + ", so nothing was written. Change the "
+                f"line's words, or close the suggestion with that line: `gigai scout suggestions resolve {name} --job-url URL --how master_line --ref LINE`",
+            )
+        line_id, written, warnings = write.ids[0], write.stored, tuple(write.warnings)
+    when = now or _clock()
+    trigger = f"{TRIGGER_MASTER_LINE}:{line_id}"
+    # The stored assessment, read again, settled on the new line in code: the strict check, the gate, the history.
+    assessment = quick_assess.read_quick_assessment(home_root, target, job.profile_id, job.job_identity) or job.assessment
+    body = assessment.result  # type: ignore[attr-defined]
+    matrix = body.matrix  # type: ignore[attr-defined]
+    if not any(entry.trigger == trigger for entry in assessment.history):  # type: ignore[attr-defined]
+        matrix = tuple(_rechecked_row(each, line_id, written) if getattr(each, "id", None) == row.id else each for each in matrix)  # type: ignore[union-attr]
+        verdict = settled_verdict(body.verdict, matrix, body.structured_questions)  # type: ignore[attr-defined]
+        decided = gate(matrix, body.structured_questions, verdict)  # type: ignore[attr-defined]
+        settled = replace(
+            assessment, result=replace(body, matrix=matrix, verdict=verdict), resume_gate=decided.record(), updated_at=when,
+            history=quick_assess._history_with(assessment, VerdictHistoryEntry(at=when, verdict=verdict, trigger=trigger)),  # type: ignore[arg-type]  # noqa: SLF001 - the history's one append rule
+        )
+        path = quick_assess.quick_assess_write_path(home_root, target, job.profile_id, job.job_identity)
+        atomic_write(path, json.dumps(settled.to_json(), indent=2, sort_keys=True).encode("utf-8"))
+    resolve_suggestion(home_root, target, job_url, name, how="master_line", actor=by, profile_id=job.profile_id, ref=line_id, now=when)
+    repick: dict[str, object] | None = None
+    try:
+        pick_action(home_root, target, job_url, ACTION_REFRESH, profile_id=job.profile_id, now=when)
+    except (JobActionError, NotBuilt) as exc:
+        repick = {"code": getattr(exc, "code", "pick_not_available"), "message": str(exc)}
+    status = next((job_brief._word(each.status) for each in matrix if getattr(each, "id", None) == row.id), None)  # noqa: SLF001 - the brief's own reading of an enum
+    return {
+        **list_suggestions(home_root, target, job_url, profile_id=job.profile_id),
+        "resolved": name, "line": {"id": line_id, "entry_id": draft.entry_id, "backed": draft.backed},
+        "row": {"id": row.id, "status": status}, "repick": repick, "warnings": list(warnings),
+    }
 
 
 # --- the hand-back's follow-up (SPEC 5.3 "What is stored") ------------------------------------------------------
@@ -548,8 +741,10 @@ __all__ = [
     "STATUSES",
     "SUGGESTIONS_SCHEMA",
     "SUGGESTION_KINDS",
+    "TRIGGER_MASTER_LINE",
     "JobActionError",
     "NotBuilt",
+    "add_line",
     "add_suggestion",
     "after_handback",
     "check_resolves",

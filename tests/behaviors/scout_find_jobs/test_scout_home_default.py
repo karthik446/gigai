@@ -182,6 +182,7 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "suggestions add": ("scout", "suggestions", "add", "--job-url", "https://boards.greenhouse.io/example/jobs/1", "--kind", "reword", "--line", "b-example", "--why", "Say the technique."),
     "suggestions resolve": ("scout", "suggestions", "resolve", "sg-1", "--job-url", "https://boards.greenhouse.io/example/jobs/1", "--how", "master_line", "--ref", "b-example"),
     "suggestions dismiss": ("scout", "suggestions", "dismiss", "sg-1", "--job-url", "https://boards.greenhouse.io/example/jobs/1"),
+    "suggestions add-line": ("scout", "suggestions", "add-line", "sg-1", "--job-url", "https://boards.greenhouse.io/example/jobs/1"),
     "answers list": ("scout", "answers", "list"),
     "answers show": ("scout", "answers", "show", "technical:python"),
     "answers save": ("scout", "answers", "save", "technical:python", "--answer-text", "Eight years."),

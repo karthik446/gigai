@@ -113,21 +113,24 @@ def test_row_4_alternatives_one_supported_counts_as_supported() -> None:
 
 
 @pytest.mark.parametrize("klass", ["hard", "askable", None])
-def test_row_2_answered_a_must_have_the_user_said_yes_to_and_no_resume_line_shows_holds_the_resume(klass: str | None) -> None:
-    """0.1.11.12 F2a (operator decision 2026-10-22): an ``answered`` must-have holds like an open must-have question."""
+def test_row_1_answered_a_must_have_the_user_said_yes_to_and_no_resume_line_shows_suggests_the_resume(klass: str | None) -> None:
+    """0.3.2 gyl (supersedes 0.1.11.12 F2a): an ``answered`` must-have no longer holds. The user's yes supports the row;
+    the resume is suggested and the job's suggestions draft the line for the master (``drafted_line``)."""
 
     rows = [_row("8+ years", "hard", "met"), _row("Kafka", klass, "answered", id="req-aaaaaa", sources=["A tooling:kafka"]), _row("Helm", "list_item", "unclear")]
     found = gate(rows, [_question("Helm")], MATCHED)
-    assert found.decision == HOLD_QUESTION and not found.suggests
-    assert [(reason.code, reason.requirement_id, reason.requirement) for reason in found.reasons] == [("answered", "req-aaaaaa", "Kafka")]
-    assert found.record() == GateRecord(HOLD_QUESTION, (GateReason("answered", "req-aaaaaa"),))
+    assert found.decision == SUGGEST and found.suggests and found.reasons == ()
+    assert found.record() == GateRecord(SUGGEST, ())
+    assert weights.settled_verdict(PENDING, rows, [_question("Helm")]) == MATCHED  # the model's pending is not kept by an answered row
     assert resume_gate.ANSWERED_LINE == "You said yes; add a line to your resume"
     assert resume_gate.unasked_rows(rows, []) == []  # the answer is on file: nothing is asked again
-    # With an open must-have question beside it, the question comes first, then the answered row.
+    # With an open must-have question beside it, only the question holds.
     both = [*rows, _row("Go", "askable", "unclear", id="req-bbbbbb")]
-    assert [(reason.code, reason.requirement_id) for reason in gate(both, [_question("Go")], PENDING).reasons] == [("question_open", "req-bbbbbb"), ("answered", "req-aaaaaa")]
+    assert [(reason.code, reason.requirement_id) for reason in gate(both, [_question("Go")], PENDING).reasons] == [("question_open", "req-bbbbbb")]
     # A hard gap still decides first.
     assert gate([*rows, _row("Clearance", "hard", "unmet", id="req-cccccc")], [], MATCHED).decision == NOT_A_MATCH
+    # A record held under 0.3.1 still reads: the reason code stays known (no migration; a refresh decides again).
+    assert GateRecord.from_json({"decision": HOLD_QUESTION, "reasons": [{"code": "answered", "requirement": "req-aaaaaa"}]}).reasons[0].code == "answered"
 
 
 @pytest.mark.parametrize("klass", ["list_item", "nice_to_have"])

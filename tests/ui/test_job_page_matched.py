@@ -174,13 +174,14 @@ def test_a_matched_job_shows_its_picked_resume_and_apply_gives_the_pdf_and_nothi
         assert coverage_of(ui, ROW_ANSWER_ONLY) == ("answer_only", "from your answer only")
         answer_row = ui.page.locator(f'{TABLE} td[data-row-id="{ROW_ANSWER_ONLY}"]')
         assert (answer_row.locator('[data-role="row-alternatives"]').text_content() or "").strip() == f"any one of: {', '.join(ALTERNATIVES)}"
-        # 0.1.11.3 (item 4): the chips say Required / Nice to have; no internal id, no "Why this class", no "ask" in a chip.
+        # 0.1.11.3 (item 4): no internal id, no "Why this class", no "ask" in a chip. 0.3.2 (83r): an askable row is a
+        # must-have the user can answer, so its chip reads "Required" too; "Nice to have" is said of no row here.
         table_text = ui.page.locator(TABLE).inner_text()
         assert "Why this class" not in table_text and "req-" not in table_text, table_text
         assert answer_row.locator('[data-role="row-class-basis"], [data-action="show-class-basis"]').count() == 0
         chips = [" ".join((chip or "").split()) for chip in ui.page.locator(f"{TABLE} .status-badge").all_text_contents()]
-        assert chips and all(chip.split(":")[0] in {"Required", "Nice to have", "Bonus", "One of a list", "Met", "Unclear", "Not met"} for chip in chips), chips
-        assert "Nice to have: Met" in chips, chips
+        assert chips and all(chip.split(":")[0] in {"Required", "Bonus", "One of a list", "Met", "Unclear", "Not met", "You said yes"} for chip in chips), chips
+        assert "Required: Met" in chips and not any("nice to have" in chip.lower() for chip in chips), chips
         assert not any("ask" in chip.lower() or "must-have" in chip.lower() for chip in chips), chips
         ui.settle()
         # (0.1.11.5: the page opens on Preview always; the one POST is the preview's render, which stores nothing.)

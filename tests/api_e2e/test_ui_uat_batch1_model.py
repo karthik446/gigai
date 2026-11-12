@@ -22,7 +22,8 @@ What is pinned, by UAT item:
   gate went with the tailor call: the resume is picked when the job is
   assessed.)
 * N4  the job description is a short excerpt.
-* N8  ``Required: Met`` / ``Nice to have: Unclear`` / ``Bonus: Met``.
+* N8  ``Required: Met`` / ``Required: Unclear`` / ``Bonus: Met`` (0.3.2 83r: an askable row is a must-have the user
+  can answer, so it reads "Required"; ``answered`` reads "You said yes").
 * N9  ``Sponsorship not stated · N H-1B approvals (FY2026)``, plain
   ``Sponsorship not stated`` without approvals, positive tone only with them.
 * N12 the rotation line never says ``?`` or ``unknown``; the run-confirm
@@ -196,6 +197,7 @@ def _payload() -> dict:
             {"class": "hard", "status": "unmet"},
             {"status": "met"},
             {"class": "some_new_class", "status": "partial"},
+            {"class": "askable", "status": "answered"},
         ],
         "chips": [
             ["unknown", {"approvals": 32, "fiscal_years": [2026]}],
@@ -389,7 +391,7 @@ def test_the_job_description_is_a_short_excerpt(out: dict) -> None:
 
 
 def test_status_reads_class_then_status(out: dict) -> None:
-    assert out["statusLabels"] == ["Required: Met", "Nice to have: Unclear", "Bonus: Met", "Required: Not met", "Met", "Some new class: Partial"]
+    assert out["statusLabels"] == ["Required: Met", "Required: Unclear", "Bonus: Met", "Required: Not met", "Met", "Some new class: Partial", "Required: You said yes"]
 
 
 def test_the_status_rendering_is_option_a_only() -> None:

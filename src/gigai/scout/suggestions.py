@@ -128,6 +128,9 @@ STALE_ASSESSMENT_NEWER = "assessment_newer"
 
 #: The sentence of the suggestion code writes for a ``met`` row no line of the master states.
 ANSWER_ONLY_WHY = "An answer or a story supports this requirement, and no line of your master resume states it. Add a line to your master so a resume can show it."
+#: 0.3.2 gyl: the sentence of the suggestion code writes for a must-have row ``answered`` (the user said yes; no line of the
+#: master shows it). The line itself is drafted when the record is read (``drafted_line``), never stored here.
+ANSWERED_WHY = "You said yes, and no line of your master shows it. A line is drafted from your answer: add it to your master so a resume can show it."
 
 _ANSWER_PREFIX = "A "
 _SUGGESTION_ID = re.compile(r"\Asg-(\d+)\Z")
@@ -561,7 +564,8 @@ def gate_json(gate_record: object | None, check: SelectionCheck | None) -> dict[
 def _assessment_suggestions(
     items: Iterable[AssessmentSuggestion], check_rows: Iterable[CoverageRow], *, start: int, created_at: str,
 ) -> list[Suggestion]:
-    """The assessment's suggestions as record entries, plus one ``master_line`` per ``answer_only`` row it did not name."""
+    """The assessment's suggestions as record entries, plus one ``master_line`` per ``answer_only`` row, and per must-have
+    ``answered`` row (0.3.2 gyl), it did not name."""
 
     out: list[Suggestion] = []
     number = start
@@ -573,9 +577,16 @@ def _assessment_suggestions(
         number += 1
     named = {item.requirement for item in out if item.kind == "master_line"}
     for row in check_rows:
-        if row.coverage == COVERAGE_ANSWER_ONLY and row.id not in named and is_row_id(row.id):
-            out.append(Suggestion(id=f"sg-{number}", kind="master_line", why=ANSWER_ONLY_WHY, source=SOURCE_ASSESSMENT, created_at=created_at, requirement=row.id))
-            number += 1
+        if row.id in named or not is_row_id(row.id):
+            continue
+        if row.coverage == COVERAGE_ANSWER_ONLY:
+            why = ANSWER_ONLY_WHY
+        elif row.status == "answered" and row.mandatory:
+            why = ANSWERED_WHY
+        else:
+            continue
+        out.append(Suggestion(id=f"sg-{number}", kind="master_line", why=why, source=SOURCE_ASSESSMENT, created_at=created_at, requirement=row.id))
+        number += 1
     return out
 
 

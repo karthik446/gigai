@@ -355,7 +355,8 @@ GATE_DECISIONS: tuple[str, ...] = (GATE_SUGGEST, GATE_HOLD_QUESTION, GATE_HOLD_U
 GATE_REASON_HARD_UNMET = "hard_unmet"
 GATE_REASON_QUESTION_OPEN = "question_open"
 GATE_REASON_ASKABLE_UNMET = "askable_unmet"
-#: 0.1.11.12 F2a: a must-have row ``answered`` (the user said yes, no resume line shows it): held like an open question.
+#: 0.1.11.12 F2a: a must-have row ``answered`` (the user said yes, no resume line shows it), held like an open question.
+#: 0.3.2 gyl: no longer produced (an answered row suggests a resume, with a line drafted for the master); kept so records stored before it still read.
 GATE_REASON_ANSWERED = "answered"
 GATE_REASONS: tuple[str, ...] = (GATE_REASON_HARD_UNMET, GATE_REASON_QUESTION_OPEN, GATE_REASON_ASKABLE_UNMET, GATE_REASON_ANSWERED)
 
@@ -804,8 +805,10 @@ class VerdictHistoryEntry(_Contract):
     time), ``verdict`` its verdict (``None`` for a result the prompt gave no
     verdict for), and ``trigger`` names what caused it: ``"assess"`` (the
     first assessment of this job), ``"reassess"`` (assessed again with no
-    answer in between: the CLI or ``POST /api/assess`` on a known job) or
-    ``"answer:<question_id>"`` (``POST /api/answers`` with ``reassess``).
+    answer in between: the CLI or ``POST /api/assess`` on a known job),
+    ``"answer:<question_id>"`` (``POST /api/answers`` with ``reassess``) or
+    ``"master_line:<line_id>"`` (0.3.2: a line drafted from an answer was
+    added to the master and the job settled on it in code, no model call).
     Operator answer 4: a re-assessment APPENDS here, never rewrites.
     """
 

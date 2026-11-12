@@ -50,7 +50,11 @@ the name and contact lines removed, your answers, and the few stories that fit t
 fills a table of the posting's requirements, each one met, not met or unclear, with the line of
 your resume or the answer it relied on. Scout then checks every met must-have row: a row that cites
 no resume line reads as unclear, and a row that rests only on one of your answers reads as
-**answered** (you said yes; the resume shows no line for it). The verdict is read from that table.
+**answered** (the page reads "You said yes"; the resume shows no line for it). The verdict is read
+from that table. An answered must-have does not hold the resume, and its question is not asked
+again: the job gets a suggestion with a line drafted from your answer, and adding it to your master
+(one click, or `gigai scout suggestions add-line`, no model call) settles the row and picks the
+resume again.
 
 A model can misread a posting. The table shows what it relied on for each requirement, so you
 can check it. An assessment made before your settings, your answers or Scout's prompt changed

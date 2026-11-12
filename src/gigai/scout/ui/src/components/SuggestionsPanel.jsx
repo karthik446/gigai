@@ -15,6 +15,10 @@ import { briefCommands, suggestionRows } from "../jobResumeModel.js";
 //   Work on this     shows the two brief commands to copy (SPEC 5.2: the
 //   with your agent  user's part and the posting's part are two calls, never
 //                    one response). Nothing is fetched and no model is called
+//   Add to my master 0.3.2: a master_line suggestion on a must-have you said
+//                    yes to shows the line drafted from your answer; the
+//                    button adds it (`add_line`), and Scout settles the job
+//                    on it in code. No model is called
 //
 // 0.1.11.3 item 9: the card is ONE line by default, "Suggestions (N open)",
 // below the resume card (which holds Generate PDF). The line is a button: a
@@ -96,7 +100,8 @@ export default function SuggestionsPanel({ state, assessment, jobUrl }) {
     setBusy(row.id);
     setError(null);
     postJobSuggestion({ jobUrl: jobUrl || state.jobIdentity, profileId: state.profileId, action: use, id: row.id, how: use === "resolve" ? DONE_HOW[row.kind] || "job_resume_edit" : undefined })
-      .then(() => state.reloadRecord())
+      // add_line picks the resume again on the server: read the stored resume as well as the record.
+      .then(() => (use === "add_line" && typeof state.reload === "function" ? Promise.all([state.reload(), state.reloadRecord()]) : state.reloadRecord()))
       .catch((err) => setError(err.detail || err.message || String(err)))
       .finally(() => setBusy(null));
   };
@@ -126,6 +131,11 @@ export default function SuggestionsPanel({ state, assessment, jobUrl }) {
                 </div>
               )}
               <div data-role="suggestion-why">{row.why}</div>
+              {row.draft && (
+                <div className="muted small" data-role="suggestion-draft">
+                  Drafted from your answer: “{row.draft.text}”
+                </div>
+              )}
               <div className="muted small">
                 <span data-role="suggestion-who">From {row.who}</span> · <span data-role="suggestion-status">{row.statusLine}</span>
               </div>
@@ -141,6 +151,11 @@ export default function SuggestionsPanel({ state, assessment, jobUrl }) {
                     <button className="link-button" data-action="suggestion-dismiss" disabled={busy !== null} onClick={() => write(row, "dismiss")}>
                       Dismiss
                     </button>
+                    {row.draft && (
+                      <button className="link-button" data-action="suggestion-add-line" disabled={busy !== null} onClick={() => write(row, "add_line")}>
+                        Add to my master
+                      </button>
+                    )}
                   </>
                 )}
                 {commands.length > 0 && (

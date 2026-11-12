@@ -171,20 +171,28 @@ function heldRequirements(gate, assessment) {
 
 // The one sentence of a held job: "2 must-have requirements wait for your answer", "Has a gap: Kubernetes in
 // production", "Not a match: ...". null when the gate does not hold.
+// 0.3.2 (83r): it says what the hold waits for. A must-have you said yes to (`answered`) waits for no answer, only for a
+// line on your master: it is named as a drafted line to add (a record held under 0.3.1 names it as an `answered` reason).
 export function holdSentence(gate, assessment) {
   if (!gateHolds(gate)) {
     return null;
   }
-  const named = heldRequirements(gate, assessment);
+  const matrix = list(assessment && assessment.matrix);
+  const answered = matrix.filter((row) => isMandatory(row) && row.status === "answered").length;
+  const lines = answered > 0 ? `; ${plural(answered, "drafted line", "drafted lines")} to add to your master` : "";
   if (gate.decision === GATE_HOLD_QUESTION) {
-    const matrix = list(assessment && assessment.matrix);
+    const named = heldRequirements({ reasons: list(gate.reasons).filter((reason) => reason.code !== "answered") }, assessment);
     const asked = new Set(openQuestions(assessment).map((question) => text(question.requirement)));
-    const waiting = named.length || matrix.filter((row) => isMandatory(row) && asked.has(row.requirement)).length || openQuestions(assessment).length;
-    return waiting > 0 ? `${plural(waiting, "must-have requirement waits", "must-have requirements wait")} for your answer` : "This job waits for your answers";
+    const waiting = named.length || matrix.filter((row) => isMandatory(row) && row.status !== "answered" && asked.has(row.requirement)).length || openQuestions(assessment).length;
+    if (waiting > 0) {
+      return `${plural(waiting, "must-have requirement waits", "must-have requirements wait")} for your answer${lines}`;
+    }
+    return answered > 0 ? `${plural(answered, "drafted line waits", "drafted lines wait")} to be added to your master` : "This job waits for your answers";
   }
+  const named = heldRequirements(gate, assessment);
   if (gate.decision === GATE_HOLD_UNMET) {
-    const gaps = named.length ? named : list(assessment && assessment.matrix).filter((row) => row.class === "askable" && row.status === "unmet").map((row) => row.requirement);
-    return gaps.length ? `Has a gap: ${gaps.join("; ")}` : "Has a gap: a must-have requirement is not met";
+    const gaps = named.length ? named : matrix.filter((row) => row.class === "askable" && row.status === "unmet").map((row) => row.requirement);
+    return (gaps.length ? `Has a gap: ${gaps.join("; ")}` : "Has a gap: a must-have requirement is not met") + lines;
   }
   const why = text(assessment && assessment.not_a_match_reason) || named.join("; ");
   return why ? `Not a match: ${why}` : "Not a match";
@@ -883,6 +891,8 @@ export function suggestionRows({ record = null, assessment = null, lineText = nu
     const how = resolved ? HOW_WORDS[resolved.how] || text(resolved.how).replace(/_/g, " ") : "";
     const by = resolved ? WRITERS[resolved.by] || text(resolved.by) : "";
     const closed = status === "dismissed" ? "Dismissed" : "Done";
+    // 0.3.2 (gyl): the line drafted from your answer, on an open master_line suggestion (derived on the server's read).
+    const draft = object(item.draft);
     return {
       id: text(item.id),
       kind: text(item.kind),
@@ -897,6 +907,7 @@ export function suggestionRows({ record = null, assessment = null, lineText = nu
       statusLine: status === "open" ? "Open" : [closed, status === "done" && how ? how : "", by ? `by ${by}` : "", resolved ? dateLabel(resolved.at) : ""].filter(Boolean).join(" · "),
       open: status === "open",
       stored: Boolean(recorded),
+      draft: status === "open" && draft && text(draft.text) ? { text: text(draft.text), entryId: text(draft.entry_id), backed: text(draft.backed) } : null,
     };
   });
 }
