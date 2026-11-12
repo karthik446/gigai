@@ -22,6 +22,33 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.3.2
+
+This release changes how `eval base` reports gate (b), the noise floor, for a rung that cannot fix a seed or a
+temperature. It is a reporting rule, not a loosened limit. It changes no stored data.
+
+#### Changed
+
+- **Gate (b) is `measured`, not pass or fail, when the noise rung cannot fix a seed or a temperature.** The noise rung
+  of the shipped ladder is `claude-haiku`, which runs through the claude CLI. That CLI takes no seed and no
+  temperature, so its repeats differ by design and gate (b) failed for it every time (0.3.1 live run: sd 5.25 at n=11,
+  3.06 at n=50, against a limit of 2.0). The limits are unchanged: at most 2.0 points of sd and 10% of items flipping.
+  The report now shows them next to the numbers and says which of them the numbers are over, as a fact and not a
+  verdict. A rung that can fix a seed or a temperature (`gemini-flash-lite`, `gemma`), and a `--deterministic` run,
+  keep the pass or fail rule exactly as before.
+- **A `measured` gate (b) says how big a difference between two rungs the data can tell apart.** The smallest such
+  difference is 1.96 times the square root of 2 times the noise sd, about 2.77 sd. Two rungs' suite scores can be told
+  apart only if they differ by more than that. It assumes every rung is as noisy as the noise rung, and the sd comes
+  from only three repeats, so it is rough. `eval base` prints it in the text report and the markdown table, and
+  `--json` carries `gates.b` with `rule` (`limit` or `measured`), `reason`, `limits`, `over_limits`,
+  `min_detectable_difference` and the sentence that explains it.
+- `ladder.toml` is unchanged, so the pre-registration hash is the same and gigs that pin it keep working.
+
+#### Upgrade notes
+
+- No migration and no `config.toml` change. Rollback is `uv tool install --reinstall gigai==0.3.1`.
+- Installing GigAI again with `uv tool install` removes gigs installed into the tool environment; install them again.
+
 ### 0.3.1
 
 This release fixes three problems found by the first live run of `eval base` on 0.3.0. It changes no stored data.
