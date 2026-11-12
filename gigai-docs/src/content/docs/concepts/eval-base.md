@@ -103,9 +103,24 @@ every rung, so its gate a is always `not_validated`.
 
 **b. Noise floor.** One rung answers up to 100 items again, with the items spread evenly across
 the sets. Its main answers count as the first repeat, so with three repeats it answers those
-items twice more. The rung is `claude-haiku`, or the strongest other selected rung. The gate
-passes when the suite score varies by at most 2.0 points (sample standard deviation) and at most
-10% of items flip between right and wrong.
+items twice more. The rung is `claude-haiku`, or the strongest other selected rung. The limits
+are a suite score that varies by at most 2.0 points (sample standard deviation) and at most 10%
+of items that flip between right and wrong.
+
+Gate b is pass/fail when the rung can fix a seed or a temperature. It is also pass/fail for the
+deterministic rung, whose repeats cannot differ. A `--deterministic` run, the check on every
+commit, keeps gate b pass/fail too: every rung answers from canned data there, so its repeats
+cannot differ either. Otherwise gate b is `measured`, not pass/fail, when the rung can fix
+neither. `claude-haiku` runs through the claude CLI, which takes no seed and no temperature, so
+its repeats differ by design. The limits are unchanged. The report shows them next to the
+numbers and says which ones the numbers exceed, as a fact and not as a verdict.
+
+A measured gate b also reports the smallest difference the data can tell apart: 1.96 times the
+square root of 2 times the noise sd, about 2.77 times the sd, in points. In plain words, two
+rungs' suite scores can be told apart only if they differ by more than that. The 1.96 is for a
+95% interval. The square root of 2 is there because both scores are noisy. It assumes every rung
+is as noisy as the noise rung, and the sd comes from only three repeats, so it is rough. With an
+sd of 3 points, for example, two rungs must differ by more than about 8.3 points.
 
 **c. Canaries.** Three deliberate sabotages must each pull the score down:
 
@@ -129,7 +144,7 @@ and the replay made 0 calls. Because it scores the same stored text again, it ca
 that is not repeatable and answers lost in the copy. It cannot catch a model that answers
 differently on a second call; gate b measures that.
 
-Exit code 0 means the run completed. Read each gate's status, `pass`, `fail` or
+Exit code 0 means the run completed. Read each gate's status, `pass`, `fail`, `measured` or
 `not_validated`, in the report. Exit code 0 does not mean the gates passed.
 
 ## Cost and caps

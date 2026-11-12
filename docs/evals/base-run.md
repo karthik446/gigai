@@ -34,12 +34,14 @@ sets, run ids and numbers only, never item text. Angle brackets mark the filled 
 | Gate | Measure | Status |
 |---|---|---|
 | a order | tau-b <tau> (min <min>) | <pass/fail/not_validated>[: reason] |
-| b noise | sd <points> points, flip rate <percent>%, n=<items> | <status> |
+| b noise | sd <points> points, flip rate <percent>%, n=<items>[, smallest tell-apart difference <points> points] | <pass/fail/measured/not_validated> |
 | c broken_prompt | drop <points> points, p <p> | <status> |
 | c truncated_context | drop <points> points, p <p> | <status> |
 | c wrong_label | drop <points> points, p <p> | <status> |
 | d judge | <reason> | not_validated |
 | e replay | max abs delta <delta>, <calls> calls | <status> |
+
+[Gate b is measured, not pass/fail: <reason>. Limits sd <points> points and flip rate <percent>%, over: <sd, flip rate, or none>. Smallest tell-apart difference: <formula sentence>.]
 ```
 
 ## Reading it
@@ -61,8 +63,20 @@ sets, run ids and numbers only, never item text. Angle brackets mark the filled 
   tied, is `not_validated`.
 - **Gate b** re-asks `noise.items` (100) items on the noise rung (`noise.rung`, else the
   strongest selected rung). Its main answers are repeat 0, so `noise.k` (3) means two more
-  passes. It passes when the sample SD of the suite score is at most 2.0 points and at most 10%
-  of items flip.
+  passes. The limits are a sample SD of the suite score of at most 2.0 points and at most 10%
+  of items that flip. When the noise rung can fix a seed or a temperature, is the deterministic
+  rung, or the run is `--deterministic` (the every-commit check, where every rung answers from
+  canned data, so repeats cannot differ), the gate passes within both limits and fails
+  otherwise; the JSON `gates.b` has `rule` `limit` and `limits`. When it can fix neither (today
+  the `claude_cli` and `codex_cli` rungs), its repeats differ by design, so the status is
+  `measured`, not pass/fail,
+  and `rule` is `measured`. The JSON then has `limits`, `reason`, `over_limits` (which limit the
+  numbers exceed, as facts), `min_detectable_difference` and
+  `min_detectable_difference_formula`. The smallest tell-apart
+  difference is 1.96 x sqrt(2) x SD points (about 2.77 SD): two rungs' suite scores can be told
+  apart only if they differ by more than that. It assumes every rung is as noisy as the noise
+  rung and the SD comes from only k repeats, so it is rough. Too few scored items stays
+  `not_validated`.
 - **Gate c** passes a canary when its score falls by at least its `min_drop` (10 / 15 / 30
   points) and the exact McNemar p of the flips is below 0.01. The two calling canaries re-ask
   their `items` (100 each), spread across their sets, on the canary rung (`canaries.rung`, else

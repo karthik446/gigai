@@ -17,6 +17,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import zlib
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -278,6 +279,88 @@ def test_noise_gate_sets_weigh_equally_and_bad_input_is_handled() -> None:
     assert base.noise_gate(repeats([1], n=10), max_sd_points=2.0, max_flip_rate=0.1)["status"] == "not_validated"
     with pytest.raises(NonFiniteScoreError):
         base.noise_gate([("s", [1.0, math.nan]), ("s", [1.0, 1.0])], max_sd_points=2.0, max_flip_rate=0.1)
+
+
+def haiku(**changes: Any) -> base.Rung:
+    """The shipped ``claude-haiku`` rung (claude_cli, no knobs), with ``changes`` applied."""
+
+    return replace(base.load_ladder().rung("claude-haiku"), **changes)
+
+
+def gate_b(right: list[int], rung: base.Rung, *, deterministic: bool = False) -> dict[str, Any]:
+    return base.noise_rule(base.noise_gate(repeats(right), max_sd_points=2.0, max_flip_rate=0.10), rung, deterministic=deterministic)
+
+
+#: 100 items over three repeats with 40, 50, 60 right: sd 10 points, 20 items flip (20%); over both limits.
+NOISY = [40, 50, 60]
+
+
+def test_an_unfixed_noise_rung_is_measured_never_failed() -> None:
+    rung = haiku()
+    assert rung.knobs == () and rung.adapter == "claude_cli"
+    measured = gate_b(NOISY, rung)
+    assert (measured["status"], measured["rule"], measured["n"], measured["sd"], measured["flip_rate"]) == ("measured", "measured", 100, 10.0, 0.20)
+    assert measured["min_detectable_difference"] == pytest.approx(1.96 * math.sqrt(2) * 10.0, abs=1e-9)
+    assert measured["over_limits"] == {"sd": True, "flip_rate": True}
+    assert measured["limits"] == {"max_sd_points": 2.0, "max_flip_rate": 0.10}
+    assert measured["reason"] == "the claude_cli rung takes no seed or temperature, so its repeats differ by design; the limits are reported but not applied"
+    assert measured["min_detectable_difference_formula"] == base.MIN_DETECTABLE_DIFFERENCE_FORMULA
+    assert base.MIN_DETECTABLE_DIFFERENCE_FORMULA.startswith("two rungs' suite scores can be told apart only if they differ by more than 2.77 times")
+    # Within the limits it is still measured; the over_limits facts say so.
+    calm = gate_b([50, 52, 54], rung)
+    assert (calm["status"], calm["over_limits"]) == ("measured", {"sd": False, "flip_rate": False})
+    # The pass/fail maths are untouched: the same numbers, only the status and the added keys differ.
+    plain = base.noise_gate(repeats(NOISY), max_sd_points=2.0, max_flip_rate=0.10)
+    assert {key: measured[key] for key in plain if key != "status"} == {key: value for key, value in plain.items() if key != "status"}
+
+
+@pytest.mark.parametrize("knobs", [("temperature", "seed"), ("temperature",), ("seed",)])
+def test_a_noise_rung_that_fixes_a_seed_or_a_temperature_keeps_the_limits(knobs: tuple[str, ...]) -> None:
+    over = gate_b(NOISY, haiku(knobs=knobs))
+    assert (over["status"], over["rule"], over["limits"]) == ("fail", "limit", {"max_sd_points": 2.0, "max_flip_rate": 0.10})
+    assert "over_limits" not in over and "min_detectable_difference" not in over and "reason" not in over
+    assert gate_b([50, 52, 54], haiku(knobs=knobs))["status"] == "pass"
+
+
+def test_the_deterministic_adapter_and_run_keep_the_limits_because_their_repeats_cannot_differ() -> None:
+    rung = base.load_ladder().rung("deterministic")
+    assert rung.knobs == () and rung.deterministic
+    steady = gate_b([50, 50, 50], rung)
+    assert (steady["sd"], steady["status"], steady["rule"]) == (0.0, "pass", "limit")
+    # In a --deterministic run every rung answers from canned data, claude-haiku too.
+    assert (gate_b([50, 50, 50], haiku(), deterministic=True)["status"], gate_b(NOISY, haiku(), deterministic=True)["status"]) == ("pass", "fail")
+    assert gate_b(NOISY, haiku(), deterministic=True)["rule"] == "limit"
+
+
+def test_an_unfixed_noise_rung_with_too_few_scored_items_stays_not_validated() -> None:
+    few = base.noise_rule(base.noise_gate([("s", [1.0, 0.0])], max_sd_points=2.0, max_flip_rate=0.10), haiku(), deterministic=False)
+    assert (few["status"], few["reason"], few["rule"]) == ("not_validated", "needs 2+ scored items with 2+ repeats each", "measured")
+    assert (few["sd"], few["min_detectable_difference"], few["over_limits"]) == (None, None, None)
+
+
+def test_a_measured_gate_b_reads_measured_in_the_text_and_markdown_reports(gig: GigContext) -> None:
+    report = deterministic_run(gig, "--max-calls", "0")
+    report["gates"]["b"] = {**report["gates"]["b"], **gate_b(NOISY, haiku())}
+    assert "rule" in report["gates"]["b"]
+    smallest = f"smallest tell-apart difference {1.96 * math.sqrt(2) * 10.0:.2f} points"
+    [line] = [line for line in base.report_lines(report) if line.startswith("  b noise:")]
+    assert line.startswith(f"  b noise: sd 10.00 points, flip rate 20.0% on n=100: measured, {smallest}")
+    assert "limits sd 2 points and flip rate 10%, over: sd, flip rate" in line and "fail" not in line
+    assert f"    {base.MIN_DETECTABLE_DIFFERENCE_FORMULA}" in base.report_lines(report)
+    markdown = base.render_markdown(report)
+    [row] = [row for row in markdown.splitlines() if row.startswith("| b noise |")]
+    assert row == f"| b noise | sd 10.00 points, flip rate 20.0%, n=100, {smallest} | measured |"
+    [note] = [row for row in markdown.splitlines() if row.startswith("Gate b is measured")]
+    assert note == (
+        f"Gate b is measured, not pass/fail: {report['gates']['b']['reason']}. Limits sd 2 points and flip rate 10%, over: sd, flip rate."
+        f" Smallest tell-apart difference: {base.MIN_DETECTABLE_DIFFERENCE_FORMULA}."
+    )
+    assert "fail" not in row and "fail" not in note.replace("pass/fail", "")
+
+
+def test_a_failed_seeded_gate_b_renders_as_before() -> None:
+    b = gate_b(NOISY, haiku(knobs=("temperature", "seed")))
+    assert base._noise_row(b) == "| b noise | sd 10.00 points, flip rate 20.0%, n=100 | fail |"
 
 
 # --- gate c: canaries --------------------------------------------------------------------------------------------
@@ -546,7 +629,9 @@ def test_the_deterministic_gate_run_records_every_gate_with_no_call(gig: GigCont
     gates = report["gates"]
     assert (gates["a"]["tau"], gates["a"]["status"]) == (None, "not_validated")
     assert gates["a"]["excluded_sets"] == ["contractnli", "quality", "ragtruth", "rewardbench2"]
+    # A --deterministic run answers every rung from canned data, so even claude-haiku's repeats cannot differ: limits.
     assert (gates["b"]["sd"], gates["b"]["flip_rate"], gates["b"]["n"], gates["b"]["status"]) == (0.0, 0.0, 20, "pass")
+    assert (gates["b"]["rung"], gates["b"]["rule"]) == ("claude-haiku", "limit") and "over_limits" not in gates["b"]
     assert [c["canary"] for c in gates["c"]] == list(base.CANARIES)
     assert [(c["drop"], c["status"]) for c in gates["c"]] == [(80.0, "pass"), (100.0, "pass"), (100.0, "pass")]
     assert all(c["p"] < 0.01 for c in gates["c"])
@@ -810,6 +895,39 @@ def test_a_live_rung_calls_once_per_item_noise_repeat_and_canary(gig: GigContext
     assert rows(gig.home, called) == [(main + noise + canaries,)]
     # The replay copies the first main run's traces (claude-haiku on contractnli) with their call metadata, calling nothing.
     assert report["gates"]["e"]["traces"] == 10 and report["gates"]["e"]["calls_made"] == 0
+
+
+def test_a_flaky_live_noise_rung_is_measured_when_unfixed_and_failed_when_seeded(gig: GigContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """On top of answer_live, every second and later ask of about a third of the prompts answers wrong."""
+
+    real = DeterministicAdapter.invoke
+    answer_live(gig, monkeypatch)
+    canned = DeterministicAdapter.invoke
+    asked: dict[str, int] = {}
+
+    def flaky(self: DeterministicAdapter, request: Any) -> Any:
+        n = asked.get(request.prompt, 0)
+        asked[request.prompt] = n + 1
+        if n and (zlib.crc32(request.prompt.encode()) + n) % 3 == 0:
+            self._responses = {**self._responses, request.prompt: "no answer"}
+            return real(self, request)
+        return canned(self, request)
+
+    monkeypatch.setattr(DeterministicAdapter, "invoke", flaky)
+    by_rungs = {}
+    for rungs in ("claude-haiku,deterministic", "gemini-flash-lite,deterministic"):
+        asked.clear()
+        result = invoke(gig, "--rungs", rungs, "--max-calls", str(HAIKU_GATE_CALLS), "--json", "--report", str(tmp_path / f"{rungs}.md"))
+        assert result.exit_code == 0, result.stderr
+        by_rungs[rungs] = json.loads(result.stdout)["gates"]["b"]
+    haiku_b, gemini_b = by_rungs["claude-haiku,deterministic"], by_rungs["gemini-flash-lite,deterministic"]
+    assert (haiku_b["rung"], haiku_b["status"], haiku_b["rule"], haiku_b["over_limits"]) == ("claude-haiku", "measured", "measured", {"sd": True, "flip_rate": True})
+    assert haiku_b["sd"] > 2.0 and haiku_b["flip_rate"] > 0.10
+    assert haiku_b["min_detectable_difference"] == pytest.approx(1.96 * math.sqrt(2) * haiku_b["sd"], abs=1e-9)
+    assert "| measured |" in (tmp_path / "claude-haiku,deterministic.md").read_text(encoding="utf-8")
+    # The same flaky answers on a rung that fixes seed and temperature still fail the limits.
+    assert (gemini_b["rung"], gemini_b["status"], gemini_b["rule"]) == ("gemini-flash-lite", "fail", "limit")
+    assert (gemini_b["sd"], gemini_b["flip_rate"]) == (haiku_b["sd"], haiku_b["flip_rate"]) and "over_limits" not in gemini_b
 
 
 def test_a_calling_canary_asks_only_its_items_when_the_slice_holds_more(gig: GigContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

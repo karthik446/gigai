@@ -7,7 +7,9 @@ validation gates:
 
 - a: the measured order of the rungs agrees with the published order (Kendall tau-b at least 0.6).
 - b: the noise floor: one rung answers the same items three times; the suite score moves at most 2 points and at
-  most 10% of items flip between right and wrong.
+  most 10% of items flip between right and wrong. A noise rung that can fix neither a seed nor a temperature repeats
+  differently by design, so for it gate b is ``measured``: the numbers and the limits are reported, not judged. The
+  deterministic rung and a ``--deterministic`` run answer from canned data, so they keep pass/fail.
 - c: three canaries sabotage the suite on purpose (a broken prompt, the first quarter of the context, a scorer
   with wrong labels); the score must drop by a set number of points with an exact McNemar p below 0.01.
 - d: judge validation against human labels, which the base run does not check yet (``not_validated``).
@@ -380,6 +382,47 @@ def noise_gate(rows: Sequence[tuple[str, Sequence[float | None]]], *, max_sd_poi
     flip_rate = flips / len(scored)
     status = "pass" if sd <= max_sd_points and flip_rate <= max_flip_rate else "fail"
     return {**out, "k": k, "suite_scores": suite, "sd": sd, "flips": flips, "flip_rate": flip_rate, "status": status}
+
+
+#: The plain-words reading of a measured gate b's ``min_detectable_difference``, printed verbatim in the reports.
+MIN_DETECTABLE_DIFFERENCE_FORMULA = (
+    "two rungs' suite scores can be told apart only if they differ by more than 2.77 times the noise sd (1.96 for a"
+    " 95% interval, times the square root of 2 because both scores are noisy); this assumes every rung is as noisy as"
+    " the noise rung, and the sd comes from only k repeats, so it is rough"
+)
+
+
+def noise_rule(result: Mapping[str, Any], rung: Rung, *, deterministic: bool) -> dict[str, Any]:
+    """Gate b's ``noise_gate`` result under the rule its noise rung allows.
+
+    A rung that can fix a seed or a temperature keeps the limits: ``rule`` is ``limit`` and the status stays ``pass``
+    / ``fail``. So does the deterministic adapter, and every rung of a ``--deterministic`` run (``deterministic``),
+    because canned answers cannot differ between repeats. A rung that can fix neither repeats differently by design,
+    so its gate is a measurement: ``rule`` is ``measured``, the status becomes ``measured`` (``not_validated`` wins),
+    and the result carries the limits, which of them the numbers exceed, and the smallest difference the noise lets
+    two suite scores be told apart by (``1.96 * sqrt(2) * sd`` points).
+    """
+
+    limits = {"max_sd_points": result["max_sd_points"], "max_flip_rate": result["max_flip_rate"]}
+    if deterministic or rung.deterministic or "seed" in rung.knobs or "temperature" in rung.knobs:
+        return {**result, "rule": "limit", "limits": limits}
+    sd, flip_rate = result["sd"], result["flip_rate"]
+    out = {
+        **result,
+        "rule": "measured",
+        "limits": limits,
+        "min_detectable_difference": None if sd is None else 1.96 * math.sqrt(2) * sd,
+        "min_detectable_difference_formula": MIN_DETECTABLE_DIFFERENCE_FORMULA,
+    }
+    if result["status"] == "not_validated":
+        return {**out, "over_limits": None}
+    return {
+        **out,
+        "status": "measured",
+        "reason": f"the {rung.adapter} rung takes no seed or temperature, so its repeats differ by design; the limits are reported but not applied",
+        "over_limits": {"sd": sd > limits["max_sd_points"], "flip_rate": flip_rate > limits["max_flip_rate"]},
+    }
+
 
 
 def canary_verdict(name: str, base: Sequence[float], canary: Sequence[float], *, min_drop: float, max_p: float) -> dict[str, Any]:
@@ -1291,7 +1334,7 @@ def _noise(run: _Context, selected: Sequence[Rung], gated: Sequence[str], values
         max_flip_rate=ladder.noise["max_flip_rate"],
     )
     return {
-        **result,
+        **noise_rule(result, rung, deterministic=run.deterministic),
         "rung": rung.name,
         "run_id": record.run_id,
         "repeat_0": "the rung's main runs",
@@ -1478,10 +1521,17 @@ def report_lines(report: Mapping[str, Any]) -> list[str]:
     a, b, e = gates["a"], gates["b"], gates["e"]
     lines.append("gates:")
     lines.append(f"  a order: tau-b {_num(a['tau'], 3)} (min {a['min_tau']:g}): {a['status']}" + (f" ({a['reason']})" if a.get("reason") else ""))
-    lines.append(
-        f"  b noise: sd {_num(b.get('sd'))} points, flip rate {_num(None if b.get('flip_rate') is None else 100 * b['flip_rate'], 1)}%"
-        f" on n={b.get('n', 0)}: {b['status']}" + (f" ({b['reason']})" if b.get("reason") else "")
-    )
+    if b["status"] == "measured":
+        lines.append(
+            f"  b noise: sd {_num(b['sd'])} points, flip rate {_num(100 * b['flip_rate'], 1)}% on n={b['n']}: measured,"
+            f" smallest tell-apart difference {_num(b['min_detectable_difference'])} points (limits {_noise_limits(b)}; {b['reason']})"
+        )
+        lines.append(f"    {b['min_detectable_difference_formula']}")
+    else:
+        lines.append(
+            f"  b noise: sd {_num(b.get('sd'))} points, flip rate {_num(None if b.get('flip_rate') is None else 100 * b['flip_rate'], 1)}%"
+            f" on n={b.get('n', 0)}: {b['status']}" + (f" ({b['reason']})" if b.get("reason") else "")
+        )
     for canary in gates["c"]:
         lines.append(
             f"  c {canary['canary']}: drop {_num(canary.get('drop'))} points (min {canary.get('min_drop', 0):g}),"
@@ -1532,13 +1582,36 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "| Gate | Measure | Status |",
         "|---|---|---|",
         f"| a order | tau-b {_num(a['tau'], 3)} (min {a['min_tau']:g}) | {a['status']}{': ' + a['reason'] if a.get('reason') else ''} |",
-        f"| b noise | sd {_num(b.get('sd'))} points, flip rate {_num(None if b.get('flip_rate') is None else 100 * b['flip_rate'], 1)}%, n={b.get('n', 0)} | {b['status']} |",
+        _noise_row(b),
     ]
     for canary in gates["c"]:
         out.append(f"| c {canary['canary']} | drop {_num(canary.get('drop'))} points, p {_num(canary.get('p'), 4)} | {canary['status']} |")
     out.append(f"| d judge | {gates['d']['reason']} | {gates['d']['status']} |")
     out.append(f"| e replay | max abs delta {_num(e.get('max_abs_delta'), 6)}, {e.get('calls_made', 0)} calls | {e['status']} |")
+    if b["status"] == "measured":
+        out += [
+            "",
+            f"Gate b is measured, not pass/fail: {b['reason']}. Limits {_noise_limits(b)}."
+            f" Smallest tell-apart difference: {b['min_detectable_difference_formula']}.",
+        ]
     return "\n".join(out) + "\n"
+
+
+def _noise_limits(b: Mapping[str, Any]) -> str:
+    """``sd 2 points and flip rate 10%, over: sd, flip rate``: a measured gate b's limits; the over list is a fact."""
+
+    limits, over = b["limits"], [name.replace("_", " ") for name, above in b["over_limits"].items() if above]
+    return f"sd {limits['max_sd_points']:g} points and flip rate {100 * limits['max_flip_rate']:g}%, over: {', '.join(over) or 'none'}"
+
+
+def _noise_row(b: Mapping[str, Any]) -> str:
+    """Gate b's row in the markdown Gates table."""
+
+    flip = _num(None if b.get("flip_rate") is None else 100 * b["flip_rate"], 1)
+    if b["status"] == "measured":
+        measure = f"sd {_num(b['sd'])} points, flip rate {flip}%, n={b['n']}, smallest tell-apart difference {_num(b['min_detectable_difference'])} points"
+        return f"| b noise | {measure} | measured |"
+    return f"| b noise | sd {_num(b.get('sd'))} points, flip rate {flip}%, n={b.get('n', 0)} | {b['status']} |"
 
 
 @click.command("base")
