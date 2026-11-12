@@ -32,29 +32,49 @@ mechanics here. Those belong in the internal changelog.
 
 ### 0.3.2
 
-This release changes how `eval base` reports gate (b), the noise floor, for a rung that cannot fix a seed or a
-temperature. It is a reporting rule, not a loosened limit. It changes no stored data.
+This release fixes what the first live `eval base` run showed about how the run picks the sets it gates and how it
+reports noise. The fixes are in a new pre-registration, ladder v2; ladder v1 is kept as it was. It changes no stored
+data.
 
 #### Changed
 
-- **Gate (b) is `measured`, not pass or fail, when the noise rung cannot fix a seed or a temperature.** The noise rung
-  of the shipped ladder is `claude-haiku`, which runs through the claude CLI. That CLI takes no seed and no
-  temperature, so its repeats differ by design and gate (b) failed for it every time (0.3.1 live run: sd 5.25 at n=11,
-  3.06 at n=50, against a limit of 2.0). The limits are unchanged: at most 2.0 points of sd and 10% of items flipping.
-  The report now shows them next to the numbers and says which of them the numbers are over, as a fact and not a
-  verdict. A rung that can fix a seed or a temperature (`gemini-flash-lite`, `gemma`), and a `--deterministic` run,
-  keep the pass or fail rule exactly as before.
+- **Ladder v2: the deterministic rung no longer decides what is gated.** The deterministic rung answers each item's
+  canned completion, which is the gold answer on four of the six gate-tier sets. In 0.3.1 that marked those four sets
+  "saturated, not gated", so the order check (gate a) ranked four rungs on one set (ifeval) and the noise check
+  (gate b) had 11 scored items instead of 100. In v2 only model rungs count when a set is tested for saturation, the
+  noise items are drawn from the sets that are gated (after scoring), and the order check ranks the model rungs only.
+  The deterministic rung is still run and shown; the report lists it as unranked, with the reason. The saturation line
+  (97%), the limits, the number of repeats and items, the canaries and every price are unchanged. jsonschemabench was
+  correctly marked saturated in the 0.3.1 run: the deterministic rung scored 34 there, but `claude-haiku` scored
+  exactly 97.0, the line.
+- **Ladder v1 is kept, and a gig picks its ladder by the hash it registered.** `src/gigai/evals/ladder.toml` (v1) is
+  byte for byte what 0.3.0 and 0.3.1 shipped, with the same hash and the same behaviour, so a gig that pins it
+  keeps working and the 0.3.1 base-run report stays valid. `ladder-v2.toml` ships beside it. A gig that pins neither
+  hash is refused, naming both. A gig with no pin runs v2. v2 was registered on 2026-11-12, after the first live run,
+  and says so in its header. The report and `--json` show `ladder_version` and the rules that applied.
+- **Gate (b) is `measured`, not pass or fail, when the noise rung cannot fix a seed or a temperature.** This is a
+  reporting rule, not a loosened limit, and it applies under both ladders. The noise rung of the shipped ladder is
+  `claude-haiku`, which runs through the claude CLI. That CLI takes no seed and no temperature, so its repeats differ
+  by design and gate (b) failed for it every time (0.3.1 live run: sd 5.25 at n=11, 3.06 at n=50, against a limit of
+  2.0). The limits are unchanged: at most 2.0 points of sd and 10% of items flipping. The report now shows them next
+  to the numbers and says which of them the numbers are over, as a fact and not a verdict. A rung that can fix a seed
+  or a temperature (`gemini-flash-lite`, `gemma`), and a `--deterministic` run, keep the pass or fail rule exactly as
+  before.
 - **A `measured` gate (b) says how big a difference between two rungs the data can tell apart.** The smallest such
   difference is 1.96 times the square root of 2 times the noise sd, about 2.77 sd. Two rungs' suite scores can be told
   apart only if they differ by more than that. It assumes every rung is as noisy as the noise rung, and the sd comes
   from only three repeats, so it is rough. `eval base` prints it in the text report and the markdown table, and
   `--json` carries `gates.b` with `rule` (`limit` or `measured`), `reason`, `limits`, `over_limits`,
   `min_detectable_difference` and the sentence that explains it.
-- `ladder.toml` is unchanged, so the pre-registration hash is the same and gigs that pin it keep working.
+- **`gigai gig list` describes Scout by what it does.** The description read "Install and configure the Scout gig for
+  this project.", which looks like an instruction. It now reads "Find job postings, assess them against your resume,
+  and draft applications." (the same line is the help of `gigai scout`).
 
 #### Upgrade notes
 
 - No migration and no `config.toml` change. Rollback is `uv tool install --reinstall gigai==0.3.1`.
+- A gig that registered the v1 hash keeps running under v1 rules, including the saturation and noise behaviour
+  described above as fixed. To get the fixes, register the v2 hash (`ladder_sha256` in the gig's release gate).
 - Installing GigAI again with `uv tool install` removes gigs installed into the tool environment; install them again.
 
 ### 0.3.1
