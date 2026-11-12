@@ -6,8 +6,9 @@
 [gig]
 manifest_format = 1
 name = "scout"
-# The `gigai --help` line of 0.1.11.13's `scout` group (scout_cli.py `scout_group` help), byte for byte.
-description = "Install and configure the Scout gig for this project."
+# The `gigai --help` line of the `scout` group (scout_cli.py `scout_group` help), byte for byte. 0.3.2 reworded it: the
+# old line, "Install and configure the Scout gig for this project.", read as an instruction in `gigai gig list`.
+description = "Find job postings, assess them against your resume, and draft applications."
 core = ">=0.2,<0.4"
 
 [commands]

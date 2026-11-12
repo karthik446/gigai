@@ -199,7 +199,7 @@ def write_starter_find_jobs_config(target_root: Path) -> bool:
     return True
 
 
-@click.group("scout", help="Install and configure the Scout gig for this project.")
+@click.group("scout", help="Find job postings, assess them against your resume, and draft applications.")
 def scout_group() -> None:
     pass
 
