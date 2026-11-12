@@ -824,7 +824,7 @@
             "ladder_sha256": {
               "type": "string",
               "pattern": "^[0-9a-f]{64}$",
-              "description": "SHA-256 of the shipped `gigai/evals/ladder.toml` the gig registered; `eval base` refuses a different ladder."
+              "description": "SHA-256 of the shipped ladder the gig registered: `gigai/evals/ladder.toml` (v1) or `gigai/evals/ladder-v2.toml` (v2). `eval base` runs that ladder and refuses a pin that matches neither."
             }
           },
           "description": "`release` gates: the pre-registration `gigai <gig> eval base` checks before it runs."

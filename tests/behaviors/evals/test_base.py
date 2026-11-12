@@ -19,7 +19,7 @@ import subprocess
 import sys
 import zlib
 from collections.abc import Callable, Iterator
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +59,9 @@ CI_ITEMS = {"contractnli": 10, "ragtruth": 20, "quality": 10, "ifeval": 10, "jso
 #: claude-haiku alone on the gate tier: 560 items, 100 noise items x 2 more repeats (its main answers are repeat 0),
 #: and, as the only rung, both 100-item calling canaries.
 HAIKU_GATE_CALLS = 560 + 200 + 200
+#: Ladder v1 (``ladder.toml``), which 0.3.0 and 0.3.1 shipped and the fixture gig pins; it must never change.
+V1_SHA256 = "30953cb9b2f3b8fb2decad8a1230fc3497723a1b5c9f3b54b8d4a479e79cea12"
+V2_RULES = {"saturation": "model", "noise_sets": "gated", "order_rungs": "model"}
 assert loopback_only  # the autouse socket guard, imported to apply here
 
 
@@ -175,9 +178,28 @@ def test_the_ollama_rung_pins_a_tagged_model_because_ollama_lists_name_tag() -> 
         assert name and tag and ":" not in tag and rung.model.strip() == rung.model
 
 
-def test_the_fixture_gig_pins_the_shipped_ladder_sha256() -> None:
+def test_the_fixture_gig_pins_ladder_v1_which_stays_shipped_byte_for_byte() -> None:
     pins = {step["gates"]["release"]["prereg"]["ladder_sha256"] for step in MANIFEST["evals"]["steps"] if "release" in step.get("gates", {})}
-    assert pins == {base.ladder_sha256()} == {base.load_ladder().sha256}
+    v1 = base.load_ladder(base.LADDER_PATHS[0])
+    assert pins == {V1_SHA256} == {base.ladder_sha256(base.LADDER_PATHS[0])} == {v1.sha256}
+    assert (base.LADDER_PATHS[0].name, v1.version, v1.registered_at, dict(v1.rules)) == ("ladder.toml", 1, "2026-11-09", base.V1_RULES)
+
+
+def test_ladder_v2_is_the_newest_shipped_ladder_and_the_default() -> None:
+    v2 = base.load_ladder()
+    assert [path.name for path in base.LADDER_PATHS] == ["ladder.toml", "ladder-v2.toml"]
+    assert (v2.version, v2.registered_at, dict(v2.rules)) == (2, "2026-11-12", V2_RULES)
+    assert v2.sha256 == base.ladder_sha256() == base.ladder_sha256(base.LADDER_PATHS[1]) != V1_SHA256
+
+
+def test_ladder_v2_equals_v1_on_every_field_but_version_registered_at_rules_and_the_floor_rank_source() -> None:
+    v1, v2 = (base.load_ladder(path) for path in base.LADDER_PATHS)
+    changed = {"sha256", "version", "registered_at", "rules", "rungs"}
+    for name in (f.name for f in fields(base.Ladder)):
+        assert (name in changed) or getattr(v1, name) == getattr(v2, name), name
+    assert [replace(rung, rank_source="") for rung in v1.rungs] == [replace(rung, rank_source="") for rung in v2.rungs]
+    assert [rung.name for rung in v1.rungs if rung.rank_source != v2.rung(rung.name).rank_source] == ["deterministic"]
+    assert "not ranked in gate a" in v2.rung("deterministic").rank_source
 
 
 def test_a_calling_canary_takes_its_items_or_100_and_spreads_them_round_robin(tmp_path: Path) -> None:
@@ -545,7 +567,7 @@ def test_prereg_and_manifest_cap_problems_exit_2(gig: GigContext) -> None:
     shipped = base.ladder_sha256()
     other = "0" * 64
     assert refused(context(gig.home, with_gate(prereg={"registered_at": "2026-11-09", "ladder_sha256": other})), "--deterministic") == (
-        f"gigai {GIG} eval: the gig registered ladder sha256 {other}; the shipped ladder is {shipped}\n"
+        f"gigai {GIG} eval: the gig registered ladder sha256 {other}; it matches no shipped ladder (v1 {V1_SHA256}, v2 {shipped})\n"
     )
     for bad in ({"registered_at": "2026-11-09", "ladder_sha256": "abc"}, {"ladder_sha256": shipped}, "pinned"):
         assert refused(context(gig.home, with_gate(prereg=bad)), "--deterministic") == (
@@ -562,7 +584,7 @@ def test_deterministic_needs_the_committed_ci_slices(gig: GigContext, tmp_path: 
     assert not evals_db_path(GIG, gig.home).exists()
 
 
-SHIPPED = base.LADDER_PATH.read_text(encoding="utf-8")
+SHIPPED = base.LADDER_PATHS[0].read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -603,7 +625,7 @@ def test_a_malformed_ladder_exits_2_naming_the_key(
         text = SHIPPED.replace(old, new, 1)
     path = tmp_path / "ladder.toml"
     path.write_text(text, encoding="utf-8")
-    monkeypatch.setattr(base, "LADDER_PATH", path)
+    monkeypatch.setattr(base, "LADDER_PATHS", (path,))
     stderr = refused(gig, "--deterministic", "--plan")
     assert stderr.startswith(f"gigai {GIG} eval: {message or 'ladder.toml: noise.k must be an integer >= 2'}")
     assert not evals_db_path(GIG, gig.home).exists()
@@ -612,8 +634,233 @@ def test_a_malformed_ladder_exits_2_naming_the_key(
 def test_a_changed_ladder_no_longer_matches_the_gig_pin(gig: GigContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "ladder.toml"
     path.write_text(SHIPPED.replace("min_drop = 10", "min_drop = 9", 1), encoding="utf-8")
-    monkeypatch.setattr(base, "LADDER_PATH", path)
+    monkeypatch.setattr(base, "LADDER_PATHS", (path,))
     assert "the gig registered ladder sha256" in refused(gig, "--deterministic", "--plan")
+
+
+# --- ladder versions and their rules ------------------------------------------------------------------------------
+
+
+def pinned_to(pin: str | None) -> dict[str, Any]:
+    """MANIFEST with every release gate pinning ladder ``pin``, or with no ``prereg`` at all when ``pin`` is None."""
+
+    manifest = copy.deepcopy(MANIFEST)
+    for step in manifest["evals"]["steps"]:
+        gate = (step.get("gates") or {}).get("release")
+        if gate is not None:
+            gate.pop("prereg", None)
+            if pin is not None:
+                gate["prereg"] = {"registered_at": "2026-11-12", "ladder_sha256": pin}
+    return manifest
+
+
+def test_a_pin_picks_its_shipped_ladder_no_pin_picks_the_newest_and_any_other_pin_is_refused(gig: GigContext) -> None:
+    v2 = base.ladder_sha256()
+    for pin, version, sha, rules in ((V1_SHA256, 1, V1_SHA256, base.V1_RULES), (v2, 2, v2, V2_RULES), (None, 2, v2, V2_RULES)):
+        result = invoke(context(gig.home, pinned_to(pin)), "--deterministic", "--plan", "--json")
+        assert result.exit_code == 0, result.stderr
+        planned = json.loads(result.stdout)
+        assert (planned["ladder_sha256"], planned["ladder_version"], planned["rules"]) == (sha, version, rules), pin
+    other = "f" * 64
+    assert refused(context(gig.home, pinned_to(other)), "--deterministic", "--plan") == (
+        f"gigai {GIG} eval: the gig registered ladder sha256 {other}; it matches no shipped ladder (v1 {V1_SHA256}, v2 {v2})\n"
+    )
+    assert not evals_db_path(GIG, gig.home).exists()
+
+
+@pytest.mark.parametrize(
+    ("added", "message"),
+    [
+        ('[rules]\nsaturation = "best"\nnoise_sets = "gated"\norder_rungs = "model"\n', 'ladder.toml: rules.saturation must be "all" or "model"'),
+        ('[rules]\nsaturation = "model"\nnoise_sets = 1\norder_rungs = "model"\n', 'ladder.toml: rules.noise_sets must be "all" or "gated"'),
+        ('[rules]\nsaturation = "model"\nnoise_sets = "gated"\n', 'ladder.toml: rules.order_rungs must be "all" or "model"'),
+        (
+            '[rules]\nsaturation = "model"\nnoise_sets = "gated"\norder_rungs = "model"\nsaturated = "model"\n',
+            "ladder.toml: rules.saturated is not a rule (the rules are saturation, noise_sets, order_rungs)",
+        ),
+        ('rules = "v2"\n', "ladder.toml: rules must be a table"),
+        ("version = 0\n", "ladder.toml: version must be an integer >= 1"),
+        ('version = "2"\n', "ladder.toml: version must be an integer >= 1"),
+    ],
+)
+def test_a_wrong_ladder_version_or_rule_exits_2_naming_the_key(
+    gig: GigContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, added: str, message: str
+) -> None:
+    path = tmp_path / "ladder.toml"
+    path.write_text(SHIPPED.replace('registered_at = "2026-11-09"\n', f'registered_at = "2026-11-09"\n{added}', 1), encoding="utf-8")
+    monkeypatch.setattr(base, "LADDER_PATHS", (path,))
+    assert refused(context(gig.home, pinned_to(None)), "--deterministic", "--plan") == f"gigai {GIG} eval: {message}\n"
+    assert not evals_db_path(GIG, gig.home).exists()
+
+
+def test_saturation_under_v2_counts_model_rungs_only_and_keeps_the_at_or_above_line() -> None:
+    v1, v2 = (base.load_ladder(path) for path in base.LADDER_PATHS)
+    selected = [v2.rung(name) for name in ("claude-haiku", "gemma", "deterministic")]
+    sizes = {"contractnli": 10, "jsonschemabench": 100, "ifeval": 100, "quality": 10}
+
+    def share(right: int, of: int) -> list[float | None]:
+        return [1.0] * right + [0.0] * (of - right)
+
+    values = {
+        # Only the deterministic rung is at 100: saturated under v1, gated under v2.
+        ("claude-haiku", "contractnli"): share(8, 10),
+        ("gemma", "contractnli"): share(5, 10),
+        ("deterministic", "contractnli"): share(10, 10),
+        # A model rung at exactly 0.97 (97 of 100) saturates the set under both rules: the line is ">=".
+        ("claude-haiku", "jsonschemabench"): share(97, 100),
+        ("gemma", "jsonschemabench"): share(83, 100),
+        ("deterministic", "jsonschemabench"): share(34, 100),
+        # A model rung just below the line leaves the set gated under both rules.
+        ("claude-haiku", "ifeval"): share(96, 100),
+        ("gemma", "ifeval"): share(81, 100),
+        ("deterministic", "ifeval"): share(80, 100),
+        # No model rung scored the set: only the deterministic rung counts under v1, nothing under v2.
+        ("claude-haiku", "quality"): [None] * 10,
+        ("gemma", "quality"): [None] * 10,
+        ("deterministic", "quality"): share(10, 10),
+    }
+    by_rule = {ladder.version: base.saturation(ladder, selected, sizes, values) for ladder in (v1, v2)}
+    assert {row["set"]: (row["best"], row["saturated"]) for row in by_rule[1]} == {
+        "contractnli": (100.0, True),
+        "jsonschemabench": (97.0, True),
+        "ifeval": (96.0, False),
+        "quality": (100.0, True),
+    }
+    assert {row["set"]: (row["best"], row["saturated"]) for row in by_rule[2]} == {
+        "contractnli": (80.0, False),
+        "jsonschemabench": (97.0, True),
+        "ifeval": (96.0, False),
+        "quality": (None, False),
+    }
+    assert [(row["set"], row["items"], row["k_score"]) for row in by_rule[2]] == [(name, size, v2.sets[name]["k_score"]) for name, size in sizes.items()]
+
+
+#: Live answers for the v1 / v2 comparison: per model rung, how many of each set's first ci items it answers wrong.
+#: Every other answer is the ci completion, so the deterministic rung keeps its 100 on four sets.
+WRONG = {
+    "claude-haiku": {"contractnli": 1, "quality": 1, "rewardbench2": 1},
+    "gemini-flash-lite": {"contractnli": 2, "ragtruth": 2, "quality": 2, "rewardbench2": 2},
+    "gemma": {"contractnli": 3, "ragtruth": 4, "quality": 3, "rewardbench2": 3},
+}
+
+
+def answer_by_rung(gig: GigContext, monkeypatch: pytest.MonkeyPatch, wrong: dict[str, dict[str, int]]) -> None:
+    """On top of answer_live, the rung asked answers "no answer" to the first ``wrong[rung][set]`` items of each set."""
+
+    real = DeterministicAdapter.invoke
+    answer_live(gig, monkeypatch)
+    resolve, canned = factory.resolve_model_adapter, DeterministicAdapter.invoke
+    bad = {(rung, item.prompt) for rung, by_set in wrong.items() for set_name, n in by_set.items() for item in ci_items(set_name)[:n]}
+    asking = {"rung": ""}
+
+    def resolving(config: Any, target: str, **kwargs: Any) -> Any:
+        asking["rung"] = target  # the base run builds one adapter per call, then calls it
+        return resolve(config, target, **kwargs)
+
+    def answering(self: DeterministicAdapter, request: Any) -> Any:
+        if (asking["rung"], request.prompt) in bad:
+            self._responses = {**self._responses, request.prompt: "no answer"}
+            return real(self, request)
+        return canned(self, request)
+
+    monkeypatch.setattr(factory, "resolve_model_adapter", resolving)
+    monkeypatch.setattr(DeterministicAdapter, "invoke", answering)
+
+
+def wrong_answers_run(gig: GigContext, monkeypatch: pytest.MonkeyPatch, pin: str, tmp_path: Path) -> tuple[dict[str, Any], list[str], str]:
+    """Three model rungs and the floor on WRONG's answers, pinned to ``pin``: the JSON report, the text lines, the markdown."""
+
+    pinned = context(gig.home, pinned_to(pin))
+    answer_by_rung(pinned, monkeypatch, WRONG)
+    argv = ("--rungs", "claude-haiku,gemini-flash-lite,gemma,deterministic", "--max-calls", "100000")
+    report_path = tmp_path / f"{pin[:6]}.md"
+    result = invoke(pinned, *argv, "--json", "--report", str(report_path))
+    assert result.exit_code == 0, result.stderr
+    report = json.loads(result.stdout)
+    text = base.report_lines(report)  # what the run prints without --json
+    return report, text, report_path.read_text(encoding="utf-8")
+
+
+def noise_items(gig: GigContext, run_id: str) -> dict[str, int]:
+    return json.loads(rows(gig.home, "SELECT dataset_slice_recipe FROM runs WHERE run_id = ?", run_id)[0][0])["items"]
+
+
+def test_a_v1_pin_keeps_the_v1_rules_on_live_answers(gig: GigContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    report, _, markdown = wrong_answers_run(gig, monkeypatch, V1_SHA256, tmp_path)
+    assert (report["ladder_version"], report["ladder_sha256"], report["rules"]) == (1, V1_SHA256, base.V1_RULES)
+    # The deterministic rung's 100 saturates four sets, so only ifeval and jsonschemabench are gated.
+    assert [s["set"] for s in report["sets"] if s["saturated"]] == ["contractnli", "ragtruth", "quality", "rewardbench2"]
+    a, b = report["gates"]["a"], report["gates"]["b"]
+    assert (a["rungs"], a["status"], a["tau"]) == (["claude-haiku", "gemini-flash-lite", "gemma", "deterministic"], "not_validated", None)
+    assert "unranked" not in a
+    # v1 cuts the noise run's 100 items from every set, then keeps the gated sets' items only.
+    assert noise_items(gig, b["run_id"]) == CI_ITEMS
+    # claude-haiku fixes no seed, so its noise is measured, not held to the limits (gate b's rule, unchanged).
+    assert (b["rung"], b["n"], b["rule"], b["status"]) == ("claude-haiku", 20, "measured", "measured")
+    assert "- Rules: v1 rules" in markdown and f"- Ladder: v1 {V1_SHA256[:12]} (sha256 `{V1_SHA256}`)" in markdown
+
+
+def test_a_v2_pin_gates_sets_only_the_floor_saturates_and_ranks_the_model_rungs(gig: GigContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    v2 = base.ladder_sha256()
+    report, text, markdown = wrong_answers_run(gig, monkeypatch, v2, tmp_path)
+    assert (report["ladder_version"], report["ladder_sha256"], report["rules"]) == (2, v2, V2_RULES)
+    best = {s["set"]: (s["best"], s["saturated"]) for s in report["sets"]}
+    # The deterministic rung no longer counts: only ragtruth, where claude-haiku answers all 20 right, stays saturated.
+    assert best == {
+        "contractnli": (90.0, False),
+        "ragtruth": (100.0, True),
+        "quality": (90.0, False),
+        "ifeval": (60.0, False),
+        "jsonschemabench": (30.0, False),
+        "rewardbench2": (90.0, False),
+    }
+    a, b = report["gates"]["a"], report["gates"]["b"]
+    # Suites over the five gated sets: claude-haiku 72, gemini-flash-lite 66, gemma 60, all in published rank order.
+    assert (a["rungs"], a["status"], a["tau"]) == (["claude-haiku", "gemini-flash-lite", "gemma"], "pass", pytest.approx(1.0))
+    assert a["unranked"] == [{"rung": "deterministic", "reason": base.UNRANKED_REASON}]
+    suites = {r["name"]: r["suite_score"] for r in report["rungs"]}
+    assert suites == pytest.approx({"claude-haiku": 72.0, "gemini-flash-lite": 66.0, "gemma": 60.0, "deterministic": 78.0})
+    # The noise items come from the gated sets only: all 50 of their items fit the 100-item budget.
+    gated = {name: n for name, n in CI_ITEMS.items() if name != "ragtruth"}
+    assert noise_items(gig, b["run_id"]) == gated
+    assert (b["rung"], b["n"], b["items_available"], b["status"]) == ("claude-haiku", 50, 50, "measured")
+    assert rows(gig.home, "SELECT count(*) FROM traces WHERE run_id = ?", b["run_id"]) == [(2 * 50,)]
+    assert text[:2] == [
+        f"base run: gate tier on the release slices, ladder v2 {v2[:12]}",
+        "rules: saturation over model rungs, noise from gated sets, gate a ranks model rungs",
+    ]
+    assert [line for line in text if line.startswith("  a order: tau-b 1.000")] == [
+        f"  a order: tau-b 1.000 (min 0.6): pass; unranked: deterministic ({base.UNRANKED_REASON})"
+    ]
+    assert f"- Ladder: v2 {v2[:12]} (sha256 `{v2}`)" in markdown
+    assert "- Rules: saturation over model rungs, noise from gated sets, gate a ranks model rungs" in markdown
+    assert "; unranked: deterministic" in markdown
+
+
+def test_noise_with_every_set_saturated_is_not_validated_under_v2(gig: GigContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    path = tmp_path / "ladder-v2.toml"
+    shipped = base.LADDER_PATHS[1].read_text(encoding="utf-8")
+    path.write_text(shipped.replace("\nsaturated_at = 0.97\n", "\nsaturated_at = 0.25\n", 1), encoding="utf-8")
+    monkeypatch.setattr(base, "LADDER_PATHS", (path,))
+    report = deterministic_run(context(gig.home, pinned_to(None)))
+    assert all(s["saturated"] for s in report["sets"])
+    b = report["gates"]["b"]
+    assert (b["status"], b["reason"], b["sd"], b["flip_rate"], b["n"], b["items_available"]) == ("not_validated", "every set is saturated", None, None, 0, 0)
+
+
+def test_a_deterministic_run_with_no_pin_runs_v2_on_the_same_canned_answers(gig: GigContext, built: list[str]) -> None:
+    """Every rung answers from the ci slices, so every model rung also scores 100 on four sets: the gated sets match v1."""
+
+    report = deterministic_run(context(gig.home, pinned_to(None)), "--max-calls", "0")
+    assert (report["ladder_version"], report["ladder_sha256"], report["rules"]) == (2, base.ladder_sha256(), V2_RULES)
+    assert [s["set"] for s in report["sets"] if s["saturated"]] == ["contractnli", "ragtruth", "quality", "rewardbench2"]
+    a, b = report["gates"]["a"], report["gates"]["b"]
+    assert "deterministic" not in a["rungs"] and a["unranked"] == [{"rung": "deterministic", "reason": base.UNRANKED_REASON}]
+    assert (a["status"], a["tau"]) == ("not_validated", None)
+    # The noise run now cuts its items from ifeval and jsonschemabench only; the same 20 items are measured.
+    assert noise_items(gig, b["run_id"]) == {"ifeval": 10, "jsonschemabench": 10}
+    assert (b["sd"], b["flip_rate"], b["n"], b["status"]) == (0.0, 0.0, 20, "pass")
+    assert built == []
 
 
 # --- the deterministic run ---------------------------------------------------------------------------------------
@@ -621,7 +868,8 @@ def test_a_changed_ladder_no_longer_matches_the_gig_pin(gig: GigContext, tmp_pat
 
 def test_the_deterministic_gate_run_records_every_gate_with_no_call(gig: GigContext, built: list[str], tmp_path: Path) -> None:
     report = deterministic_run(gig, "--max-calls", "0", "--report", str(tmp_path / "base.md"))
-    assert (report["source"], report["tier"], report["ladder_sha256"], report["calls_made"]) == ("ci", "gate", base.ladder_sha256(), 0)
+    assert (report["source"], report["tier"], report["ladder_sha256"], report["calls_made"]) == ("ci", "gate", V1_SHA256, 0)
+    assert (report["ladder_version"], report["rules"]) == (1, base.V1_RULES)
     assert len(report["runs"]) == 6 * 6
     for row in report["runs"]:
         assert (row["items"], row["scored"], row["score"], row["calls_made"]) == (CI_ITEMS[row["set"]], CI_ITEMS[row["set"]], SNAPSHOT[row["set"]], 0)
@@ -654,7 +902,7 @@ def test_the_text_report_lists_rungs_sets_and_gates(gig: GigContext) -> None:
     result = invoke(gig, "--deterministic")
     assert result.exit_code == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == f"base run: gate tier on the ci slices, ladder {base.ladder_sha256()[:12]}"
+    assert lines[:2] == [f"base run: gate tier on the ci slices, ladder v1 {V1_SHA256[:12]}", "rules: v1 rules"]
     assert "  claude-haiku: rank 2, ran, 0 calls, suite 45.00" in lines
     assert "  a order: tau-b n/a (min 0.6): not_validated (every measured rung scored the same, so tau-b is undefined)" in lines
     assert lines[-1] == "calls made: 0"
@@ -938,7 +1186,7 @@ def test_a_calling_canary_asks_only_its_items_when_the_slice_holds_more(gig: Gig
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(base, "LADDER_PATH", path)
+    monkeypatch.setattr(base, "LADDER_PATHS", (path,))
     pinned = context(gig.home, with_gate(prereg={"registered_at": "2026-11-09", "ladder_sha256": base.ladder_sha256(path)}))
     answer_live(pinned, monkeypatch)
     result = invoke(pinned, "--rungs", "claude-haiku", "--max-calls", str(HAIKU_GATE_CALLS), "--json")

@@ -34,7 +34,7 @@ Without `--deterministic`, the run reads each set's release slice from the gig f
 
 ## The ladder
 
-`src/gigai/evals/ladder.toml` lists the rungs. Each rung records:
+`src/gigai/evals/ladder-v2.toml` lists the rungs. Each rung records:
 
 - its adapter and model
 - its price per million tokens, with the page the price came from
@@ -60,17 +60,60 @@ The Claude rungs pin the `claude` CLI aliases `sonnet` and `haiku`. These aliase
 newest Sonnet and Haiku, so a rank is true for the model the alias named on the rank's date,
 which the ladder records.
 
-The ladder file is data, and its SHA-256 is part of every report. A Gig can register the ladder
-it was evaluated against in a step's release gate:
+The ladder file is data, and its version and SHA-256 are part of every report. A Gig can
+register the ladder it was evaluated against in a step's release gate:
 
 ```toml
 [[evals.steps]]
 # ...
-gates.release = { suite = "release", prereg = { registered_at = "2026-11-09", ladder_sha256 = "<sha256 of ladder.toml>" } }
+gates.release = { suite = "release", prereg = { registered_at = "2026-11-12", ladder_sha256 = "<sha256 of ladder-v2.toml>" } }
 ```
 
-If the shipped ladder no longer matches that SHA-256, the run is refused with exit 2. To accept
-a changed ladder, register it again.
+## Ladder versions
+
+gigai ships two ladders. A registered ladder is never edited. A fix comes as a new version, and
+the old file stays, byte for byte, so its pins and old reports stay valid.
+
+| Version | File | Shipped in | SHA-256 |
+|---|---|---|---|
+| v1 | `ladder.toml` | 0.3.0, 0.3.1 and later | `30953cb9b2f3b8fb2decad8a1230fc3497723a1b5c9f3b54b8d4a479e79cea12` |
+| v2 | `ladder-v2.toml` | 0.3.2 and later | `80fea4128a6e7ced6f381dda7b640662d4aabcc35b8c609590facef9e722fc7c` |
+
+The registered `ladder_sha256` picks the ladder:
+
+- It matches v1: the run uses v1 and the v1 rules.
+- It matches v2: the run uses v2.
+- There is no registration: the run uses the newest ladder, v2.
+- It matches neither: the run is refused with exit 2, and the message names both shipped
+  hashes. To move a Gig to v2, register the v2 SHA-256 with a new `registered_at`.
+
+v2 keeps every rung, rank, price, threshold, `k`, item count and canary of v1. It changes three
+rules, which the file's `[rules]` table names. The 0.3.1 live run showed the reasons:
+
+- **Saturation counts model rungs only** (`saturation = "model"`). Under v1 the deterministic
+  rung counted. Its canned answers are the gold answer on ContractNLI, QuALITY, RAGTruth and
+  RewardBench 2, so it scored 100 there and marked those sets saturated. On ContractNLI,
+  QuALITY and RewardBench 2 no model reached the line. Gate a was left with one set, IFEval.
+- **Gate b draws its items from the gated sets only** (`noise_sets = "gated"`). Under v1 the
+  100 items were spread over every set and the saturated ones were then dropped, so the 0.3.1
+  run's gate b measured 11 items. The plan's noise items stay an upper bound. The
+  dollars can shift, because the gated sets' prompts may be longer or shorter.
+- **Gate a ranks the model rungs only** (`order_rungs = "model"`). The deterministic rung is not
+  a weaker model: on several sets its answers are the gold answer. It is still run and its
+  suite score is shown. The report lists it as unranked, with the reason.
+
+Two sets stay saturated under v2 on the 0.3.1 live run, and that is the rule working:
+`claude-haiku` scored 97.0 on JSONSchemaBench, exactly the 97-point line (the check is "at or
+above"), and `gemini-flash-lite` scored 99.0 on RAGTruth. v2 does not move the line.
+
+The text, `--json` and markdown reports name the version and its rules:
+
+```text
+base run: gate tier on the release slices, ladder v2 <first 12 hex of its sha256>
+rules: saturation over model rungs, noise from gated sets, gate a ranks model rungs
+```
+
+A v1 run prints `rules: v1 rules`.
 
 ## Tiers
 
@@ -90,19 +133,23 @@ A JSONSchemaBench item is asked in schema mode: the call carries the item's own 
 the model sees the schema its answer must match. An answer that is not JSON scores 0, and so
 does a provider that refuses the schema with HTTP 400.
 
-A set where the best rung scores 97 points or more is marked saturated. A saturated set is
-reported but left out of a rung's suite score and out of the gates.
+A set where the best counted rung scores 97 points or more is marked saturated. A saturated set
+is reported but left out of a rung's suite score and out of the gates. Under v2 only the model
+rungs count; under v1 every rung does (see [Ladder versions](#ladder-versions)).
 
 ## The five gates
 
 **a. Order.** This gate compares the measured order of the rungs with their published order. It
 uses Kendall's tau-b, which runs from +1 (the two orders agree on every pair of rungs) through 0
 (no relation) to −1 (exact reverse). It passes when tau-b is at least 0.6. With fewer than three
-measured rungs, or with every rung tied, the gate is `not_validated`. The deterministic run ties
-every rung, so its gate a is always `not_validated`.
+measured rungs, or with every rung tied, the gate is `not_validated`. Under v2 it ranks the model
+rungs only and lists the deterministic rung as unranked. The deterministic run ties every rung,
+so its gate a is always `not_validated`.
 
 **b. Noise floor.** One rung answers up to 100 items again, with the items spread evenly across
-the sets. Its main answers count as the first repeat, so with three repeats it answers those
+the gated sets (under v1, across every set, keeping the gated ones). With every set saturated,
+gate b is `not_validated`. Its main answers count as the first repeat, so with three repeats
+it answers those
 items twice more. The rung is `claude-haiku`, or the strongest other selected rung. The limits
 are a suite score that varies by at most 2.0 points (sample standard deviation) and at most 10%
 of items that flip between right and wrong.

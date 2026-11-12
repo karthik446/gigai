@@ -8,7 +8,8 @@ sets, run ids and numbers only, never item text. Angle brackets mark the filled 
 # Base run: <gig>
 
 - Tier: <gate|judge|full>, <ci|release> slices[ (deterministic)]
-- Ladder sha256: `<64-hex sha256 of src/gigai/evals/ladder.toml>`
+- Ladder: v<ladder version> <first 12 hex of its sha256> (sha256 `<64-hex sha256 of the ladder file the run used>`)
+- Rules: <v1 rules | saturation over model rungs, noise from gated sets, gate a ranks model rungs>
 - Calls made: <model calls: calls to every rung but the deterministic one>
 
 ## Rungs
@@ -33,7 +34,7 @@ sets, run ids and numbers only, never item text. Angle brackets mark the filled 
 
 | Gate | Measure | Status |
 |---|---|---|
-| a order | tau-b <tau> (min <min>) | <pass/fail/not_validated>[: reason] |
+| a order | tau-b <tau> (min <min>)[; unranked: <rung>, ...] | <pass/fail/not_validated>[: reason] |
 | b noise | sd <points> points, flip rate <percent>%, n=<items>[, smallest tell-apart difference <points> points] | <pass/fail/measured/not_validated> |
 | c broken_prompt | drop <points> points, p <p> | <status> |
 | c truncated_context | drop <points> points, p <p> | <status> |
@@ -55,14 +56,25 @@ sets, run ids and numbers only, never item text. Angle brackets mark the filled 
   score; the suite and set scores are over scored items only. A schema-mode call answered with
   non-JSON or with HTTP 400 is not a failed call: it is stored as an empty `not_json` answer and
   scores 0.
+- **Ladder** is the ladder file the run used: its version and SHA-256. The gig's registered
+  `ladder_sha256` picks it: `ladder.toml` (v1) or `ladder-v2.toml` (v2). With no registration
+  the run uses the newest, v2. **Rules** names the version's rules in words. The JSON has
+  `ladder_version` and `rules` (`saturation`, `noise_sets`, `order_rungs`).
 - **Suite** is a rung's mean over the gated sets of its per-set score, in points (0-100). A set
-  where the best rung scores at or above `order.saturated_at` (0.97) is flagged and left out of
-  the suite and the gates.
+  is flagged saturated and left out of the suite and the gates when the best counted rung
+  scores at or above `order.saturated_at` (0.97). Under v1 every selected rung counts. Under v2
+  only the model rungs count (`rules.saturation = "model"`), so the deterministic rung's canned
+  answers do not saturate a set.
 - **Gate a** passes when Kendall tau-b between the suite scores and the published ranks is at
   least `order.min_tau` (0.6); fewer than `order.min_rungs` (3) measured rungs, or every rung
-  tied, is `not_validated`.
+  tied, is `not_validated`. Under v2 (`rules.order_rungs = "model"`) it ranks the model rungs
+  only. The deterministic rung is still run and shown with its suite score, and the JSON lists
+  it in `gates.a.unranked` with the reason.
 - **Gate b** re-asks `noise.items` (100) items on the noise rung (`noise.rung`, else the
-  strongest selected rung). Its main answers are repeat 0, so `noise.k` (3) means two more
+  strongest selected rung). Under v1 the items are spread over every set; under v2
+  (`rules.noise_sets = "gated"`) over the gated sets only, and with every set saturated the
+  gate is `not_validated`. The planned items stay an upper bound. Its main answers are repeat
+  0, so `noise.k` (3) means two more
   passes. The limits are a sample SD of the suite score of at most 2.0 points and at most 10%
   of items that flip. When the noise rung can fix a seed or a temperature, is the deterministic
   rung, or the run is `--deterministic` (the every-commit check, where every rung answers from

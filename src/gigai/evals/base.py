@@ -1,8 +1,11 @@
 """``gigai <gig> eval base``: run the shared eval sets on a ladder of models and check the measurement itself.
 
-The ladder (``ladder.toml``, data) names six rungs from the strongest model to the deterministic floor, each with
-its adapter, model, price and published rank. A base run answers every set of a tier (``gate``: the 560-item
-per-release suite) on each rung, records one ``runs`` row per rung and set in ``evals.sqlite``, and then checks five
+The ladder (``ladder.toml`` v1 or ``ladder-v2.toml`` v2, data) names six rungs from the strongest model to the
+deterministic floor, each with its adapter, model, price and published rank. A gig's release-gate ``prereg`` pins
+one shipped ladder by its SHA-256; a gig with no pin runs the newest. The ladder's ``[rules]`` say which rungs the
+saturation test counts, which sets the noise items come from and which rungs gate a ranks (v1: all of them; v2:
+the model rungs and the gated sets). A base run answers every set of a tier (``gate``: the 560-item per-release
+suite) on each rung, records one ``runs`` row per rung and set in ``evals.sqlite``, and then checks five
 validation gates:
 
 - a: the measured order of the rungs agrees with the published order (Kendall tau-b at least 0.6).
@@ -53,7 +56,16 @@ from .run import CapReachedError, RunFailed, RunRefused, _manifest_digest, _sche
 if TYPE_CHECKING:
     from gigai.sdk import GigContext
 
-LADDER_PATH = Path(__file__).with_name("ladder.toml")
+#: The shipped ladders, oldest first: v1 (0.3.0, 0.3.1) and v2 (0.3.2, registered after the first live base run).
+#: A gig's ``prereg`` pins one by its SHA-256; a gig with no pin runs the newest.
+LADDER_PATHS = (Path(__file__).with_name("ladder.toml"), Path(__file__).with_name("ladder-v2.toml"))
+#: The rules a ladder's optional ``[rules]`` table sets, with their allowed values; the first value is v1's
+#: behaviour, which a ladder with no ``[rules]`` table runs. ``saturation``: which rungs the saturation test counts;
+#: ``noise_sets``: which sets the noise items come from; ``order_rungs``: which rungs gate a ranks.
+RULES = {"saturation": ("all", "model"), "noise_sets": ("all", "gated"), "order_rungs": ("all", "model")}
+V1_RULES = {key: values[0] for key, values in RULES.items()}
+#: Why gate a under ``order_rungs = "model"`` leaves the deterministic rung out of the order it checks.
+UNRANKED_REASON = "its canned answers are the gold answer on several sets, so it is not a floor to rank"
 TIERS = ("gate", "judge", "full")
 CANARIES = ("broken_prompt", "truncated_context", "wrong_label")
 #: The canaries that send altered prompts (wrong_label re-scores the main answers at no call).
@@ -108,7 +120,7 @@ class Rung:
 
 @dataclass(frozen=True)
 class Ladder:
-    """``ladder.toml``, validated."""
+    """A shipped ladder file, validated."""
 
     sha256: str
     registered_at: str
@@ -119,6 +131,10 @@ class Ladder:
     order: Mapping[str, Any]
     canaries: Mapping[str, Any]
     replay: Mapping[str, Any]
+    #: The pre-registration version (v1 has no ``version`` key).
+    version: int = 1
+    #: One value per key of :data:`RULES`.
+    rules: Mapping[str, str] = field(default_factory=lambda: dict(V1_RULES))
 
     def rung(self, name: str) -> Rung:
         return next(rung for rung in self.rungs if rung.name == name)
@@ -131,22 +147,47 @@ class Ladder:
 
 
 def ladder_sha256(path: Path | None = None) -> str:
-    """The bare SHA-256 of the ladder file a gig's ``prereg`` pins."""
+    """The bare SHA-256 of a ladder file a gig's ``prereg`` pins (default: the newest shipped ladder)."""
 
-    return sha256_hex(Path(path or LADDER_PATH).read_bytes())
+    return sha256_hex(Path(path or LADDER_PATHS[-1]).read_bytes())
+
+
+def shipped_ladder(pin: str | None, paths: Sequence[Path] | None = None) -> Ladder:
+    """The ladder a run uses: the shipped one whose SHA-256 is the gig's ``prereg`` pin, the newest when it pins none.
+
+    Every candidate in ``paths`` (default :data:`LADDER_PATHS`, oldest first) is loaded and checked first, so a
+    malformed ladder is refused naming the key; a pin that matches none of them is refused naming every hash.
+    """
+
+    ladders = [load_ladder(path) for path in (paths or LADDER_PATHS)]
+    if pin is None:
+        return ladders[-1]
+    for ladder in ladders:
+        if ladder.sha256 == pin:
+            return ladder
+    shipped = ", ".join(f"v{ladder.version} {ladder.sha256}" for ladder in ladders)
+    raise RunRefused(f"the gig registered ladder sha256 {pin}; it matches no shipped ladder ({shipped})")
 
 
 def load_ladder(path: Path | None = None) -> Ladder:
-    """``ladder.toml`` read and checked; anything malformed is a :class:`RunRefused` naming the key."""
+    """A ladder file (default: the newest shipped one) read and checked; anything malformed is a :class:`RunRefused` naming the key."""
 
-    path = Path(path or LADDER_PATH)
+    path = Path(path or LADDER_PATHS[-1])
     try:
         raw = path.read_bytes()
         data = tomllib.loads(raw.decode("utf-8"))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise RunRefused(f"ladder.toml: cannot read it ({exc})") from exc
     check = _Checker()
+    version = check.integer(data, "version", "", minimum=1) if "version" in data else 1
     registered_at = check.text(data, "registered_at", "")
+    rules = dict(V1_RULES)
+    if "rules" in data:
+        table = check.table(data, "rules", "")
+        for key in table:
+            if key not in RULES:
+                raise RunRefused(f"ladder.toml: rules.{key} is not a rule (the rules are {', '.join(RULES)})")
+        rules = {key: check.choice(table, key, "rules", allowed) for key, allowed in RULES.items()}
     rungs_raw = data.get("rungs")
     if not isinstance(rungs_raw, list) or not rungs_raw:
         raise RunRefused("ladder.toml: rungs must be a non-empty array of tables")
@@ -217,6 +258,8 @@ def load_ladder(path: Path | None = None) -> Ladder:
         order=order_out,
         canaries=canaries_out,
         replay=replay_out,
+        version=version,
+        rules=rules,
     )
 
 
@@ -266,6 +309,12 @@ class _Checker:
         value = self.text(data, key, where)
         if value not in names:
             raise RunRefused(f"ladder.toml: {_key(where, key)} names no rung of the ladder")
+        return value
+
+    def choice(self, data: Mapping[str, Any], key: str, where: str, allowed: Sequence[str]) -> str:
+        value = data.get(key)
+        if value not in allowed:
+            raise RunRefused(f"ladder.toml: {_key(where, key)} must be {' or '.join(json.dumps(item) for item in allowed)}")
         return value
 
 
@@ -697,6 +746,9 @@ def plan(ladder: Ladder, selected: Sequence[Rung], counts: Mapping[str, int], de
     noise_rung = _helper_rung(ladder, ladder.noise["rung"], selected)
     canary_rung = _helper_rung(ladder, ladder.canaries["rung"], selected)
     extra = ladder.noise["k"] - 1
+    # The noise budget is taken over every set of the tier. Under the "gated" noise rule the run takes the same
+    # number of items or fewer over the gated sets only, so the calls stay an upper bound; the dollars can shift
+    # between sets, because the gated sets' token anchors differ from the sets this estimate spreads them over.
     noise_items = allocate(counts, ladder.noise["items"])
     canaries = canary_items(ladder, counts)
     rows = []
@@ -1093,15 +1145,12 @@ def execute_base(
 ) -> dict[str, Any]:
     """Plan, check, run and gate a base run; refusals come before any row is written or any call is made."""
 
-    ladder = load_ladder(ladder_path)
     if tier not in TIERS:
         raise RunRefused(f"tier {tier!r} is not one of {list(TIERS)}")
-    selected = _select(ladder, rung_names)
     prereg, manifest_cap = _registration(gig.manifest)
-    if prereg is not None and prereg["ladder_sha256"] != ladder.sha256:
-        raise RunRefused(
-            f"the gig registered ladder sha256 {prereg['ladder_sha256']}; the shipped ladder is {ladder.sha256}"
-        )
+    pin = prereg["ladder_sha256"] if prereg is not None else None
+    ladder = shipped_ladder(pin, None if ladder_path is None else (ladder_path,))
+    selected = _select(ladder, rung_names)
     counts = dict(ladder.tiers[tier])
     planned = plan(ladder, selected, counts, deterministic)
     head = {
@@ -1109,6 +1158,8 @@ def execute_base(
         "tier": tier,
         "deterministic": deterministic,
         "ladder_sha256": ladder.sha256,
+        "ladder_version": ladder.version,
+        "rules": dict(ladder.rules),
         "prereg": prereg,
     }
     if plan_only:
@@ -1215,6 +1266,33 @@ def _load_items(gig: GigContext, counts: Mapping[str, int], deterministic: bool)
     return out
 
 
+def saturation(
+    ladder: Ladder, selected: Sequence[Rung], sizes: Mapping[str, int], values: Mapping[tuple[str, str], list[float | None]]
+) -> list[dict[str, Any]]:
+    """The report's ``sets`` rows: per set of ``sizes``, its best counted mean and whether that is at or above the line.
+
+    A saturated set is flagged and left out of the gates. Under the "model" saturation rule the deterministic rung is
+    not counted: its canned answers are the gold answer on several sets, so it would saturate them although no model
+    does; a set no model rung scored is then not saturated.
+    """
+
+    counted = [rung for rung in selected if ladder.rules["saturation"] == "all" or not rung.deterministic]
+    out = []
+    for set_name, size in sizes.items():
+        means = [_mean(values[(rung.name, set_name)]) for rung in counted]
+        best = max((mean for mean in means if mean is not None), default=None)
+        out.append(
+            {
+                "set": set_name,
+                "k_score": ladder.sets[set_name]["k_score"],
+                "items": size,
+                "best": None if best is None else 100.0 * best,
+                "saturated": best is not None and best >= ladder.order["saturated_at"],
+            }
+        )
+    return out
+
+
 def _run_and_gate(run: _Context, selected: Sequence[Rung], skipped: list[dict[str, str]], tier: str) -> dict[str, Any]:
     ladder = run.ladder
     rows: list[dict[str, Any]] = []
@@ -1242,33 +1320,26 @@ def _run_and_gate(run: _Context, selected: Sequence[Rung], skipped: list[dict[st
                     "calls_made": made,
                 }
             )
-    # Saturation: a set the best measured rung answers at or above the line is flagged and left out of the gates.
-    sets_out = []
-    saturated = set()
-    for set_name, items in run.items.items():
-        means = [_mean(values[(rung.name, set_name)]) for rung in selected]
-        best = max((mean for mean in means if mean is not None), default=None)
-        is_saturated = best is not None and best >= ladder.order["saturated_at"]
-        if is_saturated:
-            saturated.add(set_name)
-        sets_out.append(
-            {
-                "set": set_name,
-                "k_score": ladder.sets[set_name]["k_score"],
-                "items": len(items),
-                "best": None if best is None else 100.0 * best,
-                "saturated": is_saturated,
-            }
-        )
+    sets_out = saturation(ladder, selected, {name: len(items) for name, items in run.items.items()}, values)
+    saturated = {entry["set"] for entry in sets_out if entry["saturated"]}
     gated = [name for name in run.items if name not in saturated]
     suite: dict[str, float | None] = {}
     for rung in selected:
         means = [_mean(values[(rung.name, name)]) for name in gated]
         known = [mean for mean in means if mean is not None]
         suite[rung.name] = 100.0 * math.fsum(known) / len(known) if known and len(known) == len(means) else None
-    gate_a = order_gate(suite, {rung.name: rung.rank for rung in selected}, min_tau=ladder.order["min_tau"], min_rungs=ladder.order["min_rungs"])
+    # Every selected rung's suite score is shown; under the "model" rule gate a ranks the model rungs only.
+    ranked = [rung for rung in selected if ladder.rules["order_rungs"] == "all" or not rung.deterministic]
+    gate_a = order_gate(
+        {rung.name: suite[rung.name] for rung in ranked},
+        {rung.name: rung.rank for rung in ranked},
+        min_tau=ladder.order["min_tau"],
+        min_rungs=ladder.order["min_rungs"],
+    )
     gate_a["excluded_sets"] = sorted(saturated)
     gate_a["skipped"] = [entry["rung"] for entry in skipped]
+    if ladder.rules["order_rungs"] == "model":
+        gate_a["unranked"] = [{"rung": rung.name, "reason": UNRANKED_REASON} for rung in selected if rung not in ranked]
     gate_b = _noise(run, selected, gated, values)
     gate_c = _canaries(run, selected, values, main_runs)
     gate_d = {"status": "not_validated", "reason": "judge agreement with human labels is not checked by the base run"}
@@ -1308,14 +1379,31 @@ def _run_and_gate(run: _Context, selected: Sequence[Rung], skipped: list[dict[st
 
 
 def _noise(run: _Context, selected: Sequence[Rung], gated: Sequence[str], values: Mapping[tuple[str, str], list[float | None]]) -> dict[str, Any]:
-    """Gate b: the noise rung's main answers are repeat 0; its first ``items`` items are asked ``k - 1`` more times."""
+    """Gate b: the noise rung's main answers are repeat 0; its first ``items`` items are asked ``k - 1`` more times.
+
+    Under the "all" rule the items are taken over every set and the gate reads the gated sets' rows (every set's
+    when all are saturated); under the "gated" rule they are taken over the gated sets only, after scoring, so no
+    repeat is spent on a set the gate drops. Either way the calls stay within :func:`plan`'s noise budget.
+    """
 
     ladder = run.ladder
     rung = _helper_rung(ladder, ladder.noise["rung"], selected)
     if rung is None or not run.items:
         return {"status": "not_validated", "reason": "no rung was reachable", "sd": None, "flip_rate": None, "n": 0}
-    taken = allocate({name: len(items) for name, items in run.items.items()}, ladder.noise["items"])
-    sets = [name for name in run.items if taken[name]]
+    pool = list(gated) if ladder.rules["noise_sets"] == "gated" else list(run.items)
+    if not pool:
+        return {
+            "status": "not_validated",
+            "reason": "every set is saturated",
+            "sd": None,
+            "flip_rate": None,
+            "n": 0,
+            "rung": rung.name,
+            "items_planned": ladder.noise["items"],
+            "items_available": 0,
+        }
+    taken = allocate({name: len(run.items[name]) for name in pool}, ladder.noise["items"])
+    sets = [name for name in pool if taken[name]]
     digest = sha256_hex("\n".join(f"{name}:{run.items[name][0].sha256}" for name in sets).encode())
     dataset = records.Dataset("base-noise", run.source, dataset_digest(digest), {"base": True, "items": taken}, ds.SEED)
     record = run.run_record(None, f"base:{rung.name}:noise", k=ladder.noise["k"], dataset=dataset)
@@ -1339,7 +1427,7 @@ def _noise(run: _Context, selected: Sequence[Rung], gated: Sequence[str], values
         "run_id": record.run_id,
         "repeat_0": "the rung's main runs",
         "items_planned": ladder.noise["items"],
-        "items_available": sum(len(items) for items in run.items.values()),
+        "items_available": sum(len(run.items[name]) for name in pool),
     }
 
 
@@ -1501,9 +1589,37 @@ def _failed_note(rung: Mapping[str, Any]) -> str:
     return f" ({rung['failed_calls']} failed: {by_class})"
 
 
+_RULE_WORDS = {
+    ("saturation", "all"): "saturation over all rungs",
+    ("saturation", "model"): "saturation over model rungs",
+    ("noise_sets", "all"): "noise from all sets",
+    ("noise_sets", "gated"): "noise from gated sets",
+    ("order_rungs", "all"): "gate a ranks all rungs",
+    ("order_rungs", "model"): "gate a ranks model rungs",
+}
+
+
+def rules_text(rules: Mapping[str, str]) -> str:
+    """``v1 rules``, or what each rule does: ``saturation over model rungs, noise from gated sets, ...``."""
+
+    if dict(rules) == V1_RULES:
+        return "v1 rules"
+    return ", ".join(_RULE_WORDS[(key, rules[key])] for key in RULES)
+
+
+def _unranked_note(a: Mapping[str, Any], *, reasons: bool) -> str:
+    """``; unranked: deterministic (why)`` for gate a under the "model" order rule; empty when it ranks every rung."""
+
+    if not a.get("unranked"):
+        return ""
+    names = ", ".join(f"{entry['rung']} ({entry['reason']})" if reasons else entry["rung"] for entry in a["unranked"])
+    return f"; unranked: {names}"
+
+
 def report_lines(report: Mapping[str, Any]) -> list[str]:
     gates = report["gates"]
-    lines = [f"base run: {report['tier']} tier on the {report['source']} slices, ladder {report['ladder_sha256'][:12]}"]
+    lines = [f"base run: {report['tier']} tier on the {report['source']} slices, ladder v{report['ladder_version']} {report['ladder_sha256'][:12]}"]
+    lines.append(f"rules: {rules_text(report['rules'])}")
     lines.append("rungs (published rank, status, calls made, suite score):")
     for rung in report["rungs"]:
         if rung["status"] == "skipped":
@@ -1520,7 +1636,11 @@ def report_lines(report: Mapping[str, Any]) -> list[str]:
         lines.append(f"  {entry['set']}: K{entry['k_score']}, {entry['items']} items, best {_num(entry['best'])}{flag}{beside}")
     a, b, e = gates["a"], gates["b"], gates["e"]
     lines.append("gates:")
-    lines.append(f"  a order: tau-b {_num(a['tau'], 3)} (min {a['min_tau']:g}): {a['status']}" + (f" ({a['reason']})" if a.get("reason") else ""))
+    lines.append(
+        f"  a order: tau-b {_num(a['tau'], 3)} (min {a['min_tau']:g}): {a['status']}"
+        + (f" ({a['reason']})" if a.get("reason") else "")
+        + _unranked_note(a, reasons=True)
+    )
     if b["status"] == "measured":
         lines.append(
             f"  b noise: sd {_num(b['sd'])} points, flip rate {_num(100 * b['flip_rate'], 1)}% on n={b['n']}: measured,"
@@ -1551,7 +1671,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"# Base run: {report['gig']}",
         "",
         f"- Tier: {report['tier']}, {report['source']} slices{' (deterministic)' if report['deterministic'] else ''}",
-        f"- Ladder sha256: `{report['ladder_sha256']}`",
+        f"- Ladder: v{report['ladder_version']} {report['ladder_sha256'][:12]} (sha256 `{report['ladder_sha256']}`)",
+        f"- Rules: {rules_text(report['rules'])}",
         f"- Calls made: {report['calls_made']}",
         "",
         "## Rungs",
@@ -1581,7 +1702,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         "",
         "| Gate | Measure | Status |",
         "|---|---|---|",
-        f"| a order | tau-b {_num(a['tau'], 3)} (min {a['min_tau']:g}) | {a['status']}{': ' + a['reason'] if a.get('reason') else ''} |",
+        f"| a order | tau-b {_num(a['tau'], 3)} (min {a['min_tau']:g}){_unranked_note(a, reasons=False)} | {a['status']}{': ' + a['reason'] if a.get('reason') else ''} |",
         _noise_row(b),
     ]
     for canary in gates["c"]:
