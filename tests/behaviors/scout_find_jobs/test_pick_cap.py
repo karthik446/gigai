@@ -139,10 +139,12 @@ def _assert_whole_and_capped(settled: pick.Settled, *, picked_by: str) -> None:
     skills = next(line for line in markdown.splitlines() if line.startswith("- Python") or "Capacity planning" in line)
     assert all(name.strip() in skills for name in fx.SKILLS.split(", ")), "the Skills section is whole: no skill is cut"
     assert [skill.name for skill in settled.record.skills_left_out] == []
-    # Nothing is "cut for length", and no page was counted.
+    # Nothing is "cut for length", and no page was counted. A draft picked by code asks for one layout estimate to fit 2 pages (0.3.2);
+    # with no renderer that estimate fails and the draft is left as it was made.
     assert settled.result.length is None, "a pick carries no length record: there is nothing to Restore"
     assert settled.record.cut_for_length == () and settled.record.to_json()["counts"]["cut_for_length"] == 0
-    assert settled.pages is None and settled.layouts == 0 and settled.selection_json(made_at="t", result_digest=None, master_revision_id=None)["pages"] is None
+    assert settled.pages is None and settled.layouts == (1 if picked_by == "code" else 0)
+    assert settled.selection_json(made_at="t", result_digest=None, master_revision_id=None)["pages"] is None
     assert settled.conflicts == () and settled.check.ready
     reasons = [line.reason for line in (*settled.record.picked, *settled.record.left_out)]
     assert not [reason for reason in reasons if "cut for length" in reason or "page" in reason.lower()], "no reason speaks of length or pages"
@@ -174,7 +176,7 @@ def test_the_code_selectors_own_selection_holds_exactly_twenty_bullets_and_every
     assert sum(len(bullets) for entry_id, bullets in selected.entries.items() if MASTER.entries[entry_id].section != "education") == 20
     assert (selected.pages, selected.pages_before_fit, selected.layout_queries, selected.cut_for_length, selected.fits) == (None, None, 0, (), True)
     assert len(selected.skills) == len(MASTER.skills()) and len(selected.earlier) == len(fx.EARLIER)
-    assert no_layout == []
+    assert no_layout == ["pages_at"], "the code's draft asked for its one layout estimate; the refusal left it unchanged"
 
 
 def test_the_pdf_of_the_capped_pick_with_a_header_is_two_pages_at_the_automatic_spacing() -> None:

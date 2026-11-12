@@ -4,9 +4,11 @@ ONE ENTRY, ``settle(master, assessment, requirements, today)``: what
 ``quick_assess.run_quick_assessment``, the pipeline's ``pick`` step, the
 re-pick action (``settle_stored``, at the end of this module) and the pick
 eval (``tools/pick_probe.py``) all call.  It never
-calls a model.  Pure: NOTHING IS LAID OUT AND NO PAGE IS COUNTED (0.1.11.5
-item 1c).  The selection does not know the page limit; the user fits the page
-with the spacing of the job's preview.
+calls a model.  A MODEL'S PICK lays out nothing and counts no page (0.1.11.5
+item 1c): it does not know the page limit; the user fits the page with the
+spacing of the job's preview.  THE FALLBACK, a draft picked by code, is cut to
+the page limit at the default spacing (0.3.2; ``tm.fit_draft``, THE FALLBACK
+below): the only page layout done here, a layout estimate, no PDF.
 
 WHAT IS REUSED, AND WHAT IS NEW.  The tree already holds a selector and a fit
 (0.1.10.9 master P2/P4; ``sel-6`` lists a role with no line by its heading, ``sel-7`` caps the bullets and knows no page), and this module adds no second one:
@@ -25,7 +27,8 @@ WHAT IS REUSED, AND WHAT IS NEW.  The tree already holds a selector and a fit
   keeps its best line, a project one line, an old role that loses its last
   line keeps its heading line;
 - Picked / Left out (``tailor_master.selection_record``) and its conflicts;
-- the fallback (``tailor_master.code_only``): the selector's own selection.
+- the fallback (``tailor_master.code_only``): the selector's own selection,
+  and its fit to the page limit (``tailor_master.fit_draft``).
 
 New here: the validation of a model's pick (V1 to V8), the order a PICK's
 lines are left out in when it holds more than the cap (3.2: the model's
@@ -57,8 +60,8 @@ reworded.
 
 THE CAP (3.2; 0.1.11.5 item 1c).  A selection shows at most
 ``master_selection.MAX_PICK_BULLETS`` bullets under its roles and projects, and
-that is the only limit: no page is counted, nothing is rendered, no room is
-kept for a header.  (Until 0.1.11.5 the pick was fitted to 2 pages with one PDF
+for a model's pick that is the only limit: no page is counted, nothing is
+rendered, no room is kept for a header.  (Until 0.1.11.5 the pick was fitted to 2 pages with one PDF
 layout for each trial, and real picks stopped at 14 bullets "cut for length".)
 The summary, the Other lines, the whole Skills section, every degree and the
 heading line of a role with no bullet do not count and are never left out for
@@ -106,6 +109,21 @@ user asked for a draft on a held job; ``draft`` is then true) and
 ``master_revision_unreadable`` (the caller could not load the revision the
 assessment read and passes the master as it is).  The fallback goes through the
 same final-selection check, and keeps the model's raw pick and its problems.
+
+A DRAFT PICKED BY CODE FITS THE PAGE LIMIT (0.3.2, the operator's decision of
+2026-11-12): whatever the reason above, the selector's selection is cut to
+``LENGTH_RULE.max_pages`` pages at the default spacing
+(``SPACING_DEFAULT``, the preview's spacing of 1.0) before it is stored
+(``tailor_master.fit_draft``): the lowest-scored lines first, never a
+requirement's evidence, a pin, the line of the role the posting's title
+names, a recent role's best line, a project's one line or a heading (an older
+role that loses its last line keeps its heading, listed under Earlier
+experience).  What was cut is the result's length record, so Picked / Left out
+lists it under ``cut_for_length`` and the job page's Restore puts it back.  A
+draft whose minimum is still over is kept at that minimum, every free cut
+applied, and its record says so (an ``over_budget`` conflict in Picked / Left
+out, no ``PickConflict``: it stays ready).  A draft that cannot be
+measured (no renderer) is stored as the selector made it, nothing cut.
 
 ``picked_by`` keeps its two values, ``model`` and ``code``, and ``candidates``
 is ``evidence`` for the assessment's pick and ``view`` for the fallback: no
@@ -534,12 +552,14 @@ class Settled:
     printed: tuple[str, ...]
     #: Each printed line's mark at the time (``MasterItem.mark``): what ``picked_line_changed`` compares.
     line_marks: Mapping[str, str]
-    #: INFORMATIONAL (kept for readers of the stored record): a selection counts no page, so ``pages`` is ``None``;
-    #: ``max_pages`` is the resume's page limit, which the PREVIEW reads, never the selection.
+    #: INFORMATIONAL (kept for readers of the stored record): a selection records no page count, so ``pages`` is ``None``
+    #: (a draft picked by code is cut to its pages: what was cut is on ``result.length``); ``max_pages`` is the
+    #: resume's page limit.
     pages: int | None
     max_pages: int
     check: suggestions.SelectionCheck
-    #: Page layouts this selection cost: always 0 since 0.1.11.5 (kept for the pick eval's report).
+    #: Page layouts this selection cost: 0 for a model's pick (since 0.1.11.5); a draft picked by code costs the
+    #: layout estimates ``tm.fit_draft`` made (0.3.2; kept for the pick eval's report).
     layouts: int = 0
     #: The cap this selection was made under.
     max_bullets: int = MAX_PICK_BULLETS
@@ -781,15 +801,24 @@ def _code_selection(
     master: Master, rows: Sequence[suggestions.RequirementRow], *, profile: SelectionProfile, posting: SelectionPosting, job: TailorJob, answers: object,
     excludes: Sequence[str], today: date, max_bullets: int, code: str, draft: bool, pick: AssessmentPick | None, problems: Sequence[Problem],
 ) -> Settled:
-    """The fallback (3.4): the code selector's own selection, through the same record and the same final check."""
+    """The fallback (3.4): the code selector's own selection cut to the page limit (``tm.fit_draft``), through the same record and the same final check."""
 
     candidates = tm.job_candidates(master, profile, posting, mode=tm.MODE_VIEW, today=today, max_bullets=max_bullets)
-    result, view = tm.code_only(master, candidates, job, answers=answers, today=today)  # type: ignore[arg-type]
+    whole, view = tm.code_only(master, candidates, job, answers=answers, today=today)  # type: ignore[arg-type]
+    layouts = 0
+
+    def measure(result: TailoredResume) -> int | None:
+        nonlocal layouts
+        layouts += 1
+        return tm.draft_pages(result)
+
+    result = tm.fit_draft(whole, view, master, today=today, measure=measure)
     built = _Built(view, view.context(answers=answers), result)  # type: ignore[arg-type]
-    return _finish(
+    settled = _finish(
         master, built, rows, picked_by=tm.PICKED_BY_CODE, fallback=code, draft=draft, pick=pick, problems=problems, added=(), pins=profile.pins,
         excludes=excludes, today=today, max_bullets=max_bullets,
     )
+    return replace(settled, layouts=layouts)
 
 
 def settle(
@@ -820,7 +849,9 @@ def settle(
     ``draft``, ``master_revision_unreadable``).  ``max_bullets``: the cap
     (``master_selection.MAX_PICK_BULLETS``).
 
-    No page is counted and nothing is rendered: this needs no PDF renderer.
+    A model's pick counts no page and renders nothing.  The code selector's draft is cut to the page limit with
+    layout estimates (``tm.fit_draft``); without a PDF renderer it is kept as the selector made it, so this never
+    needs one.
     """
 
     today = today or date.today()

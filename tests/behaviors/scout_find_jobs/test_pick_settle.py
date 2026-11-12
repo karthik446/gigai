@@ -420,7 +420,10 @@ def test_the_seven_picks_each_end_within_the_cap_with_no_empty_role_and_nothing_
         checks = pick.checks(master, settled, rows)
         assert settled.fallback == expected[name], (name, settled.fallback, [problem.to_json() for problem in settled.problems])
         shown = sum(len(entry.bullets) for section in settled.result.sections if section.heading in ("experience", "projects") for entry in section.entries)
-        assert shown <= ms.MAX_PICK_BULLETS and settled.pages is None and settled.result.length is None and checks.fits, (name, shown, checks.to_json())
+        # A model's pick carries no length record; the code's draft (0.3.2) is cut to fit 2 pages at the default spacing when it runs over.
+        length = settled.result.length
+        fitted = length is None if settled.picked_by == "model" else length is None or (length.status == "cut" and length.pages is not None and length.pages <= 2)
+        assert shown <= ms.MAX_PICK_BULLETS and settled.pages is None and fitted and checks.fits, (name, shown, length, checks.to_json())
         if name == "every_line":
             assert shown == ms.MAX_PICK_BULLETS == 20, shown  # more lines than the cap: exactly the cap is shown
         assert all(item_id in master.items for item_id in settled.printed), name

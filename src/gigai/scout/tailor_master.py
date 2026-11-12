@@ -8,16 +8,20 @@ call (``MasterTailoring``) orders and words inside that set; when the call
 fails or no model is available the code's own selection is the resume (the
 fallback, ``code_only``).
 
-THE CODE'S OWN SELECTION KNOWS NO PAGE LIMIT (0.1.11.5 item 1c, ``sel-7``): it
-is the selector's pick by score up to ``master_selection.MAX_PICK_BULLETS``
-bullets, laid out by nobody and cut for no page.  ``code_only``, a job's
-pick (``pick.settle``) and a tailor call's answer (``MasterTailoring.finish``)
-therefore carry no length record (``TailoredResume.length`` is ``None``): what
+THE CODE'S OWN SELECTION IS CUT TO THE PAGE LIMIT (0.3.2, the operator's
+decision of 2026-11-12; until then, from 0.1.11.5 item 1c, it knew no page
+limit): it is the selector's pick by score up to
+``master_selection.MAX_PICK_BULLETS`` bullets (``code_only``, which lays
+out nothing), and a job's draft picked by code (``pick.settle``'s fallback)
+is then cut to ``LENGTH_RULE.max_pages`` pages AT THE DEFAULT SPACING
+(``fit_draft``, measured by ``draft_pages``): the lowest-scored lines first,
+never a line the posting needs most (THE FIT, below).  A model's pick and a
+tailor call's answer (``MasterTailoring.finish``) are cut for no page: what
 the cap left out is under Left out, and the user fits the page with the
 spacing of the job's preview.  ``cut_order`` below is the ORDER a pick's lines
 are left out in under its cap (``pick``); ``fit_selected`` (that order applied
-until a page count is met) is kept for a caller that measures pages itself
-and is called by nothing in the product.
+until a page count is met, with refill) is kept for a caller that measures
+pages itself (the master tailor eval).
 
 Without a master nothing here runs: ``master_tailoring`` answers ``None`` and
 ``tailored_resume.run_tailored_resume`` does exactly what it did.
@@ -66,7 +70,7 @@ line the assessment CITES (``assess_master.stored_citations``,
 all follow the citations, so a cited line is never cut because another line
 shares the requirement's words.
 
-THE FIT (``fit_selected``; 0110-10-15; no product caller since 0.1.11.5).  The page
+THE FIT (``fit_selected``, and ``fit_draft`` for a draft picked by code; 0110-10-15).  The page
 limit is a constraint: at most ``LENGTH_RULE.max_pages`` pages, every recent
 role present, and no employer dropped silently (0.1.11.4 item 9: a role with
 no line left keeps its heading, printed as one line under
@@ -88,11 +92,21 @@ order they may be applied (``cut_order``), the fewest that fit taken
 
 THE EVIDENCE OF A REQUIREMENT, among the lines the tailoring shows, is the
 best shown line that supports it: step 1 never cuts it, wherever its role
-stands in time.  A line comes back when the last cut left room for it (not an
+stands in time.  ``fit_selected`` puts a line back when the last cut left room for it (not an
 old role's line that supports nothing).  What was cut is recorded on the
 result exactly as the 0110-10-05 length rule records it
-(``TailoredResume.length``), so it is shown and one Restore puts it back.  The
-pages are measured at ``master_selection.FIT_SCALE``.
+(``TailoredResume.length``), so it is shown and one Restore puts it back.
+``fit_selected`` measures the pages at ``master_selection.FIT_SCALE`` (``measure_pages``).
+
+``fit_draft`` (0.3.2) takes step 1's cuts ONLY, strictly lowest score first
+(ties by line id) and with NO line put back, so every line it cuts scores
+below every line it keeps; its minimum is what step 1 never cuts (a recent
+role's best line, a project's line, every heading, the title's line, pins and
+evidence).  It measures at ``resume_display.SPACING_DEFAULT`` (``draft_pages``:
+the layout estimate with room for a header, which never counts fewer pages
+than the PDF prints).  A draft that fits is not touched; one still over at its
+minimum keeps every such cut and is recorded ``over``; a draft that cannot be
+measured (no renderer) is returned exactly as it was.
 
 WHAT WAS PICKED (``selection_record``): the stored tailored resume carries
 ``selection``: every line of the master except its Skills lines, picked or
@@ -146,7 +160,7 @@ from .master_selection import (
     select,
     unlisted_roles_reason,
 )
-from .tailor_length import STATUS_CUT, Measure, fit_by_cuts
+from .tailor_length import STATUS_CUT, STATUS_UNMEASURED, Measure, fit_by_cuts
 from .tailored_resume import (
     ENTRY_SECTIONS,
     AnswerSource,
@@ -416,13 +430,28 @@ def measure_pages(result: TailoredResume) -> int | None:
     """The page ESTIMATE of ``result`` at ``FIT_SCALE``; ``None`` when the renderer cannot say.
 
     What the tailor call's fit, an Add that makes room on a resume cut to its pages and an agent's brief read.
-    NO SELECTION CALLS IT (0.1.11.5 item 1c): ``code_only`` and ``pick.settle`` lay out nothing."""
+    A draft picked by code is measured by ``draft_pages`` (the default spacing), not by this."""
 
     try:
         from .resume_pdf import pages_at
 
         return pages_at(result, FIT_SCALE)
     except Exception:  # noqa: BLE001 - no renderer (Typst missing or failing): the length is flagged, never guessed
+        return None
+
+
+def draft_pages(result: TailoredResume) -> int | None:
+    """The page ESTIMATE of ``result`` at the DEFAULT spacing (``SPACING_DEFAULT``); ``None`` when the renderer cannot say.
+
+    What ``fit_draft`` cuts a draft picked by code to (0.3.2): one layout query with room for a header, no PDF
+    compiled.  It never counts fewer pages than the PDF prints, so a draft that fits here prints on its page
+    limit at the default spacing, at any tighter one and at the preview's automatic spacing."""
+
+    try:
+        from .resume_pdf import SPACING_DEFAULT, pages_at
+
+        return pages_at(result, SPACING_DEFAULT)
+    except Exception:  # noqa: BLE001 - no renderer (Typst missing or failing): the draft is left as it was, never cut on a guess
         return None
 
 
@@ -454,7 +483,9 @@ def shown_evidence(shown_ids: Sequence[str], selected: Selected) -> dict[str, tu
     return {item_id: tuple(ids) for item_id, ids in found.items()}
 
 
-def cut_order(result: TailoredResume, candidates: JobCandidates, master: Master, *, today: date) -> tuple[list[tuple[str, str]], frozenset[str]]:
+def cut_order(
+    result: TailoredResume, candidates: JobCandidates, master: Master, *, today: date, free_only: bool = False,
+) -> tuple[list[tuple[str, str]], frozenset[str]]:
     """The cuts the fit may make on ``result``, in the one order it may make them (the module text's rules).
 
     ``(cuts, refill)``: each cut is ``("bullet", <line id>)``, ``("role", <the id of the role's first
@@ -465,6 +496,8 @@ def cut_order(result: TailoredResume, candidates: JobCandidates, master: Master,
     THE HEADING LINES (0.1.11.4 item 9) stand after every line that is not a pin or a requirement's evidence, the
     oldest role's first: a heading line is never cut while such a line can go, and never before a pin or evidence
     is touched.  A caller with more to cut before them (``pick``: Other lines, Skills) moves them itself.
+
+    ``free_only`` (``fit_draft``): step 1's cuts only, none that is a conflict, and no refill.
     """
 
     selected = candidates.selected
@@ -543,6 +576,8 @@ def cut_order(result: TailoredResume, candidates: JobCandidates, master: Master,
 
     cuttable = [line for line in lines if line.id in home and line_item_id(line) is not None]
     cut([line for line in cuttable if kept_for_last(line) == 0])
+    if free_only:
+        return cuts, frozenset()
     # Only when nothing else can go (a conflict, reported by ``selection_record``): the one line of an entry the
     # title names, then pins, then requirements' evidence.
     cut([line for line in cuttable if kept_for_last(line) == 1])
@@ -563,6 +598,21 @@ def fit_selected(
     return fit_by_cuts(result, cuts, measure=measure or measure_pages, max_pages=max_pages, refill=refill)
 
 
+def fit_draft(
+    result: TailoredResume, candidates: JobCandidates, master: Master, *, today: date, measure: Measure | None = None,
+    max_pages: int = MAX_PAGES,
+) -> TailoredResume:
+    """A draft picked by code (``code_only``'s result) cut to ``max_pages`` pages at the default spacing (the module text).
+
+    The fewest of ``cut_order``'s free cuts, lowest score first, none put back; what was cut is on the result's
+    length record.  A draft that fits comes back as it was; one that cannot be measured comes back EXACTLY as it was
+    (no length record: a missing renderer never changes a pick)."""
+
+    cuts, _refill = cut_order(result, candidates, master, today=today, free_only=True)
+    fitted = fit_by_cuts(result, cuts, measure=measure or draft_pages, max_pages=max_pages)
+    return result if fitted.length is not None and fitted.length.status == STATUS_UNMEASURED else fitted
+
+
 def code_only(
     master: Master, candidates: JobCandidates, job: TailorJob, *, answers: Mapping[str, AnswerSource] | None = None,
     matrix: tuple[MatrixRow, ...] = (), today: date | None = None,
@@ -573,8 +623,9 @@ def code_only(
     through the checks a model's answer goes through (the validator, the
     no-loss pass, the Skills rules: an answer that satisfies a posting skill
     is still shown).  No model is called, NOTHING IS LAID OUT and nothing is
-    cut for a page (0.1.11.5 item 1c): the selection is already the
-    selector's pick up to its cap, so the result carries no length record.
+    cut for a page: the selection is already the selector's pick up to its
+    cap, so the result carries no length record.  A job's draft is then cut to
+    its page limit by ``fit_draft`` (``pick``, 0.3.2).
     """
 
     from .tailor_skills import finish_tailoring
@@ -794,9 +845,9 @@ class TailorSelection:
         )
 
 
-_CUT_ROLE = ("cut_role_dropped", "cut for length: no line of this older role is evidence for this posting")
-_CUT_VALUE = ("cut_lowest_value", "cut for length: lowest value for this posting")
-_CUT_CONFLICT = ("cut_conflict", "cut for length although the rules say it stays: it does not fit the page limit (see conflicts)")
+_CUT_ROLE = ("cut_role_dropped", f"cut to fit {MAX_PAGES} pages: no line of this older role is evidence for this posting")
+_CUT_VALUE = ("cut_lowest_value", f"cut to fit {MAX_PAGES} pages: among the lowest-scored lines for this posting")
+_CUT_CONFLICT = ("cut_conflict", f"cut to fit {MAX_PAGES} pages although the rules say it stays: it does not fit the page limit (see conflicts)")
 _NOT_SHOWN = ("left_out_by_tailoring", "offered to the tailoring, which did not show it")
 _NOT_OFFERED = ("not_offered", "scores lower for this posting than the lines offered to the tailoring")
 _OFFERED = ("offered", "among the lines of the master most relevant to this posting")
@@ -1238,7 +1289,9 @@ __all__ = [
     "cut_order",
     "detached",
     "digest_parts",
+    "draft_pages",
     "ensure_skills_line",
+    "fit_draft",
     "fit_selected",
     "job_candidates",
     "line_item_id",

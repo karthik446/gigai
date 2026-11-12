@@ -42,16 +42,31 @@ same switched-off step.
 
 > Every line comes from your resume, answers or stories. Read it before you send it.
 
-A pick holds your best lines for the job, **at most 20 points**, and it does not count pages:
-you fit the page yourself with the spacing slider beside the preview on the job's page, which
-says how many pages the resume prints on ("2 pages", or "3 pages" when it runs over). The
-lines that back a must-have requirement of the posting are kept first, then the lines you
-pinned; the lines past the 20 are left out, and you can add one back. A pick is never cut to
-fit a page count, and a resume that prints on 3 pages is not held back for it. To get to 2
-pages, move the spacing slider left; if the tightest spacing is not enough, remove a point on
-the job's page (`resume pick --shorten` is retired: it changes nothing and says so). A resume picked before
-0.1.11.5 stays as it is until you pick it again (**Re-pick** on the job's page, or
-`gigai scout resume pick --job-url <url> --refresh`).
+A pick holds your best lines for the job, **at most 20 points**. The lines that back a
+must-have requirement of the posting are kept first, then the lines you pinned; the lines past
+the 20 are left out, and you can add one back. How many lines a role shows depends on the
+posting: a role starts with its best few, lines that match the posting can take it further, and
+a line left out says it "scores lower for this posting than the lines this role shows".
+
+**When the assessment picked the lines**, the pick does not count pages: you fit the page
+yourself with the spacing slider beside the preview on the job's page, which says how many
+pages the resume prints on ("2 pages", or "3 pages" when it runs over). Such a pick is never
+cut to fit a page count, and a resume that prints on 3 pages is not held back for it. To get
+to 2 pages, move the spacing slider left; if the tightest spacing is not enough, remove a point
+on the job's page (`resume pick --shorten` is retired: it changes nothing and says so).
+
+**When Scout's own rules picked the lines** (a draft for a held job, or no usable pick from the
+assessment: `picked_by` is `code`), the resume is cut to **2 pages at the default spacing**
+before it is stored. The lowest-scored lines go first; a line that backs a must-have
+requirement, a pinned line, the line of the role the posting's title names, the best line of
+each recent role, one line per project and every role heading always stay (an older role that
+loses its last line is listed under Earlier experience). What was cut is shown as **Cut for
+length** with **Restore** (below). A resume that already fits is not touched. If the lines
+that always stay are more than 2 pages on their own, the resume keeps them and says it is
+over. Without a PDF renderer nothing is cut.
+
+A resume picked before 0.1.11.5 stays as it is until you pick it again (**Re-pick** on the
+job's page, or `gigai scout resume pick --job-url <url> --refresh`).
 
 No employer is dropped. A role none of whose lines is shown (an older role, usually) is still
 listed, on one line, under **Earlier experience** at the end of the Experience section, newest
@@ -304,13 +319,13 @@ A skill the posting asks for that your resume does not name, and that one of you
 answers says you have, is added to Skills with that answer as its source. An answer
 that says you do not have it adds nothing.
 
-**Older resumes only: "Cut for length".** A resume picked before 0.1.11.5, or made by the
-tailoring step (switched off by default, see above), was cut to 2 pages when it was made:
-whole roles were left out, the oldest first. Such a resume still shows what was left out
-("Cut for length: ...") with **Restore**, which puts all of it back in one step
-(`gigai scout resume length --job-url <url> --restore`, or `PUT /api/tailored-resumes/length`).
-A resume picked on 0.1.11.5 has no such line: nothing is cut from it for length. Pick an older
-resume again to get the new pick.
+**"Cut for length".** A resume picked by Scout's own rules (see above) shows the lines it
+cut to fit 2 pages ("Cut for length: ..."), each with its reason. A resume picked before
+0.1.11.5, or made by the tailoring step (switched off by default, see above), was also cut to 2
+pages when it was made, by leaving out whole roles, the oldest first. Either way **Restore**
+puts all of it back in one step (`gigai scout resume length --job-url <url> --restore`, or
+`PUT /api/tailored-resumes/length`). A resume whose lines the assessment picked has no such
+line: nothing is cut from it for length.
 
 The background pipeline is off by default in 0.1.11, so nothing is tailored by itself. A home
 whose settings explicitly enable it keeps the 0.1.10 behaviour: it never replaces a resume you

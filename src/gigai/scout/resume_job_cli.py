@@ -435,7 +435,7 @@ def _pick_lines(view: dict[str, object]) -> list[str]:
         lines.append(f"Resume: {resume['lines']} lines, {who}; yours, kept as it is" if resume["replaceable"] is False else f"Resume: {resume['lines']} lines, {who}")
         if isinstance(resume["counts"], dict):
             counts = resume["counts"]
-            # (``cut_for_length``: only a resume picked before 0.1.11.5 holds any; a pick knows no page limit now.)
+            # (``cut_for_length``: what a draft picked by code was cut to fit its pages (0.3.2), or an old resume's cut.)
             cut = f", cut for length {counts['cut_for_length']}" if counts.get("cut_for_length") else ""
             lines.append(f"  Picked {counts['picked']}, left out {counts['left_out']}{cut}.")
         if isinstance(picked, dict) and picked.get("pages") is not None:
@@ -485,9 +485,12 @@ def resume_pick_command(
     Without a flag nothing is recomputed and nothing is written. --refresh
     picks again in code (refused while the assessment is old: re-assess
     instead); --draft makes a draft for a held job; a pick holds at most 20
-    bullets and counts no page (the spacing slider beside the preview on
-    the job's page fits the page, and a point can be removed there), so
-    --shorten is retired and only says so; --use-proposed takes the
+    bullets, and a resume picked by Scout's own rules (a draft, or no usable
+    model pick) is cut to 2 pages at the default spacing, its lowest-scored
+    lines first (listed as cut for length, Restore puts them back); otherwise
+    the spacing slider beside the preview on the job's page fits the page,
+    and a point can be removed there, so --shorten is retired and only says
+    so; --use-proposed takes the
     new suggested resume that waits beside a resume you edited, and
     --dismiss-proposed drops it. A resume you edited is never replaced by
     anything but --use-proposed, and --use-proposed is refused when the
@@ -541,6 +544,9 @@ def _suggestion_lines(body: dict[str, object]) -> list[str]:
         if isinstance(item.get("resolved"), dict):
             text += f"  {item['resolved']['how']} by {item['resolved']['by']}" + (f" -> {item['resolved']['ref']}" if item["resolved"].get("ref") else "")
         lines += [text, f"      {item['why']}"]
+        if isinstance(item.get("draft"), dict):
+            # 0.3.2 gyl: the line drafted from your answer (derived on this read): `suggestions add-line` adds it.
+            lines.append(f"      Drafted line: {item['draft']['text']}  (under {item['draft']['entry_id'] or 'no role'}, backed by {item['draft']['backed']})")
     return lines
 
 
@@ -562,6 +568,13 @@ def _run_suggestions(call, *, target_value: Path | None, home_value: Path | None
     for key, verb in (("added", "Added"), ("resolved", "Set to done:"), ("dismissed", "Dismissed")):
         if key in body:
             click.echo(f"{verb} {body[key]}.")
+    if isinstance(body.get("line"), dict):
+        line, row = body["line"], body.get("row") or {}
+        click.echo(f"Added {line['id']} to your master under {line['entry_id']}, backed by {line['backed']}. Requirement {row.get('id')}: {row.get('status')}.")  # type: ignore[index, union-attr]
+        for warning in body.get("warnings") or ():  # type: ignore[union-attr]
+            click.echo(f"Check: {warning}")
+        if isinstance(body.get("repick"), dict):
+            click.echo(f"The resume was not picked again: {body['repick']['message']}")  # type: ignore[index]
     click.echo("\n".join(_suggestion_lines(body)))
 
 
@@ -645,6 +658,31 @@ def suggestions_dismiss_command(
 
     _run_suggestions(
         lambda home_root, target: job_actions.dismiss_suggestion(home_root, target, job_url, suggestion_id, actor=actor, profile_id=profile_id or None),
+        target_value=target_value, home_value=home_value, as_json=as_json,
+    )
+
+
+@suggestions_group.command("add-line")
+@click.argument("suggestion_id")
+@_JOB_URL
+@_PROFILE
+@click.option("--text", "text", help="Your own words for the line (the suggestion's drafted line when not given).")
+@_ACTOR
+@_options
+def suggestions_add_line_command(
+    suggestion_id: str, job_url: str, profile_id: str | None, text: str | None, actor: str, target_value: Path | None, home_value: Path | None, as_json: bool,
+) -> None:
+    """Add a master_line suggestion's drafted line to your master, then settle the job on it. No model call.
+
+    The line (`suggestions list` shows it as "Drafted line") goes under your newest role, backed by the answer or
+    story it comes from, as `gigai scout resume master add` writes it. Then the requirement is checked again, the
+    assessment records `master_line:<line id>`, the suggestion is set to done and the resume is picked again.
+    """
+
+    from . import job_actions
+
+    _run_suggestions(
+        lambda home_root, target: job_actions.add_line(home_root, target, job_url, suggestion_id, text=text or None, actor=actor, profile_id=profile_id or None),
         target_value=target_value, home_value=home_value, as_json=as_json,
     )
 

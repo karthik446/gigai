@@ -48,9 +48,11 @@ that is over the cap, the result carries a ``title_entry`` conflict.  It never c
 
 THE CAP IS A COUNT OF BULLETS, NOT A PAGE (``sel-7``, 0.1.11.5 item 1c).  A resume shows at most
 ``MAX_PICK_BULLETS`` bullets under its roles and projects.  THE SELECTION DOES NOT KNOW THE PAGE LIMIT: it lays out
-nothing, counts no page and keeps no room for a header.  How many pages the pick prints on is the user's to settle,
-with the spacing of the job's preview (``resume_pdf``); a pick of 20 bullets that prints on 3 pages at its automatic
-spacing is a good pick, and the preview says "3 pages".  (``sel-2`` to ``sel-6`` fitted the pick to
+nothing, counts no page and keeps no room for a header.  How many pages a MODEL'S pick prints on is the user's to
+settle, with the spacing of the job's preview (``resume_pdf``); such a pick of 20 bullets that prints on 3 pages at
+its automatic spacing is a good pick, and the preview says "3 pages".  A job's DRAFT PICKED BY CODE (this
+selection, as ``pick``'s fallback) is cut to ``LENGTH_RULE.max_pages`` pages at the default spacing after this, by
+``tailor_master.fit_draft`` (0.3.2), lowest-scored lines first.  (``sel-2`` to ``sel-6`` fitted the pick to
 ``LENGTH_RULE.max_pages`` pages with one layout for each trial, and real picks stopped at 14 bullets "cut for
 length".)  What does NOT count toward the cap and is never left out for it: the summary, the Skills section (whole,
 in its order), every degree, the Other lines (``MAX_OTHER``) and the heading line of a role that shows no bullet.
@@ -1255,7 +1257,10 @@ def select(
         pick.entries[entry.id] = chosen
         for bullet in ranked:
             if bullet not in chosen:
-                out[bullet] = ("role_limit", f"over the limit of {caps[entry.id]} lines for this role; the lines shown score higher for {subject}")
+                # Not "over the limit of N lines": PICK_CAPS is where a role's pick starts, a line about the posting
+                # stays up to HARD_CAPS, evidence whatever the cap, and the fill (8.) and a draft's page fit change
+                # the count after this, so the reason names no number.
+                out[bullet] = ("role_limit", f"scores lower for {subject} than the lines this role shows")
 
     # 3. Projects: the best few, a few bullets each; a project that holds a requirement's evidence is one of them.
     projects = master.entries_in("projects")
