@@ -86,6 +86,10 @@ is approximate. It checks 15 of the 25 instruction types; an item with any other
 unscored. It skips language detection for the all-capitals and all-lowercase checks, and it
 counts sentences with a simple pattern rather than a full sentence splitter.
 
+A JSONSchemaBench item is asked in schema mode: the call carries the item's own JSON Schema, so
+the model sees the schema its answer must match. An answer that is not JSON scores 0, and so
+does a provider that refuses the schema with HTTP 400.
+
 A set where the best rung scores 97 points or more is marked saturated. A saturated set is
 reported but left out of a rung's suite score and out of the gates.
 
@@ -146,6 +150,36 @@ gigai my-gig eval: cap 0 reached before call 1 (the plan needs 2080 model calls;
 
 The cap is checked again before every call.
 
+## Failed calls
+
+A model call can fail for one item: the local Ollama server answers HTTP 500 or times out, an
+API returns an error, or a CLI exits with an error. The run records that call as a trace with an
+empty answer, outcome `failed` and the error class (with the HTTP status, never the error text),
+gives it no score and goes on. The call still counts toward the cap and toward the rung's calls.
+The suite and set scores are over the scored items only, and each run row shows its items and
+how many were scored.
+
+The report counts failed calls per rung: `failed_calls` and `failures` (error class to count) in
+`--json`, and after the rung's calls in the text and markdown reports, only when some failed:
+
+```text
+  gemma: rank 5, ran, 560 calls (3 failed: OllamaLocalAdapterError 3), suite 41.2
+```
+
+A rung may lose at most 10% of its planned model calls (its main, noise and canary calls in
+`--plan`). The failure that passes that limit stops the run with exit 1:
+
+```text
+gigai my-gig eval: rung gemma: 57 of 560 calls failed (limit 10%); last error OllamaLocalAdapterError
+```
+
+Some failures stop the run at the first one, because every later call would fail the same way:
+missing authentication, an API answering 401, 402 or 403, a local model whose identity changed,
+a request field or capability the adapter refuses, a cancelled call, and any error gigai does not
+recognize. Two schema-mode outcomes are not failed calls but the model's answer, scored 0: a
+reply that is not JSON, and an HTTP 400 (the provider cannot answer under that schema). An HTTP
+400 to any other call is a failed call for that item.
+
 ## Output and exit codes
 
 - The default output is a short text summary. `--json` prints the full report, and
@@ -157,5 +191,5 @@ The cap is checked again before every call.
 | Exit | Meaning |
 |---|---|
 | 0 | The run completed. The gate verdicts are in the report. |
-| 1 | A model call or the eval store failed. Calls made before the failure stay recorded. |
+| 1 | A run-level model-call error, more than 10% of a rung's calls failed, or the eval store failed. Rows written before the stop stay recorded. |
 | 2 | Refused before any call: bad options, a malformed ladder, a prereg mismatch, a missing cap, a plan over the cap, or `--deterministic` outside a source checkout. |

@@ -17,22 +17,33 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from click.testing import CliRunner
 
 from gigai.adapters import factory
 from gigai.adapters.deterministic import DeterministicAdapter
+from gigai.adapters.ollama_local import OllamaLocalAdapterError, OllamaLocalIdentityError, OllamaLocalResponseError
+from gigai.adapters.port import (
+    CapabilityMismatchError,
+    ModelAuthenticationRequired,
+    ModelInvocationCancelled,
+    ModelInvocationError,
+    ModelOutputNotJSONError,
+    UnsupportedRequestFieldError,
+)
 from gigai.config import load_config
 from gigai.evals import base
 from gigai.evals import datasets as ds
 from gigai.evals import run as eval_run
 from gigai.evals.records import evals_db_path, open_evals_db
 from gigai.evals.run import CapReachedError
+from gigai.model_call import BoundedCallError
 from gigai.sdk import GigContext
 from gigai.evals.stats import NonFiniteScoreError
 from tests.behaviors.gigs.test_loader import FIXTURES, _add_fixture, _run
@@ -841,3 +852,206 @@ def test_a_failed_call_exits_1_naming_the_input_sha_only(gig: GigContext, monkey
     assert result.stderr.startswith(f"gigai {GIG} eval: rung claude-haiku: call 1 (input sha256 ")
     assert re.search(r"failed: [A-Za-z]+Error\n$", result.stderr), result.stderr
     assert first.prompt[:40] not in result.stderr
+
+
+# --- failed calls -----------------------------------------------------------------------------------------------
+
+
+def server_error() -> OllamaLocalAdapterError:
+    return OllamaLocalAdapterError("local Ollama endpoint returned HTTP 500 for POST /api/chat")
+
+
+def http_error(status: int) -> ModelInvocationError:
+    """What the HTTP adapters raise for an HTTP error status: a plain ModelInvocationError caused by httpx's error."""
+
+    request = httpx.Request("POST", "http://127.0.0.1:9/v1/chat/completions")
+    error = ModelInvocationError("model HTTP invocation failed: HTTPStatusError")
+    error.__cause__ = httpx.HTTPStatusError("refused", request=request, response=httpx.Response(status, request=request))
+    return error
+
+
+def failing(monkeypatch: pytest.MonkeyPatch, fail: Callable[[int, Any], BaseException | None]) -> list[Any]:
+    """Wrap ``answer_live``'s invoke: call ``n`` (from 1) raises what ``fail(n, request)`` returns; returns every request."""
+
+    seen: list[Any] = []
+    answering = DeterministicAdapter.invoke
+
+    def invoked(self: DeterministicAdapter, request: Any) -> Any:
+        seen.append(request)
+        error = fail(len(seen), request)
+        if error is not None:
+            raise error
+        return answering(self, request)
+
+    monkeypatch.setattr(DeterministicAdapter, "invoke", invoked)
+    return seen
+
+
+@pytest.mark.parametrize(
+    ("error", "kind"),
+    [
+        (server_error(), "item"),
+        (OllamaLocalResponseError("local Ollama response has no answer"), "item"),
+        (ModelInvocationError("claude exited with status 1"), "item"),
+        (http_error(500), "item"),
+        (http_error(429), "item"),
+        (BoundedCallError("timed_out", "slow"), "item"),
+        (BoundedCallError("failed", "no result"), "item"),
+        (ModelOutputNotJSONError("not json"), "answer"),
+        (ModelAuthenticationRequired("log in"), "run"),
+        (CapabilityMismatchError("no tools"), "run"),
+        (UnsupportedRequestFieldError("ollama_local", ["seed"]), "run"),
+        (ModelInvocationCancelled("stopped"), "run"),
+        (OllamaLocalIdentityError("digest changed"), "run"),
+        (http_error(401), "run"),
+        (http_error(402), "run"),
+        (http_error(403), "run"),
+        (BoundedCallError("cancelled", "stopped"), "run"),
+        (BoundedCallError("budget_exhausted", "zero"), "run"),
+        (ValueError("boom"), "run"),
+        (KeyError("boom"), "run"),
+    ],
+)
+def test_failure_kind_sorts_one_item_failures_from_run_failures(error: BaseException, kind: str) -> None:
+    assert base.failure_kind(error, schema_mode=False) == kind
+    assert base.failure_kind(error, schema_mode=True) == kind
+
+
+@pytest.mark.parametrize(
+    ("error", "schema_mode", "kind"),
+    [
+        (http_error(400), True, "answer"),
+        (http_error(400), False, "item"),
+        (OllamaLocalAdapterError("local Ollama endpoint returned HTTP 400 for POST /api/chat"), True, "answer"),
+        (OllamaLocalAdapterError("local Ollama endpoint returned HTTP 400 for POST /api/chat"), False, "item"),
+    ],
+)
+def test_an_http_400_to_a_schema_call_is_a_wrong_answer_and_otherwise_an_item_failure(error: BaseException, schema_mode: bool, kind: str) -> None:
+    assert base.failure_kind(error, schema_mode=schema_mode) == kind
+
+
+def test_http_status_comes_from_the_cause_or_an_ollama_message_only() -> None:
+    assert base.http_status(server_error()) == 500
+    assert base.http_status(http_error(402)) == 402
+    assert base.http_status(ModelInvocationError("returned HTTP 500")) is None
+    assert base.http_status(ValueError("boom")) is None
+
+
+def test_one_failed_item_call_is_recorded_unscored_and_the_run_completes(gig: GigContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    answer_live(gig, monkeypatch)
+    first = ci_items("contractnli")[0]
+    # Only the first main call for contractnli's first item fails (its noise repeats ask the same prompt again).
+    first_ask = lambda n, request: request.prompt == first.prompt and [r.prompt for r in seen].count(first.prompt) == 1  # noqa: E731
+    seen = failing(monkeypatch, lambda n, request: server_error() if first_ask(n, request) else None)
+    result = invoke(gig, "--rungs", "claude-haiku,deterministic", "--max-calls", str(HAIKU_GATE_CALLS), "--json")
+    assert result.exit_code == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["calls_made"] == 270
+    by_rung = {r["name"]: (r["calls_made"], r["failed_calls"], r["failures"]) for r in report["rungs"]}
+    assert by_rung == {"claude-haiku": (270, 1, {"OllamaLocalAdapterError": 1}), "deterministic": (0, 0, {})}
+    called = "AND run_id NOT IN (SELECT run_id FROM runs WHERE replay_of IS NOT NULL)"  # gate e's replay copies it
+    failed = rows(gig.home, f"SELECT trace_id, item_id, output_raw_text, parse_status, error, model_id FROM traces WHERE outcome = 'failed' {called}")
+    error = {"code": "OllamaLocalAdapterError", "message": "OllamaLocalAdapterError (HTTP 500)", "retryable": False}
+    assert [(item, text, status, json.loads(stored), model) for _, item, text, status, stored, model in failed] == [(first.id, "", "not_parsed", error, None)]
+    assert rows(gig.home, "SELECT count(*) FROM scores WHERE trace_id = ?", failed[0][0]) == [(0,)]
+    contract = next(r for r in report["runs"] if (r["rung"], r["set"]) == ("claude-haiku", "contractnli"))
+    assert (contract["items"], contract["scored"]) == (10, 9)
+    # gate e replays the contractnli run: the failed trace is copied and not re-scored, so the mean still agrees.
+    assert report["gates"]["e"]["traces"] == 10 and report["gates"]["e"]["status"] == "pass"
+    markdown = base.render_markdown(report)
+    assert "| ran | 270 (1 failed: OllamaLocalAdapterError 1) |" in markdown
+    assert "| ran | 0 |" in markdown
+    assert "270 calls (1 failed: OllamaLocalAdapterError 1), suite" in "\n".join(base.report_lines(report))
+
+
+def test_a_run_with_no_failed_call_shows_none(gig: GigContext) -> None:
+    report = deterministic_run(gig)
+    assert {(r["failed_calls"], json.dumps(r["failures"])) for r in report["rungs"]} == {(0, "{}")}
+    assert " failed: " not in base.render_markdown(report)
+    assert " failed: " not in "\n".join(base.report_lines(report))
+
+
+def test_failed_calls_past_the_limit_abort_naming_rung_count_and_limit(gig: GigContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    answer_live(gig, monkeypatch)
+    failing(monkeypatch, lambda n, request: server_error() if n % 2 else None)
+    result = invoke(gig, "--rungs", "claude-haiku", "--max-calls", str(HAIKU_GATE_CALLS))
+    assert result.exit_code == 1
+    # 10% of the 960 planned calls is 96: the 97th failure (call 193) aborts.
+    assert result.stderr == f"gigai {GIG} eval: rung claude-haiku: 97 of {HAIKU_GATE_CALLS} calls failed (limit 10%); last error OllamaLocalAdapterError\n"
+    assert rows(gig.home, "SELECT outcome, count(*) FROM traces GROUP BY outcome ORDER BY outcome") == [("failed", 97), ("succeeded", 96)]
+    assert rows(gig.home, "SELECT count(DISTINCT run_id) FROM traces")[0][0] >= 6
+
+
+def test_failed_calls_exactly_at_the_limit_do_not_abort(gig: GigContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    answer_live(gig, monkeypatch)
+    failing(monkeypatch, lambda n, request: server_error() if n % 2 and n <= 191 else None)
+    result = invoke(gig, "--rungs", "claude-haiku", "--max-calls", str(HAIKU_GATE_CALLS), "--json")
+    assert result.exit_code == 0, result.stderr
+    (haiku,) = json.loads(result.stdout)["rungs"]
+    assert (haiku["calls_made"], haiku["failed_calls"], haiku["failures"]) == (270, 96, {"OllamaLocalAdapterError": 96})
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ModelAuthenticationRequired("log in"), OllamaLocalIdentityError("digest changed"), http_error(401), ValueError("boom")],
+    ids=["auth", "identity", "http-401", "unknown"],
+)
+def test_a_run_level_failure_aborts_at_its_first_occurrence(gig: GigContext, monkeypatch: pytest.MonkeyPatch, error: BaseException) -> None:
+    answer_live(gig, monkeypatch)
+    failing(monkeypatch, lambda n, request: error if n == 3 else None)
+    result = invoke(gig, "--rungs", "claude-haiku", "--max-calls", str(HAIKU_GATE_CALLS))
+    assert result.exit_code == 1
+    name = type(error).__name__
+    assert re.fullmatch(rf"gigai {GIG} eval: rung claude-haiku: call 3 \(input sha256 [0-9a-f]{{12}}\) failed: {name}\n", result.stderr), result.stderr
+    assert rows(gig.home, "SELECT outcome, count(*) FROM traces GROUP BY outcome") == [("succeeded", 2)]
+
+
+def test_failed_noise_repeat_and_canary_calls_are_counted_and_unscored(gig: GigContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    answer_live(gig, monkeypatch)
+    main, noise = sum(CI_ITEMS.values()), 2 * sum(CI_ITEMS.values())
+    # Calls run main answers, then noise repeats, then the calling canaries: fail the first of each of the last two.
+    failing(monkeypatch, lambda n, request: server_error() if n in (main + 1, main + noise + 1) else None)
+    result = invoke(gig, "--rungs", "claude-haiku", "--max-calls", str(HAIKU_GATE_CALLS), "--json")
+    assert result.exit_code == 0, result.stderr
+    report = json.loads(result.stdout)
+    (haiku,) = report["rungs"]
+    assert (haiku["calls_made"], haiku["failed_calls"], haiku["failures"]) == (270, 2, {"OllamaLocalAdapterError": 2})
+    noise_run = report["gates"]["b"]["run_id"]
+    canary_runs = {c["run_id"] for c in report["gates"]["c"] if c["canary"] in base.CALLING_CANARIES}
+    failed = rows(gig.home, "SELECT run_id, repeat_index FROM traces WHERE outcome = 'failed'")
+    where = sorted("noise" if (run, repeat > 0) == (noise_run, True) else "canary" if run in canary_runs else run for run, repeat in failed)
+    assert where == ["canary", "noise"]
+    assert rows(gig.home, "SELECT count(*) FROM traces t JOIN scores s ON s.trace_id = t.trace_id WHERE t.outcome = 'failed'") == [(0,)]
+
+
+def test_a_schema_tagged_item_is_asked_in_schema_mode_with_its_schema(gig: GigContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    answer_live(gig, monkeypatch)
+    seen = failing(monkeypatch, lambda n, request: None)
+    result = invoke(gig, "--rungs", "claude-haiku", "--max-calls", str(HAIKU_GATE_CALLS), "--json")
+    assert result.exit_code == 0, result.stderr
+    assert all("output_mode:schema" in item.tags for item in ci_items("jsonschemabench"))
+    # The ci jsonschemabench items share one prompt; only the schema each request carries tells them apart.
+    schemas = [item.expected["schema"] for item in ci_items("jsonschemabench")]
+    (prompt,) = {item.prompt for item in ci_items("jsonschemabench")}
+    plain = {item.prompt for item in ci_items("contractnli")}
+    asked = [r for r in seen if r.prompt == prompt]
+    other = [r for r in seen if r.prompt in plain]
+    assert all(r.output_mode == "schema" and r.schema in schemas for r in asked)
+    assert all(any(r.schema == schema for r in asked) for schema in schemas)
+    # The first item is a noise item too: its main answer and both noise repeats carry its schema.
+    assert sum(r.schema == schemas[0] for r in asked) == 3
+    assert len(other) > len(plain) and all(r.output_mode is None and r.schema is None for r in other)
+
+
+@pytest.mark.parametrize("error", [ModelOutputNotJSONError("not json"), http_error(400)], ids=["not-json", "http-400"])
+def test_a_non_json_reply_to_a_schema_request_is_a_wrong_answer_not_a_failed_call(gig: GigContext, monkeypatch: pytest.MonkeyPatch, error: BaseException) -> None:
+    answer_live(gig, monkeypatch)
+    first = ci_items("jsonschemabench")[0]
+    failing(monkeypatch, lambda n, request: error if request.prompt == first.prompt else None)
+    result = invoke(gig, "--rungs", "claude-haiku", "--max-calls", str(HAIKU_GATE_CALLS), "--json")
+    assert result.exit_code == 0, result.stderr
+    (haiku,) = json.loads(result.stdout)["rungs"]
+    assert (haiku["calls_made"], haiku["failed_calls"], haiku["failures"]) == (270, 0, {})
+    answered = "SELECT t.output_raw_text, t.parse_status, t.outcome, s.value FROM traces t LEFT JOIN scores s ON s.trace_id = t.trace_id WHERE t.input = ?"
+    stored = rows(gig.home, answered, first.prompt)
+    assert stored and set(stored) == {("", "not_json", "succeeded", 0.0)}

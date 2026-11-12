@@ -17,6 +17,10 @@ validation gates:
 Model calls (to every rung but the deterministic one) are capped by ``--max-calls`` and the gig's release-gate ``max_calls``: the plan
 is checked against the cap before any slice is read or adapter built, and each call is checked again before it is
 made. ``--deterministic`` answers every rung from the committed ci slices' canned completions with no call.
+A call that fails for one item (the model server or provider broke that one request) is recorded as a failed trace
+with no score and the run goes on; a rung aborts the run once more than ``MAX_FAILED_PERCENT`` of its planned model
+calls have failed, and a missing credential, a changed model identity or an unknown error aborts it at the first
+failure (see :func:`failure_kind`). A call to an item tagged ``output_mode:schema`` carries the item's JSON Schema.
 Errors name rungs, sets, item ids and SHA-256s, never item text.
 """
 
@@ -42,7 +46,7 @@ from ..canonical import sha256_hex
 from ..gigs.home import GigNameError, check_name
 from . import records, stats
 from . import datasets as ds
-from .run import CapReachedError, RunFailed, RunRefused, _manifest_digest, dataset_digest, guard
+from .run import CapReachedError, RunFailed, RunRefused, _manifest_digest, _schema_settings, dataset_digest, guard
 
 if TYPE_CHECKING:
     from gigai.sdk import GigContext
@@ -54,6 +58,8 @@ CANARIES = ("broken_prompt", "truncated_context", "wrong_label")
 CALLING_CANARIES = ("broken_prompt", "truncated_context")
 #: Items a calling canary takes when its ladder table names no ``items``.
 CANARY_ITEMS = 100
+#: A rung aborts the run once more than this percent of its planned model calls (main, noise and canary) failed.
+MAX_FAILED_PERCENT = 10
 ADAPTERS = ("deterministic", "claude_cli", "codex_cli", "openrouter_api", "openai_api", "ollama_local")
 KNOBS = ("temperature", "seed")
 SCORER_VERSION = "1"
@@ -785,6 +791,84 @@ def _unreachable(rung: Rung, config: Any) -> str | None:
     return None
 
 
+# --- failed calls -----------------------------------------------------------------------------------------------
+
+#: An API answering one of these refused the credential or the account (out of credits): every later call fails too.
+_RUN_LEVEL_HTTP = frozenset({401, 402, 403})
+
+
+def http_status(exc: BaseException) -> int | None:
+    """The HTTP status behind a failed call: an httpx response in its cause chain, or ``HTTP NNN`` in a local Ollama error."""
+
+    from gigai.adapters.ollama_local import OllamaLocalAdapterError
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        status = getattr(getattr(current, "response", None), "status_code", None)
+        if isinstance(status, int) and not isinstance(status, bool):
+            return status
+        current = current.__cause__ or current.__context__
+    found = re.search(r"\bHTTP (\d{3})\b", str(exc)) if isinstance(exc, OllamaLocalAdapterError) else None
+    return int(found.group(1)) if found else None
+
+
+def failure_kind(exc: BaseException, *, schema_mode: bool) -> str:
+    """What one failed model call means for the run: ``"answer"``, ``"item"`` or ``"run"``.
+
+    ``schema_mode``: the call carried ``output_mode="schema"`` and the item's JSON Schema.
+
+    - ``answer``: the model's wrong answer, recorded as an empty answer and scored like any non-JSON answer; not a
+      failed call. A schema-mode reply that is not JSON (``ModelOutputNotJSONError``), and an HTTP 400 to a
+      schema-mode call: the provider cannot answer under that schema (API strict ``response_format``, Ollama ``format``).
+    - ``item``: the call failed for this one request: any other ``ModelInvocationError`` (a local Ollama server's
+      HTTP 4xx/5xx, timeout or malformed reply, an API's HTTP or transport error, a CLI's non-zero exit or timeout) or
+      a bounded call that timed out or failed. The run records it and goes on.
+    - ``run``: every later call would fail the same way, or the error is unknown, so the run aborts: missing
+      authentication, a capability or request-field refusal, a cancelled call, a local model whose identity changed,
+      an API answering 401/402/403, a bounded call cancelled or out of budget, and anything else.
+    """
+
+    from gigai.adapters.ollama_local import OllamaLocalIdentityError
+    from gigai.adapters.port import (
+        CapabilityMismatchError,
+        ModelAuthenticationRequired,
+        ModelInvocationCancelled,
+        ModelInvocationError,
+        ModelOutputNotJSONError,
+        UnsupportedRequestFieldError,
+    )
+    from gigai.model_call import BoundedCallError
+
+    if isinstance(exc, ModelOutputNotJSONError):
+        return "answer"
+    if isinstance(exc, BoundedCallError):
+        return "item" if exc.reason in ("timed_out", "failed") else "run"
+    run_level = (ModelAuthenticationRequired, CapabilityMismatchError, UnsupportedRequestFieldError, ModelInvocationCancelled, OllamaLocalIdentityError)
+    if not isinstance(exc, ModelInvocationError) or isinstance(exc, run_level):
+        return "run"
+    status = http_status(exc)
+    if status in _RUN_LEVEL_HTTP:
+        return "run"
+    return "answer" if schema_mode and status == 400 else "item"
+
+
+class _ItemFailed(Exception):
+    """One item's model call failed at item level; carries the error class and HTTP status, never the error's text."""
+
+    def __init__(self, code: str, status: int | None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.status = status
+
+    def error(self) -> dict[str, Any]:
+        """The stored trace error: the class name and HTTP status only."""
+
+        detail = self.code if self.status is None else f"{self.code} (HTTP {self.status})"
+        return {"code": self.code, "message": detail, "retryable": False}
+
+
 # --- the run ----------------------------------------------------------------------------------------------------
 
 
@@ -801,19 +885,25 @@ class _Context:
     canned: dict[str, dict[str, tuple[str, str]]] = field(default_factory=dict)
     prereg: records.Prereg | None = None
     calls_by_rung: dict[str, int] = field(default_factory=dict)
+    #: Each rung's planned model calls (main, noise and canary): the base of its failed-call limit.
+    planned_calls: dict[str, int] = field(default_factory=dict)
+    #: Each rung's failed calls by error class.
+    failures: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def answer(self, rung: Rung, set_name: str, item: ds.Item, prompt: str) -> tuple[str, records.ModelCall | None]:
         """The rung's answer to ``prompt`` for ``item``: canned for the deterministic rung or run, else one capped call.
 
         The canned answer is keyed by item id and given only to the item's own prompt; an altered (canary) prompt gets none.
+        An item tagged ``output_mode:schema`` is asked in schema mode with its own JSON Schema.
         """
 
         if self.deterministic or rung.deterministic:
             stored = self.canned[set_name].get(item.id)
             return (stored[1] if stored is not None and stored[0] == prompt else ""), None
-        return self.cap.call(lambda: self._call(rung, prompt))
+        fields = _schema_settings({"tags": list(item.tags), "expected": item.expected}, {}, prompt)
+        return self.cap.call(lambda: self._call(rung, prompt, fields))
 
-    def _call(self, rung: Rung, prompt: str) -> tuple[str, records.ModelCall]:
+    def _call(self, rung: Rung, prompt: str, fields: Mapping[str, Any]) -> tuple[str, records.ModelCall | None]:
         from gigai.adapters import factory
         from gigai.model_call import invoke_bounded
         from gigai.steps import _WALL_TIME_MS
@@ -826,13 +916,18 @@ class _Context:
             raise RunRefused(f"rung {rung.name}: cannot build its adapter ({type(exc).__name__})") from exc
         settings = {"temperature": 0.0, "seed": ds.SEED}
         request = dataclasses.replace(
-            binding.request(role="reviewer", prompt=prompt), **{key: settings[key] for key in rung.knobs}
+            binding.request(role="reviewer", prompt=prompt), **{key: settings[key] for key in rung.knobs}, **fields
         )
         try:
             result = invoke_bounded(
                 binding.port, request, max_wall_time_ms=_WALL_TIME_MS, max_output_tokens=binding.current.target.max_output_tokens
             )
         except Exception as exc:
+            kind = failure_kind(exc, schema_mode=request.output_mode == "schema")
+            if kind == "answer":
+                return "", None
+            if kind == "item":
+                raise _ItemFailed(type(exc).__name__, http_status(exc)) from exc
             digest = sha256_hex(prompt.encode("utf-8"))[:12]
             raise RunFailed(f"rung {rung.name}: call {number} (input sha256 {digest}) failed: {type(exc).__name__}") from exc
         finally:
@@ -875,7 +970,11 @@ class _Context:
         expected: Any = None,
         scorer_id: str | None = None,
     ) -> float | None:
-        text, model = self.answer(rung, set_name, item, prompt)
+        try:
+            text, model = self.answer(rung, set_name, item, prompt)
+        except _ItemFailed as failed:
+            self._record_failure(run_id, rung, set_name, item, prompt, repeat, failed)
+            return None
         parsed, status = parse_json(text)
         trace = records.TraceRecord(
             trace_id=records.new_id("trace"),
@@ -897,6 +996,32 @@ class _Context:
                 records.ScoreRecord(records.new_id("score"), trace.trace_id, scorer_id or _scorer(set_name), SCORER_VERSION, value),
             )
         return value
+
+    def _record_failure(self, run_id: str, rung: Rung, set_name: str, item: ds.Item, prompt: str, repeat: int, failed: _ItemFailed) -> None:
+        """Record ``item``'s failed call as an unscored trace and abort once the rung's failed calls pass the limit."""
+
+        records.write_trace(
+            self.connection,
+            records.TraceRecord(
+                trace_id=records.new_id("trace"),
+                run_id=run_id,
+                step_id=_step(set_name),
+                item=records.ItemRef(item.id, self.source, item.cluster_id),
+                input=prompt,
+                output_raw_text="",
+                repeat_index=repeat,
+                parse_status="not_parsed",
+                outcome="failed",
+                error=failed.error(),
+            ),
+        )
+        counts = self.failures.setdefault(rung.name, {})
+        counts[failed.code] = counts.get(failed.code, 0) + 1
+        total, planned = sum(counts.values()), self.planned_calls.get(rung.name, 0)
+        if total * 100 > planned * MAX_FAILED_PERCENT:
+            raise RunFailed(
+                f"rung {rung.name}: {total} of {planned} calls failed (limit {MAX_FAILED_PERCENT}%); last error {failed.code}"
+            )
 
 
 def _step(set_name: str) -> str:
@@ -982,6 +1107,8 @@ def execute_base(
     connection = records.open_evals_db(gig.name, gig.home) if selected else None
     run = _Context(gig, ladder, connection, deterministic, source, CallCap(cap), config=config, items=items)
     run.canned = {name: {item.id: (item.prompt, item.completion or "") for item in rows} for name, rows in items.items()}
+    # Re-planned on the reachable rungs: a skipped rung can move the noise or canary passes to another rung.
+    run.planned_calls = {row["rung"]: row["model_calls"] for row in plan(ladder, selected, counts, deterministic)["rungs"]}
     run.prereg = records.Prereg(
         primary_metric="suite_score",
         pass_rule="tau_b_min",
@@ -1113,6 +1240,7 @@ def _run_and_gate(run: _Context, selected: Sequence[Rung], skipped: list[dict[st
                 continue
             status, reason = "skipped", found["reason"]
         made = sum(row["calls_made"] for row in rows if row["rung"] == rung.name)
+        failures = dict(sorted(run.failures.get(rung.name, {}).items()))
         rungs_out.append(
             {
                 **rung.describe(),
@@ -1120,6 +1248,8 @@ def _run_and_gate(run: _Context, selected: Sequence[Rung], skipped: list[dict[st
                 "reason": reason,
                 "calls_made": run.calls_by_rung.get(rung.name, 0) if status == "ran" else 0,
                 "main_calls": made,
+                "failed_calls": sum(failures.values()),
+                "failures": failures,
                 "suite_score": suite.get(rung.name),
             }
         )
@@ -1194,7 +1324,7 @@ def _canaries(
         if name == "wrong_label":
             for set_name in sets:
                 traces = run.connection.execute(
-                    "SELECT trace_id, item_id, output_raw_text FROM traces WHERE run_id = ? ORDER BY trace_id",
+                    "SELECT trace_id, item_id, output_raw_text FROM traces WHERE run_id = ? AND outcome = 'succeeded' ORDER BY trace_id",
                     (main_runs[(rung.name, set_name)],),
                 ).fetchall()
                 by_id = {item.id: item for item in run.items[set_name]}
@@ -1276,7 +1406,7 @@ def replay_gate(
     copied = records.copy_traces(connection, source_run_id, run, _step(set_name), parse_json)
     replayed = []
     for trace_id, item_id, text in connection.execute(
-        "SELECT trace_id, item_id, output_raw_text FROM traces WHERE run_id = ?", (run.run_id,)
+        "SELECT trace_id, item_id, output_raw_text FROM traces WHERE run_id = ? AND outcome = 'succeeded'", (run.run_id,)
     ).fetchall():
         value = score(set_name, items[item_id].expected, text)
         if value is None:
@@ -1319,6 +1449,15 @@ def plan_lines(report: Mapping[str, Any]) -> list[str]:
     return lines
 
 
+def _failed_note(rung: Mapping[str, Any]) -> str:
+    """`` (3 failed: OllamaLocalAdapterError 3)`` for a rung whose calls failed; empty when none did."""
+
+    if not rung.get("failed_calls"):
+        return ""
+    by_class = ", ".join(f"{name} {count}" for name, count in sorted(rung["failures"].items()))
+    return f" ({rung['failed_calls']} failed: {by_class})"
+
+
 def report_lines(report: Mapping[str, Any]) -> list[str]:
     gates = report["gates"]
     lines = [f"base run: {report['tier']} tier on the {report['source']} slices, ladder {report['ladder_sha256'][:12]}"]
@@ -1327,7 +1466,10 @@ def report_lines(report: Mapping[str, Any]) -> list[str]:
         if rung["status"] == "skipped":
             lines.append(f"  {rung['name']}: rank {rung['rank']}, skipped ({rung['reason']})")
         else:
-            lines.append(f"  {rung['name']}: rank {rung['rank']}, ran, {rung['calls_made']} calls, suite {_num(rung['suite_score'])}")
+            lines.append(
+                f"  {rung['name']}: rank {rung['rank']}, ran, {rung['calls_made']} calls{_failed_note(rung)},"
+                f" suite {_num(rung['suite_score'])}"
+            )
     lines.append("sets (K-score, items, best score):")
     for entry in report["sets"]:
         flag = ", saturated: flagged, not gated" if entry["saturated"] else ""
@@ -1372,7 +1514,7 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         status = rung["status"] if rung["status"] == "ran" else f"skipped: {rung['reason']}"
         out.append(
             f"| {rung['name']} | {rung['adapter']} | {rung['model_name']} | {rung['price_in']:g} / {rung['price_out']:g}"
-            f" | {rung['rank']} ({rung['rank_source']}, {rung['rank_date']}) | {knobs} | {status} | {rung['calls_made']}"
+            f" | {rung['rank']} ({rung['rank_source']}, {rung['rank_date']}) | {knobs} | {status} | {rung['calls_made']}{_failed_note(rung)}"
             f" | {_num(rung['suite_score'])} |"
         )
     out += ["", "## Sets", "", "| Set | K-score | Items | Best | Saturated |", "|---|---|---|---|---|"]

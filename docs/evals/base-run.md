@@ -15,7 +15,7 @@ sets, run ids and numbers only, never item text. Angle brackets mark the filled 
 
 | Rung | Adapter | Model | Price in/out ($/M) | Rank (source, date) | Knobs | Status | Calls | Suite |
 |---|---|---|---|---|---|---|---|---|
-| <name> | <adapter> | <model name> | <in> / <out> | <rank> (<source URL>, <date>) | <knobs, or why none> | <ran, or skipped: reason> | <calls> | <suite points, or n/a> |
+| <name> | <adapter> | <model name> | <in> / <out> | <rank> (<source URL>, <date>) | <knobs, or why none> | <ran, or skipped: reason> | <calls>[ (<n> failed: <error class> <count>, ...)] | <suite points, or n/a> |
 
 ## Sets
 
@@ -44,6 +44,15 @@ sets, run ids and numbers only, never item text. Angle brackets mark the filled 
 
 ## Reading it
 
+- **Calls** is the rung's model calls, failed ones included. When some failed, it is followed by
+  their count and their error classes, for example `560 (3 failed: OllamaLocalAdapterError 3)`;
+  the JSON has the same per rung as `failed_calls` and `failures` (error class to count, `{}`
+  when none failed). A failed call is stored as a trace with an empty answer, parse status
+  `not_parsed`, outcome `failed` and its error class (and HTTP status, never the error text),
+  and it gets no score. In a run row, **Scored** next to **Items** counts the answers that got a
+  score; the suite and set scores are over scored items only. A schema-mode call answered with
+  non-JSON or with HTTP 400 is not a failed call: it is stored as an empty `not_json` answer and
+  scores 0.
 - **Suite** is a rung's mean over the gated sets of its per-set score, in points (0-100). A set
   where the best rung scores at or above `order.saturated_at` (0.97) is flagged and left out of
   the suite and the gates.
