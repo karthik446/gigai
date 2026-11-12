@@ -30,6 +30,30 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.3.1
+
+This release fixes three problems found by the first live run of `eval base` on 0.3.0. It changes no stored data.
+
+#### Fixed
+
+- **One failed model call no longer ends an `eval base` run.** When a model or provider fails on a single item (for
+  example a local Ollama server answering HTTP 500 for one prompt), the item is stored as a failed call with its error
+  class and no score, counted per rung in the report (`failed_calls` and `failures` in `--json`), and the run goes on.
+  The run still stops at the first missing key, refused request, changed local model or unrecognised error, and when
+  more than 10% of one rung's planned calls have failed, naming the rung, so a dead provider cannot produce a result.
+  A non-JSON reply to a schema request, or a provider refusing the schema with HTTP 400, now counts as a wrong
+  answer (score 0), not a failure.
+- **`eval base` now works after a plain `uv tool install gigai`.** `pyarrow`, which reads the parquet files of five
+  eval sets, is now installed with GigAI (about 125 MB larger install). Before, the run stopped with "needs pyarrow".
+- **The JSON Schema set now shows the model its schema.** In 0.3.0 the `jsonschemabench` requests of `eval base` did
+  not carry the schema, so models could only guess and the set's scores were noise. Results of that set from a 0.3.0
+  base run are invalid; rerun them.
+
+#### Upgrade notes
+
+- No migration and no `config.toml` change. Rollback is `uv tool install --reinstall gigai==0.3.0`.
+- Installing GigAI again with `uv tool install` removes gigs installed into the tool environment; install them again.
+
 ### 0.3.0
 
 This release adds spending limits in US dollars and two more tools for measuring a gig's model steps. It is
