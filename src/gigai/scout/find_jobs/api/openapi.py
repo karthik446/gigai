@@ -1613,12 +1613,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("posting_phrase", "string", "add: at most 60 characters of the posting the suggestion points at."),
             _b("suggestion_id", "string", "resolve, dismiss, add_line: the suggestion, by id (`sg-<n>`)."),
             _b("how", "string", "resolve: what settled it.", enum=("job_resume_edit", "master_line", "answer")),
-            _b("ref", "string", "resolve: what it points at: the master line id (master_line) or the question id (answer)."),
+            _b("ref", "string", "resolve: what it points at: the master line id (master_line) or the question id (answer). add_line: a line your master has: the job settles on it, nothing is written."),
             _b("text", "string", "add_line: your own words for the line (the suggestion's `draft.text` when not given)."),
         ),
         request_example={"job_url": _JOB_URL, "action": "resolve", "suggestion_id": "sg-1", "how": "job_resume_edit", "actor": "agent"},
         errors=(
-            _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "bad_enum"), (422, "personal_info_refused"), (422, "unknown_line"), (422, "unknown_requirement"),
+            _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "bad_enum"), (422, "personal_info_refused"), (422, "unknown_line"), (422, "unknown_requirement"), (422, "master_place_invalid"),
             (404, "assessment_missing"), (404, "suggestions_not_found"), (404, "suggestion_not_found"), (404, "answer_not_found"), (404, "story_not_found"),
             (409, "no_master"), (409, "near_duplicate"), (409, "master_line_exists"), _NO_TARGET,
         ),
@@ -1630,7 +1630,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "job's suggestions after the change, with `added`, `resolved` or `dismissed`: the id it was about. A hand-back that settles suggestions "
             "names them itself (`gigai scout resume store --resolves sg-1,sg-3`). 0.3.2 `add_line`: an open master_line suggestion with a `draft` "
             "(else 422 invalid_value) has its line (or your `text`) added to your master under `draft.entry_id`, backed by the answer or story, as "
-            "`gigai scout resume master add` does (a line like one the master has is 409 near_duplicate: nothing is written). Then, in code: the "
+            "`gigai scout resume master add` does (a line like one the master has is 409 near_duplicate: nothing is written, unless that line "
+            "carries this suggestion's own backing: an earlier add_line that stopped half way, finished now). With `ref` (a line the master has) "
+            "nothing is written and the job settles on that line when the strict check finds the requirement on it (else 422 invalid_value). A "
+            "suggestion that is done is 422 invalid_value naming its line; a master with no role is 422 master_place_invalid naming "
+            "`gigai scout resume master add --from-answer`. Then, in code: the "
             "row is read again by the strict check (met when the line shows it), the gate is decided again, the stored assessment is written back "
             "with a history entry `master_line:<line id>`, the suggestion is resolved (`how` master_line, `ref` the line id) and the resume is picked "
             "again; the answer adds `line` `{id, entry_id, backed}`, `row` `{id, status}`, `warnings` (a number the line states that the answer "

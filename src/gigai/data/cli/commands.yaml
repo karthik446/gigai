@@ -1578,9 +1578,10 @@
       "output": "Human-readable text; --json emits the job's suggestions after the change, plus the master line written, the row settled, any warnings and the re-pick result.",
       "examples": [
         "gigai scout suggestions add-line sg-1 --job-url https://boards.greenhouse.io/acme/jobs/1 --as agent --json",
-        "gigai scout suggestions add-line sg-1 --job-url https://boards.greenhouse.io/acme/jobs/1 --text \"Ran Kafka pipelines in production for two years.\" --json"
+        "gigai scout suggestions add-line sg-1 --job-url https://boards.greenhouse.io/acme/jobs/1 --text \"Ran Kafka pipelines in production for two years.\" --json",
+        "gigai scout suggestions add-line sg-1 --job-url https://boards.greenhouse.io/acme/jobs/1 --ref b-3 --json"
       ],
-      "notes": "No model call. Only for an open master_line suggestion on a must-have the user said yes to; the line is backed by the answer. --text replaces the drafted words (the user's own). The row is re-checked in code, the assessment is written back with history trigger master_line:<line id>, the suggestion is resolved (how master_line, ref the line id) and the resume is picked again; a refused re-pick is reported and the line stays written. Refused with near_duplicate when the master already holds a close line: resolve the suggestion with --how master_line --ref LINE instead."
+      "notes": "No model call. Only for an open master_line suggestion on a must-have the user said yes to; the line is backed by the answer. --text replaces the drafted words (the user's own). The row is re-checked in code, the assessment is written back with history trigger master_line:<line id>, the suggestion is resolved (how master_line, ref the line id) and the resume is picked again; a refused re-pick is reported and the line stays written. Running it again on a done suggestion is refused (invalid_value) and names the line; a second run after one that stopped half way finishes it. Refused with near_duplicate when the master already holds a close line: settle on that line with --ref LINE (nothing is written; refused when the strict check does not find the requirement on it). A master with no role is refused (master_place_invalid): add the line with gigai scout resume master add --from-answer QID --section other, then add-line --ref LINE."
     },
     "scout run": {
       "summary": "Install/activate Scout if needed, then start (or reuse) its local API + UI.",

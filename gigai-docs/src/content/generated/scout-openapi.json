@@ -3115,7 +3115,7 @@
         ]
       },
       "post": {
-        "description": "Add a suggestion to one job, set one to done, dismiss one, or add a suggestion's drafted line to the master. No model call. `add` writes one more open suggestion with `source` the writer (operator or agent); its `line` must be a line of the master (422 unknown_line) and its `requirement` a row of this job (422 unknown_requirement); a `why` or `posting_phrase` that holds a contact detail is 422 personal_info_refused. `resolve` sets one to done and records `{by, at, how, ref}`; `dismiss` sets one to dismissed. A closed suggestion stays in the record and its id is never used again. A key of another action is 422 invalid_value. The answer is the job's suggestions after the change, with `added`, `resolved` or `dismissed`: the id it was about. A hand-back that settles suggestions names them itself (`gigai scout resume store --resolves sg-1,sg-3`). 0.3.2 `add_line`: an open master_line suggestion with a `draft` (else 422 invalid_value) has its line (or your `text`) added to your master under `draft.entry_id`, backed by the answer or story, as `gigai scout resume master add` does (a line like one the master has is 409 near_duplicate: nothing is written). Then, in code: the row is read again by the strict check (met when the line shows it), the gate is decided again, the stored assessment is written back with a history entry `master_line:<line id>`, the suggestion is resolved (`how` master_line, `ref` the line id) and the resume is picked again; the answer adds `line` `{id, entry_id, backed}`, `row` `{id, status}`, `warnings` (a number the line states that the answer does not) and `repick` (null, or `{code, message}` when the pick is refused: the line and the assessment stay written).",
+        "description": "Add a suggestion to one job, set one to done, dismiss one, or add a suggestion's drafted line to the master. No model call. `add` writes one more open suggestion with `source` the writer (operator or agent); its `line` must be a line of the master (422 unknown_line) and its `requirement` a row of this job (422 unknown_requirement); a `why` or `posting_phrase` that holds a contact detail is 422 personal_info_refused. `resolve` sets one to done and records `{by, at, how, ref}`; `dismiss` sets one to dismissed. A closed suggestion stays in the record and its id is never used again. A key of another action is 422 invalid_value. The answer is the job's suggestions after the change, with `added`, `resolved` or `dismissed`: the id it was about. A hand-back that settles suggestions names them itself (`gigai scout resume store --resolves sg-1,sg-3`). 0.3.2 `add_line`: an open master_line suggestion with a `draft` (else 422 invalid_value) has its line (or your `text`) added to your master under `draft.entry_id`, backed by the answer or story, as `gigai scout resume master add` does (a line like one the master has is 409 near_duplicate: nothing is written, unless that line carries this suggestion's own backing: an earlier add_line that stopped half way, finished now). With `ref` (a line the master has) nothing is written and the job settles on that line when the strict check finds the requirement on it (else 422 invalid_value). A suggestion that is done is 422 invalid_value naming its line; a master with no role is 422 master_place_invalid naming `gigai scout resume master add --from-answer`. Then, in code: the row is read again by the strict check (met when the line shows it), the gate is decided again, the stored assessment is written back with a history entry `master_line:<line id>`, the suggestion is resolved (`how` master_line, `ref` the line id) and the resume is picked again; the answer adds `line` `{id, entry_id, backed}`, `row` `{id, status}`, `warnings` (a number the line states that the answer does not) and `repick` (null, or `{code, message}` when the pick is refused: the line and the assessment stay written).",
         "operationId": "post_api_jobs_suggestions",
         "parameters": [],
         "requestBody": {
@@ -3186,7 +3186,7 @@
                     "type": "string"
                   },
                   "ref": {
-                    "description": "resolve: what it points at: the master line id (master_line) or the question id (answer).",
+                    "description": "resolve: what it points at: the master line id (master_line) or the question id (answer). add_line: a line your master has: the job settles on it, nothing is written.",
                     "type": "string"
                   },
                   "requirement": {
@@ -3338,7 +3338,7 @@
                 }
               }
             },
-            "description": "unknown_key, wrong_type, invalid_value, bad_enum, personal_info_refused, unknown_line, unknown_requirement"
+            "description": "unknown_key, wrong_type, invalid_value, bad_enum, personal_info_refused, unknown_line, unknown_requirement, master_place_invalid"
           }
         },
         "summary": "Add, resolve or dismiss a suggestion of one job, or add its drafted line",

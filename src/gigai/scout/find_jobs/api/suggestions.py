@@ -37,6 +37,7 @@ from ..contracts import FindJobsContractError
 
 _UNPROCESSABLE = (
     "invalid_value", "wrong_type", "unknown_key", "bad_enum", "personal_info_refused", "unknown_line", "unknown_requirement", "job_input_invalid",
+    "master_place_invalid",
 )
 _NOT_FOUND = (
     "assessment_missing", "suggestions_not_found", "suggestion_not_found", "no_proposed_resume", "target_unavailable", "profile_not_found",
@@ -57,7 +58,7 @@ _ACTION_KEYS: dict[str, frozenset[str]] = {
     "add": frozenset({"kind", "why", "line", "requirement", "posting_phrase"}),
     "resolve": frozenset({"suggestion_id", "how", "ref"}),
     "dismiss": frozenset({"suggestion_id"}),
-    "add_line": frozenset({"suggestion_id", "text"}),
+    "add_line": frozenset({"suggestion_id", "text", "ref"}),
 }
 _ERRORS = (job_actions.JobActionError, job_brief.BriefError, NotBuilt, QuickAssessError, StoryBankError, FindJobsContractError, LabelError)
 
@@ -168,7 +169,8 @@ class JobSuggestionsRoutesMixin:
                 )
             elif action == "add_line":
                 answer = job_actions.add_line(
-                    home_root, target, job_url, str(body.get("suggestion_id") or ""), text=body.get("text") or None, actor=actor, profile_id=profile_id,  # type: ignore[arg-type]
+                    home_root, target, job_url, str(body.get("suggestion_id") or ""), text=body.get("text") or None, ref=body.get("ref") or None,  # type: ignore[arg-type]
+                    actor=actor, profile_id=profile_id,
                 )
             else:
                 answer = job_actions.dismiss_suggestion(home_root, target, job_url, str(body.get("suggestion_id") or ""), actor=actor, profile_id=profile_id)  # type: ignore[arg-type]

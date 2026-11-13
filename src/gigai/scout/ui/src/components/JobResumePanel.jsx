@@ -26,6 +26,7 @@ import {
   changedLines,
   factCheckItems,
   gateHolds,
+  heldUnderOldRule,
   holdSentence,
   isUsersResume,
   needsEducationNotice,
@@ -567,6 +568,11 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
           {hasQuestions && (
             <button type="button" className="link-button" data-action="go-to-questions" onClick={scrollToQuestions}>
               Go to the questions
+            </button>
+          )}{" "}
+          {heldUnderOldRule(gate) && (
+            <button type="button" className="button small" data-action="repick-old-hold" disabled={busy} title="Decides the job again under the current rules, in code. No model call." onClick={() => state.pick("refresh")}>
+              {picking === "refresh" ? "Picking…" : "Pick it again · no model call"}
             </button>
           )}{" "}
           {!stored && (

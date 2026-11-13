@@ -47,7 +47,20 @@ out.sentences = {
   saidAndAsked: m.holdSentence({ decision: "hold_question", reasons: [{ code: "answered", requirement: "req-0000a1" }, { code: "question_open", requirement: "req-0000a2" }] }, input.said),
   saidOnly: m.holdSentence({ decision: "hold_question", reasons: [{ code: "answered", requirement: "req-0000a1" }] }, { ...input.said, matrix: input.said.matrix.slice(0, 1), structured_questions: [] }),
   gapAndSaid: m.holdSentence({ decision: "hold_unmet", reasons: [{ code: "askable_unmet", requirement: "req-0000a3" }] }, { ...input.said, matrix: [...input.said.matrix, { id: "req-0000a3", requirement: "Terraform", class: "askable", status: "unmet" }] }),
+  // 0.3.2 (gyl): a must-have whose answer on file reads both yes and no is not asked again: it is named with what settles it.
+  bothOnly: m.holdSentence({ decision: "hold_question", reasons: [{ code: "question_open", requirement: "req-0000b1" }] }, { ...input.both, matrix: input.both.matrix.slice(0, 1), structured_questions: [] }),
+  bothAndAsked: m.holdSentence({ decision: "hold_question", reasons: [{ code: "question_open", requirement: "req-0000b1" }, { code: "question_open", requirement: "req-0000a2" }] }, input.both),
+  bothTwo: m.holdSentence({ decision: "hold_question", reasons: [{ code: "question_open", requirement: "req-0000b1" }, { code: "question_open", requirement: "req-0000b2" }] }, { ...input.both, structured_questions: [] }),
+  bothAskedAgain: m.holdSentence({ decision: "hold_question", reasons: [{ code: "question_open", requirement: "req-0000b1" }] }, { ...input.both, structured_questions: [{ question_id: "k8s:prod", question: "Kubernetes?", requirement: "Kubernetes in production" }] }),
 };
+// 0.3.2 (83r): a 0.3.1 record held on `answered` rows only is held under a dropped rule: the page offers to pick it again.
+out.oldRule = [
+  m.heldUnderOldRule({ decision: "hold_question", reasons: [{ code: "answered", requirement: "req-0000a1" }] }),
+  m.heldUnderOldRule({ decision: "hold_question", reasons: [{ code: "answered", requirement: "req-0000a1" }, { code: "question_open", requirement: "req-0000a2" }] }),
+  m.heldUnderOldRule({ decision: "hold_question", reasons: [] }),
+  m.heldUnderOldRule({ decision: "suggest", reasons: [] }),
+  m.heldUnderOldRule(null),
+];
 
 // The header's chip, and the state a held match reads.
 const job = (verdict, quick, row) => ({ id: "j", verdict, quick, row: row || null, assessmentSource: "quick" });
@@ -218,6 +231,20 @@ SAID = {
     ],
     "structured_questions": [{"question_id": "cloud:gcp", "question": "Which cloud?", "requirement": "GCP"}],
 }
+#: 0.3.2 (gyl): two must-haves whose answers on file read both yes and no (``unclear``, citing the answer), one still asked.
+BOTH = {
+    "verdict": "pending_user_answers",
+    "matrix": [
+        {"id": "req-0000b1", "requirement": "Kubernetes in production", "class": "askable", "status": "unclear", "sources": ["A requirement:req.0000b1"]},
+        {"id": "req-0000a2", "requirement": "GCP", "class": "askable", "status": "unclear", "sources": []},
+        {"id": "req-0000b2", "requirement": "Helm", "class": "hard", "status": "unclear", "sources": ["A tooling:helm"]},
+    ],
+    "structured_questions": [{"question_id": "cloud:gcp", "question": "Which cloud?", "requirement": "GCP"}],
+}
+BOTH_ONE = (
+    "reads both yes and no, so it is not asked again: say it in one line with "
+    '`gigai scout answer requirement:req.0000b1 --answer-text "…" --reassess JOB_URL`, or add a line to your master that shows it and assess the job again'
+)
 
 
 def _copy(item: str, text: str, line: int) -> dict:
@@ -359,7 +386,7 @@ def out() -> dict:
     urls = [(UI_SRC / name).as_uri() for name in ("jobResumeModel.js", "jobStateModel.js")]
     payload = json.dumps({
         "assessment": ASSESSMENT, "pending": PENDING, "gapGate": GAP_GATE, "stored": STORED, "picked": PICKED, "entries": ENTRIES, "changed": CHANGED, "record": RECORD,
-        "conflicts": CONFLICTS, "added": ADDED, "skills": SKILLS, "proposed": PROPOSED, "served": SERVED, "pickView": PICK_VIEW, "pickCodes": PICK_CODES, "said": SAID,
+        "conflicts": CONFLICTS, "added": ADDED, "skills": SKILLS, "proposed": PROPOSED, "served": SERVED, "pickView": PICK_VIEW, "pickCodes": PICK_CODES, "said": SAID, "both": BOTH,
     })
     done = subprocess.run([node, "--input-type=module", "-e", SCRIPT.replace("__URLS__", json.dumps(urls)), payload], capture_output=True, text=True, check=False, timeout=60)
     assert done.returncode == 0, done.stderr
@@ -378,9 +405,17 @@ def test_the_gate_is_the_records_then_the_assessments_then_the_verdicts(out: dic
         "oneQuestion": "1 must-have requirement waits for your answer",
         "notAMatch": "Not a match: The role is on site in Lisbon.",
         "saidAndAsked": "1 must-have requirement waits for your answer; 1 drafted line to add to your master",
-        "saidOnly": "1 drafted line waits to be added to your master",
+        "saidOnly": "1 must-have you said yes to held it under an older rule; pick it again to make its resume (no model call)",
         "gapAndSaid": "Has a gap: Terraform; 1 drafted line to add to your master",
+        "bothOnly": f"Your answer on “Kubernetes in production” {BOTH_ONE}",
+        "bothAndAsked": f"1 must-have requirement waits for your answer; your answer on “Kubernetes in production” {BOTH_ONE}",
+        "bothTwo": (
+            "Your answers on 2 must-have requirements read both yes and no, so they are not asked again: say each in one line with "
+            '`gigai scout answer QUESTION_ID --answer-text "…" --reassess JOB_URL`, or add lines to your master that show them and assess the job again'
+        ),
+        "bothAskedAgain": "1 must-have requirement waits for your answer",
     }
+    assert out["oldRule"] == [True, False, False, False, False]
 
 
 def test_an_open_master_line_suggestion_shows_the_drafted_line_and_a_closed_one_none(out: dict) -> None:

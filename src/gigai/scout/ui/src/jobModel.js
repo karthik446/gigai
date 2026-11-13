@@ -695,6 +695,9 @@ export function triggerLabel(trigger, promptFor) {
   if (typeof trigger === "string" && trigger.startsWith("master_line:")) {
     return "Settled after you added a line to your master";
   }
+  if (trigger === "regate") {
+    return "Decided again under the current rules (no model call)";
+  }
   return trigger || "";
 }
 

@@ -1286,9 +1286,11 @@ def row_question(row_id: str, requirement: str) -> dict[str, object]:
     return {"question_id": row_question_id(row_id), "question": _ROW_QUESTION.format(requirement=words), "requirement": requirement}
 
 
-#: 0.3.2 gyl: an answer on file that starts by saying no ("No", "Never", "I have not ...") settles its row unmet: a true gap
-#: (``assess_strict`` T7's sense), not a question to ask again.
-_ANSWER_SAYS_NO = re.compile(r"\A\W*(?:no|nope|never|not\s+really|i\s+(?:have\s+not|haven['’]t|do\s+not|don['’]t|did\s+not|didn['’]t))\b", re.IGNORECASE)
+#: 0.3.2 gyl: the note of a must-have row whose answer on file reads both yes and no (``assess_strict.answer_denial``).
+ANSWER_AMBIGUOUS_NOTE = (
+    "Your answer on file reads both yes and no, so this stays unclear and is not asked again: add or edit a line of your "
+    "master that shows it, or change your answer and assess the job again."
+)
 
 
 def settle_answered_rows(
@@ -1298,32 +1300,46 @@ def settle_answered_rows(
 
     ``answers``: the answers on file by lowercased question id (``Boundary.answers``). A question whose id is one of
     them is dropped. A must-have row still ``unclear`` whose own question (:func:`row_question_id`) or a dropped
-    question on it was answered reads ``answered`` (the answer is cited as ``A <question_id>``; the job's suggestions
-    draft its line), or ``unmet`` when the answer says no. ``matrix`` rows are changed in place. No model is called.
+    question on it was answered cites the answer (``A <question_id>``) and reads by ``assess_strict.answer_denial``:
+    ``answered`` on a yes (the job's suggestions draft its line), ``unmet`` on a no (a gap), and on an answer that says
+    both it stays ``unclear`` with :data:`ANSWER_AMBIGUOUS_NOTE` (not settled, never asked again: ``_unasked`` passes
+    over a row citing an answer on file). A row ``answered`` (T6) whose cited answer on file says no reads ``unmet``.
+    ``matrix`` rows are changed in place. No model is called.
     """
 
     if not answers:
         return list(questions), [], []
+    from .assess_strict import AFFIRMS, DENIES, answer_denial  # lazy: the master modules import this one
+
     dropped = [item for item in questions if isinstance(item, dict) and str(item.get("question_id") or "").lower() in answers]
     kept = [item for item in questions if not any(item is gone for gone in dropped)]
     settled: list[tuple[str, str]] = []
     for row in matrix:
-        if row.get("status") != "unclear" or not is_mandatory(row) or is_authorization_row(row):
+        if row.get("status") not in ("unclear", "answered") or not is_mandatory(row) or is_authorization_row(row):
             continue
         row_id = row["id"] if isinstance(row.get("id"), str) else id_of_row.get(id(row))
-        requirement = fold(str(row.get("requirement") or ""))
-        ids = [row_question_id(row_id).lower()] if row_id else []
-        ids += [str(item["question_id"]).lower() for item in dropped if fold(str(item.get("requirement") or "")) == requirement]  # type: ignore[index]
-        on_file = next((question_id for question_id in ids if question_id in answers), None)
-        if on_file is None:
-            continue
-        says_no = bool(_ANSWER_SAYS_NO.search(answers[on_file]))
-        row["status"] = "unmet" if says_no else "answered"
         cited = [str(item) for item in row.get("sources") or () if isinstance(item, str)]  # type: ignore[union-attr]
-        row["sources"] = [*cited, f"A {on_file}"] if f"A {on_file}" not in cited else cited
+        said_to = str(row.get("requirement") or "")
+        if row["status"] == "answered":
+            on_file = next((item[2:].lower() for item in cited if item.startswith("A ") and item[2:].lower() in answers), None)
+            if on_file is None or answer_denial(answers[on_file], requirement=said_to) != DENIES:
+                continue
+        else:
+            requirement = fold(str(row.get("requirement") or ""))
+            ids = [row_question_id(row_id).lower()] if row_id else []
+            ids += [str(item["question_id"]).lower() for item in dropped if fold(str(item.get("requirement") or "")) == requirement]  # type: ignore[index]
+            on_file = next((question_id for question_id in ids if question_id in answers), None)
+            if on_file is None:
+                continue
+            row["sources"] = [*cited, f"A {on_file}"] if f"A {on_file}" not in cited else cited
+        said = answer_denial(answers[on_file], requirement=said_to)
+        if said not in (AFFIRMS, DENIES):
+            row["code_note"] = ANSWER_AMBIGUOUS_NOTE
+            continue
+        row["status"] = "unmet" if said == DENIES else "answered"
         row["code_note"] = (
             "Your answer on file says no: a gap, not a question to ask again."
-            if says_no else "You said yes, and no line of your master shows it; a line is drafted from your answer."
+            if said == DENIES else "You said yes, and no line of your master shows it; a line is drafted from your answer."
         )
         settled.append((row_id or "", str(row["status"])))
     return kept, dropped, settled
@@ -1336,9 +1352,16 @@ def _unasked(matrix: list[Mapping[str, object]], questions: list[object], verdic
     rule: such an answer keeps no question). A row is named by its own id
     (a listed row's, an ``elig-`` one) or, on a first assessment, by the id
     ``requirements_list.extracted`` gives it: the id its stored row carries.
+    A row that cites an answer on file (``A <question_id>``: one :func:`settle_answered_rows` left ``unclear``, the
+    answer saying no and yes at once) is never asked again, so it is not named here.
     """
 
-    unasked = [row for row in unasked_rows(matrix, questions) if isinstance(row.get("requirement"), str) and row["requirement"].strip()]  # type: ignore[union-attr]
+    on_file = boundary.answers or {}
+    unasked = [
+        row for row in unasked_rows(matrix, questions)
+        if isinstance(row.get("requirement"), str) and row["requirement"].strip()  # type: ignore[union-attr]
+        and not any(isinstance(item, str) and item.startswith("A ") and item[2:].lower() in on_file for item in row.get("sources") or ())  # type: ignore[union-attr]
+    ]
     if not unasked or gate(matrix, questions, verdict).decision != HOLD_QUESTION:
         return []
     ids = _row_ids(matrix, boundary.posting_sha256 or "")

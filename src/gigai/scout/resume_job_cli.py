@@ -667,22 +667,27 @@ def suggestions_dismiss_command(
 @_JOB_URL
 @_PROFILE
 @click.option("--text", "text", help="Your own words for the line (the suggestion's drafted line when not given).")
+@click.option("--ref", "ref", metavar="LINE", help="A line your master has already: settle the job on it (nothing is written) when the strict check finds the requirement on it.")
 @_ACTOR
 @_options
 def suggestions_add_line_command(
-    suggestion_id: str, job_url: str, profile_id: str | None, text: str | None, actor: str, target_value: Path | None, home_value: Path | None, as_json: bool,
+    suggestion_id: str, job_url: str, profile_id: str | None, text: str | None, ref: str | None, actor: str, target_value: Path | None,
+    home_value: Path | None, as_json: bool,
 ) -> None:
     """Add a master_line suggestion's drafted line to your master, then settle the job on it. No model call.
 
     The line (`suggestions list` shows it as "Drafted line") goes under your newest role, backed by the answer or
     story it comes from, as `gigai scout resume master add` writes it. Then the requirement is checked again, the
     assessment records `master_line:<line id>`, the suggestion is set to done and the resume is picked again.
+    --ref LINE settles on a line your master has (added by hand, or a close line a run refused as near_duplicate).
     """
 
     from . import job_actions
 
     _run_suggestions(
-        lambda home_root, target: job_actions.add_line(home_root, target, job_url, suggestion_id, text=text or None, actor=actor, profile_id=profile_id or None),
+        lambda home_root, target: job_actions.add_line(
+            home_root, target, job_url, suggestion_id, text=text or None, ref=ref or None, actor=actor, profile_id=profile_id or None,
+        ),
         target_value=target_value, home_value=home_value, as_json=as_json,
     )
 

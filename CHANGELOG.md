@@ -36,6 +36,29 @@ This release fixes what the first live `eval base` run showed about how the run 
 reports noise. The fixes are in a new pre-registration, ladder v2; ladder v1 is kept as it was. It changes no stored
 data.
 
+#### Fixed (Scout)
+
+- **An answer to a must-have no longer holds the resume, and the question is not asked again.** Before, a
+  must-have you answered stayed "unclear" in the strict read when the model also cited a line of your master, so the
+  same question came back after every paid re-assess, and an answered must-have held the resume with nothing to do
+  about it. Now an answered must-have reads "You said yes", the resume is suggested, and the question is not asked
+  again on a re-assess. (gigai-gyl)
+- **A line drafted from your answer, added in one step.** Each answered must-have gets a suggestion with a resume line
+  made from your own words (no model call). `gigai scout suggestions add-line` (and `POST /api/jobs/suggestions`
+  with `action: "add_line"`, and the "Add to my master" button) adds it to your master the same way
+  `resume master add` does, with the answer as its backing, checks the rows again in code, and picks the resume again.
+  It makes no model call and writes an entry in the assessment's history. A retry never adds a second line, and
+  `--ref LINE` settles the row on a line your master already has. An answer that says no is a gap (it draws no line
+  and holds nothing back by guesswork), an answer that says both stays unclear and is not asked again. (gigai-gyl)
+- **A must-have row reads "Required", not "Nice to have: Answered".** The requirements table and the job page now say
+  which row the resume waits for and what to do. (gigai-83r)
+- **A resume draft Scout picks by its own rules fits `max_pages` at the default spacing.** The draft is cut,
+  lowest-scored line first, before it is stored, and the cut lines are listed under "Cut for length" with Restore.
+  A draft that already fits is not changed. The fit leaves room for a header whose contact line wraps, so a draft
+  close to the limit can lose one more line than it needs to. A draft stored by an earlier version is cut the next
+  time it is picked again (Re-pick or `resume pick --refresh`). Scout's wording for a role's lines now says how many lines the role shows
+  (the 11-versus-9 lines was the posting-specific cap, not a miscount). (gigai-39o)
+
 #### Changed
 
 - **Ladder v2: the deterministic rung no longer decides what is gated.** The deterministic rung answers each item's
@@ -75,6 +98,9 @@ data.
 - No migration and no `config.toml` change. Rollback is `uv tool install --reinstall gigai==0.3.1`.
 - A gig that registered the v1 hash keeps running under v1 rules, including the saturation and noise behaviour
   described above as fixed. To get the fixes, register the v2 hash (`ladder_sha256` in the gig's release gate).
+- A job that 0.3.1 held only because you had answered a must-have has no resume yet. Run `gigai scout resume pick
+  --job-url URL --refresh` for it (code only, free), or press "Pick it again" on the job page. It decides the job
+  again under the new rule and adds the drafted-line suggestion.
 - Installing GigAI again with `uv tool install` removes gigs installed into the tool environment; install them again.
 
 ### 0.3.1

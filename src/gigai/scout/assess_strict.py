@@ -125,7 +125,77 @@ LANGUAGES = frozenset(
 )
 _LANGUAGE_ALIASES = {"golang": "go", "js": "javascript", "ts": "typescript"}
 #: T8: an answer that takes something back ("no, I have not used Rust") declares no language.
-_DENIAL = re.compile(r"\b(?:no|not|never|\w+n['’]t)\b", re.IGNORECASE)
+_DENIAL = re.compile(r"\b(?:no|not|never|nope|nein|nada|non(?!-)|\w+n['’]t)\b", re.IGNORECASE)
+#: Idioms that deny nothing when they open the answer or a clause ("No problem: 5 years running EKS", "Not only Docker").
+_NOT_DENIALS = re.compile(
+    r"(?:\A|(?<=[.,;:!?—–-]))\W*(?:no\s+(?:problem|doubt|worries|question|issue)s?|not\s+(?:only|just|a\s+problem))\b", re.IGNORECASE,
+)
+#: A clear claim of experience beside a denial word: a yes that opens the answer or a clause, or a count of years or months
+#: in digits or words ("3 years", "about four years": "No Cassandra in production. MongoDB ... for about four years").
+_CLAIM = re.compile(
+    r"(?:\A|(?<=[.,;:!?—–-]))\W*(?:yes|yeah|yep|yup|absolutely|definitely|of\s+course)\b"
+    r"|\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|a\s+few|several)\+?\s*(?:years?|yrs?|months?)\b",
+    re.IGNORECASE,
+)
+#: An answer that opens with a yes ("Yes", "Absolutely", "Of course", "I have", "I've" ...); read on its first clause.
+_OPENS_YES = re.compile(
+    r"\A\W*(?:yes|yeah|yep|yup|sure|absolutely|definitely|certainly|indeed|correct|of\s+course|i\s+(?:do|did|have|had)\b|i['’]ve)\b",
+    re.IGNORECASE,
+)
+#: Where an answer's clauses part: punctuation, a spaced dash, and the words that turn it ("but", "though", "however" ...).
+_CLAUSE_SPLIT = re.compile(r"[.,;:!?—–()]|\s-\s|\b(?:but|though|although|however|whereas)\b", re.IGNORECASE)
+#: A clause that is a bare no and nothing else ("Yes, no", "Yes ... not really").
+_BARE_DENIAL = re.compile(r"\W*(?:no|nope|never|nein|nah|nada|not(?:\s+(?:really|quite|exactly|at\s+all))?)\W*", re.IGNORECASE)
+#: Saying one is unsure is no denial; it is no yes either ("I'm not sure", "not certain").
+_UNSURE = re.compile(r"\b(?:not\s+(?:sure|certain)|unsure)\b", re.IGNORECASE)
+#: Words of a requirement that name nothing of it.
+_REQUIREMENT_FILLER = frozenset(
+    "and or the of in on with for to an at by as is are be from into using use used your you our we their this that any such other similar etc it".split()
+)
+#: :func:`answer_denial`'s readings of an answer.
+AFFIRMS = "affirms"
+DENIES = "denies"
+AMBIGUOUS = "ambiguous"
+
+
+def _requirement_words(requirement: str) -> frozenset[str]:
+    """The words that name the requirement (casefolded, a trailing plural "s" dropped), not its filler or denial words."""
+
+    words = (word.casefold() for word in re.findall(r"\w+", requirement or ""))
+    return frozenset(word.removesuffix("s") for word in words if len(word) > 1 and word not in _REQUIREMENT_FILLER and not _DENIAL.fullmatch(word))
+
+
+def _names_requirement(clause: str, named: frozenset[str]) -> bool:
+    return any(word.casefold().removesuffix("s") in named for word in re.findall(r"\w+", clause))
+
+
+def answer_denial(text: str, *, requirement: str) -> str:
+    """How the candidate's answer ``text`` to ``requirement`` reads: :data:`DENIES`, :data:`AFFIRMS` or :data:`AMBIGUOUS`. Pure; the one denial test.
+
+    The idioms that deny nothing ("No problem", "No doubt", "Not only" ...) are passed over where they open the answer or a
+    clause. An answer that opens with a yes whose first clause has no denial word affirms, unless a later clause is a bare
+    no ("Yes, no") or denies something the requirement names ("Yes, but not in production" on "Kubernetes in production"):
+    those say both, :data:`AMBIGUOUS`. A denial word in a later clause about something else ("Yes, and it's not hard",
+    "Absolutely, couldn't ship without it") affirms. Any other answer with a denial word (no, not, never, nope, nein, nada,
+    non, any "n't") denies, or says both beside a clear claim (a "yes" opening a clause, "3 years": "No gaps: ran EKS for
+    3 years"). With no denial word it affirms, unless it says it is unsure ("I'm not sure": :data:`AMBIGUOUS`). Words of
+    another language than these are read as no denial.
+    """
+
+    rest = _NOT_DENIALS.sub(" ", text or "")
+    clauses = [clause for clause in _CLAUSE_SPLIT.split(rest) if re.search(r"\w", clause)]
+    if clauses and _OPENS_YES.match(rest) and not _DENIAL.search(clauses[0]):
+        named = _requirement_words(requirement)
+        later = [clause for clause in clauses[1:] if _DENIAL.search(clause)]
+        if any(_BARE_DENIAL.fullmatch(clause) or _names_requirement(clause, named) for clause in later):
+            return AMBIGUOUS
+        return AFFIRMS
+    sure = _UNSURE.sub(" ", rest)
+    if not _DENIAL.search(sure):
+        return AMBIGUOUS if sure != rest else AFFIRMS
+    return AMBIGUOUS if _CLAIM.search(sure) else DENIES
+
+
 #: T8: what separates the names of a skills line ("Languages: Go/Ruby/Python", "Python (FastAPI, Django)") or the words of an
 #: answer; a hyphen stays, so "Objective-C" does not declare C.
 _NAME_SPLIT = re.compile(r"[\s/,;:()\[\]·•]+")
@@ -634,7 +704,7 @@ def _step_declared(row: MutableMapping[str, object], requirement: str, tools: Se
     required = requires_all(requirement, tools) or (tuple(tools) if slash_joined(requirement, tools) else ())
     named = [(tool, language_of(tool)) for tool in (required or tools)]
     answers = _answers_of(row)
-    if any(_DENIAL.search(text) for text in answers):
+    if any(answer_denial(text, requirement=requirement) != AFFIRMS for text in answers):
         return None
     in_answer = frozenset().union(*(_languages_in(text) for text in answers))
     skills_tools = [tool for tool, language in named if language in on_skills]
@@ -693,10 +763,11 @@ def strict_rows(matrix: Sequence[MutableMapping[str, object]], master: StrictMas
                 step_note = _step_years(row, years[0], years[1], tools, matcher)
             elif not tools and not _SOFT_CLAIM.search(requirement):
                 step_note = _step_sources(row, master)
-            if (row["status"] == UNCLEAR and _cites_answer(sources)) or (_only_answers(sources) and step_note is None):
+            if (row["status"] == UNCLEAR and _cites_answer(sources) and step_note is not None and step_note[0] == "T1") or (_only_answers(sources) and step_note is None):
                 # T6: the candidate's answer or story says so and no line of the master shows it (0.3.2 gyl: also when the
-                # row cited a master line beside the answer that the steps above did not accept). The answer is on file,
-                # so the row is never asked again: it is ``answered``, and the job's suggestions draft the line.
+                # row cited a master line beside the answer that T1 found does not name it; a years shortfall, T3, or any
+                # other lowering stays as it is). The answer is on file, so the row is never asked again: it is
+                # ``answered``, and the job's suggestions draft the line.
                 _lower(row, ANSWERED, "Strict read (T6): you said yes, and no line of your master shows it; a line is drafted from your answer.")
                 step_note = ("T6", str(row["code_note"]))
         elif before == UNMET and not _cites_resume(row) and not _answered(row):
@@ -708,12 +779,16 @@ def strict_rows(matrix: Sequence[MutableMapping[str, object]], master: StrictMas
 
 
 __all__ = [
+    "AFFIRMS",
+    "AMBIGUOUS",
     "ANSWERED",
+    "DENIES",
     "GENERIC_TOKENS",
     "LANGUAGES",
     "MAX_CODE_NOTE_CHARS",
     "OPEN_WORDS",
     "StrictChange",
+    "answer_denial",
     "declared_languages",
     "language_of",
     "named_tools",

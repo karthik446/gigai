@@ -344,37 +344,41 @@ def _rechecked_row(row: object, line_id: str, stored: object):  # noqa: ANN202 -
     return RequirementMatrixRow.from_json(candidate) if candidate["status"] == "met" else row
 
 
-def _added_before(master: object, backed: str, text: str) -> str | None:
-    """The id of a line of ``master`` that says ``text`` and is backed by ``backed``: what an earlier ``add_line`` of the
-    same suggestion wrote before it stopped (the master was written, a later step was not), or ``None``."""
+def _added_before(master: object, backed: str, entry_id: str | None) -> tuple[str, ...]:
+    """The ids of the lines of ``master`` under ``entry_id`` backed by ``backed``, whatever their words: among them what an
+    earlier ``add_line`` of the same suggestion wrote before it stopped (the master was written, a later step was not)."""
 
-    said = " ".join(text.split()).casefold()
     items = getattr(master, "items", {}).values()
-    return next((item.id for item in items if backed in item.backed and " ".join(item.text.split()).casefold() == said), None)
+    return tuple(item.id for item in items if backed in item.backed and item.entry_id == entry_id)
 
 
 def add_line(
-    home_root: Path, target: Path, job_url: str, suggestion_id: str, *, text: str | None = None, actor: str = "operator",
-    profile_id: str | None = None, now: str | None = None,
+    home_root: Path, target: Path, job_url: str, suggestion_id: str, *, text: str | None = None, ref: str | None = None,
+    actor: str = "operator", profile_id: str | None = None, now: str | None = None,
 ) -> dict[str, object]:
     """0.3.2 gyl: add the drafted line of an open ``master_line`` suggestion to the master, then settle the job on it. No model call.
 
     ``text``: the user's own words for the line (the draft when not given). The line is written by ``master_edit.add_line``
     under the newest role, backed by the answer or story (``master_edit.evidence_for``): the revision and backing
-    ``gigai scout resume master add`` makes. Then, in code: the row is read again by the strict check against the new
+    ``gigai scout resume master add`` makes. ``ref``: a line the master HAS (``LINE``): nothing is written, the job
+    settles on that line when the strict check finds the requirement on it (refused, nothing changed, when it does not).
+    Then, in code: the row is read again by the strict check against the new
     master (``met`` when the line shows it), the gate is decided again, the stored assessment is written back with a
     history entry ``master_line:<line id>``, the suggestion is resolved (``how: master_line``, ``ref``: the line id) and
     the resume is picked again (``refresh``). A pick that is refused (the gate holds on another row, an old assessment)
     is said in ``repick``; the line and the assessment stay written.
 
     Failure semantics: the steps run master, assessment, suggestion, pick, and no step undoes an earlier one. Each is
-    safe to run again, so the same call run again finishes what a failed one left: a line this suggestion already wrote
-    (same words, backed by the same answer or story) is taken as written (no second line, no ``near_duplicate``), an
-    assessment whose history has ``master_line:<line id>`` is not written again, and the resolve and the pick repeat
-    as they do on their own.
+    safe to run again, so the same call run again finishes what a failed one left: a line under the same role backed by
+    the same answer or story that shows the requirement to the strict read, whatever its words (and a ``near_duplicate``
+    refusal naming such a line), is the line an earlier call wrote (no second line), an assessment whose history has
+    ``master_line:<line id>`` is not written again, and the resolve and the pick repeat as they do on their own. A line of
+    the same backing that does not show it is not taken for one. A suggestion that is done says so, with its line.
 
-    Raises ``JobActionError``: ``suggestion_not_found``, ``invalid_value`` (not an open master_line of an answered row),
-    ``no_master``, ``answer_not_found``, ``near_duplicate`` (nothing written), and ``master_edit``'s own codes.
+    Raises ``JobActionError``: ``suggestion_not_found``, ``invalid_value`` (not an open master_line of an answered row,
+    done already, a ``ref`` the master has not or that does not show the requirement), ``no_master``,
+    ``answer_not_found``, ``master_place_invalid`` (the master has no role to put the line under), ``near_duplicate``
+    (nothing written), and ``master_edit``'s own codes.
     """
 
     from dataclasses import replace
@@ -397,6 +401,9 @@ def add_line(
     item = next((suggestion for suggestion in record.suggestions if suggestion.id == name), None)
     if item is None:
         raise JobActionError("suggestion_not_found", f"this job has no suggestion {name} (`gigai scout suggestions list --job-url URL` lists them)")
+    if item.kind == "master_line" and item.status == "done":
+        done = getattr(item.resolved, "ref", None)
+        raise JobActionError("invalid_value", f"{name} is already done" + (f" with line {done} of your master" if done else "") + "; nothing was changed")
     row = _matrix_rows(job).get(item.requirement or "") if item.kind == "master_line" and item.status == "open" else None
     state = None if row is None else job_brief._word(getattr(row, "status", None))  # noqa: SLF001 - the brief's own reading of an enum
     # ``met``: only when an earlier add_line of this suggestion settled the row and stopped before the resolve (below).
@@ -405,30 +412,66 @@ def add_line(
     stored = stored_master(home_root, target)
     if stored is None:
         raise JobActionError("no_master", "there is no master resume to add the line to: build it first (`gigai scout resume master init`)")
+    chosen = ref.strip() if isinstance(ref, str) and ref.strip() else None
+    if chosen is not None and chosen not in stored.master.items:
+        raise JobActionError("invalid_value", f"your master has no line {chosen}: name a line it has (`gigai scout resume master show` lists them)")
     draft = _row_draft(home_root, target, row, stored.master)
-    if draft is None and state == "answered":
+    if draft is None and state == "answered" and chosen is None:
         raise JobActionError("answer_not_found", "the answer or story this requirement rests on is no longer in your story bank, so no line is drafted from it")
     line_text = (text.strip() if isinstance(text, str) and text.strip() else draft.text) if draft is not None else ""
-    earlier = None if draft is None else _added_before(stored.master, draft.backed, line_text)
+    # What an earlier call of this suggestion wrote: a line under the draft's role with its backing that settled the row
+    # (``met``: among the row's sources) or shows the requirement to the strict read. A line of the same backing that does
+    # not (one the user added by hand, "Mentored four engineers") is not it: the draft is written beside it.
+    earlier = chosen
+    if chosen is None and draft is not None:
+        candidates = _added_before(stored.master, draft.backed, draft.entry_id)
+        earlier = next((
+            line for line in candidates
+            if (line in row.sources if state == "met" else _rechecked_row(row, line, stored) is not row)  # type: ignore[union-attr]
+        ), None)
     if state == "met" and (earlier is None or earlier not in row.sources):  # type: ignore[union-attr]
         raise JobActionError("invalid_value", f"{name} has no drafted line: its requirement is met by a line of your master already")
-    assert draft is not None
+    if chosen is not None and state == "answered" and _rechecked_row(row, chosen, stored) is row:
+        raise JobActionError(
+            "invalid_value",
+            f"line {chosen} does not show “{row.requirement}” to the strict read (it needs the requirement's own words), so nothing "  # type: ignore[union-attr]
+            "was changed: name another line, or add one (without --ref)",
+        )
     if earlier is not None:
         line_id, written, warnings = earlier, stored, ()
     else:
+        assert draft is not None
+        if draft.entry_id is None:
+            source = f"--from-answer {draft.question_id}" if draft.question_id is not None else f"--from-story {draft.story_id}"
+            raise JobActionError(
+                "master_place_invalid",
+                "your master has no role to put the line under. Add it where it goes yourself: `gigai scout resume master add --from-answer "
+                f"...` (here: `gigai scout resume master add --text \"{line_text}\" --section other {source}`, or --entry ENTRY_ID once a role is "
+                f"there), then settle this suggestion on it: `gigai scout suggestions add-line {name} --job-url URL --ref LINE`",
+            )
         try:
             evidence = master_edit.evidence_for(home_root=home_root, target=target, question_id=draft.question_id, story_id=draft.story_id)
             write = master_edit.add_line(home_root=home_root, target=target, text=line_text, entry_id=draft.entry_id, evidence=evidence, actor=by)
         except master_edit.MasterStoreError as exc:
             raise _refused(exc) from exc
-        if write.status == "near_duplicate" or not write.ids:
-            near = ", ".join(str(getattr(line, "id", "")) for line in write.near_duplicates if getattr(line, "id", None))
+        refused = write.status == "near_duplicate" or not write.ids
+        near_ids = [str(line.id) for line in write.near_duplicates if getattr(line, "id", None)] if refused else []
+        # A line like this one that carries this suggestion's own backing and shows the requirement: what an earlier call
+        # wrote, in other words.
+        own = next((
+            line for line in near_ids
+            if draft.backed in getattr(stored.master.items.get(line), "backed", ()) and _rechecked_row(row, line, stored) is not row
+        ), None)
+        if own is not None:
+            line_id, written, warnings = own, stored, ()
+        elif refused:
             raise JobActionError(
                 "near_duplicate",
-                "your master has a line like this one already" + (f" ({near})" if near else "") + ", so nothing was written. Change the "
-                f"line's words, or close the suggestion with that line: `gigai scout suggestions resolve {name} --job-url URL --how master_line --ref LINE`",
+                "your master has a line like this one already" + (f" ({', '.join(near_ids)})" if near_ids else "") + ", so nothing was written. "
+                f"Change the line's words, or settle the suggestion on that line: `gigai scout suggestions add-line {name} --job-url URL --ref LINE`",
             )
-        line_id, written, warnings = write.ids[0], write.stored, tuple(write.warnings)
+        else:
+            line_id, written, warnings = write.ids[0], write.stored, tuple(write.warnings)
     when = now or _clock()
     trigger = f"{TRIGGER_MASTER_LINE}:{line_id}"
     # The stored assessment, read again, settled on the new line in code: the strict check, the gate, the history.
@@ -452,9 +495,10 @@ def add_line(
     except (JobActionError, NotBuilt) as exc:
         repick = {"code": getattr(exc, "code", "pick_not_available"), "message": str(exc)}
     status = next((job_brief._word(each.status) for each in matrix if getattr(each, "id", None) == row.id), None)  # noqa: SLF001 - the brief's own reading of an enum
+    shown = written.master.items.get(line_id)  # type: ignore[attr-defined]
     return {
         **list_suggestions(home_root, target, job_url, profile_id=job.profile_id),
-        "resolved": name, "line": {"id": line_id, "entry_id": draft.entry_id, "backed": draft.backed},
+        "resolved": name, "line": {"id": line_id, "entry_id": getattr(shown, "entry_id", None), "backed": draft.backed if draft is not None else None},
         "row": {"id": row.id, "status": status}, "repick": repick, "warnings": list(warnings),
     }
 

@@ -136,13 +136,14 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
+import json
 import logging
 from pathlib import Path
 
 from . import suggestions
 from . import tailor_master as tm
 from .find_jobs.assess_contracts import PICK_SECTIONS, AssessmentPick
-from .job_resume_port import ACTION_DRAFT
+from .job_resume_port import ACTION_DRAFT, ACTION_REFRESH
 from .master_resume import KIND_BULLET, KIND_OTHER, KIND_SKILLS, KIND_SUMMARY, Master
 from .master_selection import (
     MAX_PAGES,
@@ -160,6 +161,8 @@ from .master_selection import (
 from .tailored_resume import LENGTH_RULE, TailorJob, TailoredResume, apply_no_loss, render_markdown, tailor_sources, validate_tailored_output
 
 _logger = logging.getLogger("gigai.scout.server")
+#: 0.3.2 gyl: the history trigger of a stored assessment a refresh decided again under today's gate (no model call).
+TRIGGER_REGATE = "regate"
 
 #: Names the validation rules, the cut order and the fill above; stored with a selection (a change re-picks on request).
 PICK_RULES_VERSION = "pick-rules:1"
@@ -1097,6 +1100,8 @@ def _settle_stored(
         # An answer stored without a gate (the shape of before 0.1.11): the gate of its rows, questions and verdict, by the same rules.
         body = assessment.result
         assessment = replace(assessment, resume_gate=gate(body.matrix, body.structured_questions, body.verdict).record())
+    elif action == ACTION_REFRESH and _held_on_answers(assessment.resume_gate):
+        assessment = _regated(home_root, target, assessment, now=now)
     record = suggestions.read_suggestions(home_root, target, profile_id, job_identity)
     held = assessment.resume_gate.decision != SUGGEST
     drafting = held and (action == ACTION_DRAFT or bool(((record.selection if record is not None else None) or {}).get("draft")))
@@ -1116,6 +1121,122 @@ def _settle_stored(
     if error is not None:
         raise refusal(error if error in MESSAGES else REFUSED_FAILED)
     return record, inputs
+
+
+def _held_on_answers(gate_record: object) -> bool:
+    """A gate of 0.3.1 that held the resume on ``answered`` rows only: a rule 0.3.2 dropped (an answered must-have suggests)."""
+
+    from .find_jobs.assess_contracts import GATE_REASON_ANSWERED
+    from .resume_gate import HOLD_QUESTION
+
+    reasons = getattr(gate_record, "reasons", ())
+    return getattr(gate_record, "decision", None) == HOLD_QUESTION and bool(reasons) and all(getattr(reason, "code", None) == GATE_REASON_ANSWERED for reason in reasons)
+
+
+def _regated(home_root: Path, target: Path, assessment: object, *, now: str) -> object:
+    """``assessment`` decided again by today's gate, in code (no model call), and written back with a history entry
+    ``regate``; its suggestion record gets the gate and a ``master_line`` suggestion per answered must-have it lacks.
+
+    0.3.2 gyl, for a job stored by 0.3.1: its gate held the resume on rows only an answer backed (``answered``), and
+    a refresh kept that stored decision, so the job stayed held until it was assessed again (a model call). Its rows
+    are first read again on the answers on file (:func:`_settled_on_answers`): an answer changed to a no since makes
+    the row ``unmet``, not a must-have that suggests. The record's ``ready`` is the record's own rule
+    (``suggestions.recheck_stored``): a ``suggest`` decision with a selection and no lost or conflict reason; those
+    reasons, about the stored resume, are kept.
+    """
+
+    from . import quick_assess
+    from .find_jobs.assess_contracts import VerdictHistoryEntry
+    from .find_jobs.discovery.storage import atomic_write
+    from .requirement_weights import MATCHED, PENDING
+    from .resume_gate import HOLD_QUESTION, NOT_A_MATCH, SUGGEST, stored_gate
+
+    body = _settled_on_answers(home_root, target, assessment.result)  # type: ignore[attr-defined]
+    assessment = replace(assessment, result=body)  # type: ignore[type-var]
+    decided = stored_gate(assessment)
+    if decided is None:
+        return assessment
+    verdict = body.verdict
+    if verdict in (MATCHED, PENDING) and decided.decision != NOT_A_MATCH:
+        verdict = PENDING if decided.decision == HOLD_QUESTION else MATCHED
+    settled = replace(
+        assessment, result=replace(body, verdict=verdict), resume_gate=decided.record(), updated_at=now,  # type: ignore[type-var]
+        history=quick_assess._history_with(assessment, VerdictHistoryEntry(at=now, verdict=verdict, trigger=TRIGGER_REGATE)),  # noqa: SLF001 - the history's one append rule
+    )
+    job = assessment.job  # type: ignore[attr-defined]
+    profile_id = assessment.resume.profile_id  # type: ignore[attr-defined]
+    path = quick_assess.quick_assess_write_path(home_root, target, profile_id, job.job_identity)
+    atomic_write(path, json.dumps(settled.to_json(), indent=2, sort_keys=True).encode("utf-8"))
+    record_path = suggestions.suggestions_write_path(home_root, target, profile_id, job.job_identity)
+    with suggestions.record_write_lock(record_path):
+        record = suggestions.read_record(record_path)
+        if record is not None:
+            rows = {row.id: row for row in suggestions.requirement_rows(body.matrix)}
+            named = {item.requirement for item in record.suggestions if item.kind == "master_line"}
+            number = record.next_number()
+            added: list[suggestions.Suggestion] = []
+            for row in rows.values():
+                if row.status == "answered" and row.mandatory and row.id not in named and suggestions.is_row_id(row.id):
+                    added.append(suggestions.Suggestion(
+                        id=f"sg-{number}", kind="master_line", why=suggestions.ANSWERED_WHY, source=suggestions.SOURCE_ASSESSMENT, created_at=now,
+                        requirement=row.id,
+                    ))
+                    number += 1
+            requirements = tuple(_coverage_on(row, rows.get(row.id)) for row in record.requirements)
+            kept = [
+                reason for reason in record.gate.get("reasons", ())
+                if isinstance(reason, Mapping) and reason.get("code") in (suggestions.REASON_LOST_EVIDENCE, suggestions.REASON_CONFLICT)
+            ]
+            ready = decided.decision == SUGGEST and isinstance(record.selection, Mapping) and not kept
+            regated = {"decision": decided.decision, "ready": ready, "reasons": [*(reason.to_json() for reason in decided.record().reasons), *kept]}
+            suggestions.save_record(replace(record, updated_at=now, gate=regated, requirements=requirements, suggestions=(*record.suggestions, *added)))
+    return settled
+
+
+def _settled_on_answers(home_root: Path, target: Path, body: object) -> object:
+    """``body`` with its must-have rows read again on the answers on file (``assessment_core.settle_answered_rows``), or
+    ``body`` itself when that changes nothing. No model call; the questions are left as stored.
+
+    0.3.2 gyl: a row a 0.3.1 assessment settled ``answered`` stays so in the stored matrix even after its answer was
+    changed to a no; read again, it is ``unmet`` (a gap), and an ``unclear`` row whose own question is answered on
+    file reads by that answer, as a fresh assessment reads it.
+    """
+
+    from . import story_bank
+    from .assessment_core import row_question_id, settle_answered_rows
+    from .find_jobs.assess_contracts import RequirementMatrixRow
+    from .resume_gate import is_mandatory
+
+    matrix = [row.to_json() for row in body.matrix]  # type: ignore[attr-defined]
+    wanted: set[str] = set()
+    for row in matrix:
+        if row.get("status") in ("unclear", "answered") and is_mandatory(row):
+            wanted.update(source[2:] for source in row.get("sources") or () if isinstance(source, str) and source.startswith("A "))  # type: ignore[union-attr]
+            if isinstance(row.get("id"), str):
+                wanted.add(row_question_id(str(row["id"])))
+    answers: dict[str, str] = {}
+    for question_id in sorted(wanted):
+        try:
+            entry = story_bank.get_answer(home_root=home_root, target=target, question_id=question_id, with_jobs=False)
+        except Exception:  # noqa: BLE001 - an id the bank cannot read (a story's, an old shape) has no answer to read the row by
+            entry = None
+        if entry is not None and entry.answer:
+            answers[question_id.lower()] = entry.answer
+    before = json.dumps(matrix, sort_keys=True)
+    settle_answered_rows(matrix, [], answers, {})
+    if json.dumps(matrix, sort_keys=True) == before:
+        return body
+    return replace(body, matrix=tuple(RequirementMatrixRow.from_json(row) for row in matrix))  # type: ignore[type-var]
+
+
+def _coverage_on(stored: suggestions.CoverageRow, row: suggestions.RequirementRow | None) -> suggestions.CoverageRow:
+    """``stored`` (a record's requirement row) with the status and sources of ``row`` read again; not printed when it is now unmet."""
+
+    if row is None or (row.status == stored.status and row.sources == stored.sources):
+        return stored
+    if row.status == "unmet":
+        return replace(stored, status=row.status, sources=row.sources, in_resume=(), coverage=None)
+    return replace(stored, status=row.status, sources=row.sources)
 
 
 # --- "Shorten automatically" (0.1.11.3 item 15): RETIRED in 0.1.11.5 -----------------------------------------------------

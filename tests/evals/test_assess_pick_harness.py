@@ -495,7 +495,8 @@ def test_the_v9_shape_runs_through_a_tree_that_has_the_pick(tmp_path: Path) -> N
     matched = by_case["m05-agentic"]
     assert matched["labels"]["has_sources"] and matched["labels"]["pick"]["unknown"] == [] and matched["resume_ids_in_prompt"]
     assert matched["model_selection"]["page_fit"] and matched["model_selection"]["picked_by"] in ("model", "code") and "lost" in matched["model_selection"]
-    # The stored selection says its cap and counts no page (0.1.11.5 item 1c).
+    # The stored selection says its cap; its ``pages`` stays null (0.1.11.5 item 1c: a model's pick counts no page; a
+    # draft picked by code is cut to fit since 0.3.2 and keeps that on its length record).
     assert matched["model_selection"]["pages"] is None and 0 < matched["model_selection"]["bullets"] <= matched["model_selection"]["max_bullets"] == 20
     # The job with a confirmed gap: Matched by the model, held by the gate, and no pick is kept (OD1). 0.1.11.12: the
     # MongoDB must-have rests on a story-bank answer and no resume line, so the strict check reads it ``answered`` (T6).

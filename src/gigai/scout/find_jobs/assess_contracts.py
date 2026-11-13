@@ -808,7 +808,9 @@ class VerdictHistoryEntry(_Contract):
     answer in between: the CLI or ``POST /api/assess`` on a known job),
     ``"answer:<question_id>"`` (``POST /api/answers`` with ``reassess``) or
     ``"master_line:<line_id>"`` (0.3.2: a line drafted from an answer was
-    added to the master and the job settled on it in code, no model call).
+    added to the master and the job settled on it in code, no model call) or
+    ``"regate"`` (0.3.2: a refresh decided a job stored by 0.3.1, held on
+    answered rows only, again under today's gate, in code, no model call).
     Operator answer 4: a re-assessment APPENDS here, never rewrites.
     """
 

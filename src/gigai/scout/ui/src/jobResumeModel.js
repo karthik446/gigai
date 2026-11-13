@@ -172,20 +172,35 @@ function heldRequirements(gate, assessment) {
 // The one sentence of a held job: "2 must-have requirements wait for your answer", "Has a gap: Kubernetes in
 // production", "Not a match: ...". null when the gate does not hold.
 // 0.3.2 (83r): it says what the hold waits for. A must-have you said yes to (`answered`) waits for no answer, only for a
-// line on your master: it is named as a drafted line to add (a record held under 0.3.1 names it as an `answered` reason).
+// line on your master: it is named as a drafted line to add. A record held under 0.3.1 on such rows only (every reason
+// `answered`, a rule 0.3.2 dropped) is said to be: picking it again decides it under today's rules (no model call).
+// 0.3.2 (gyl): a must-have whose answer on file reads both yes and no (`unclear`, citing `A <question id>`, no open
+// question on it) is never asked again, so it waits for no answer of the page's: it is named with what settles it.
 export function holdSentence(gate, assessment) {
   if (!gateHolds(gate)) {
     return null;
   }
   const matrix = list(assessment && assessment.matrix);
   const answered = matrix.filter((row) => isMandatory(row) && row.status === "answered").length;
+  if (heldUnderOldRule(gate)) {
+    const count = answered || list(gate.reasons).length;
+    return `${plural(count, "must-have you said yes to", "must-haves you said yes to")} held it under an older rule; pick it again to make its resume (no model call)`;
+  }
   const lines = answered > 0 ? `; ${plural(answered, "drafted line", "drafted lines")} to add to your master` : "";
   if (gate.decision === GATE_HOLD_QUESTION) {
-    const named = heldRequirements({ reasons: list(gate.reasons).filter((reason) => reason.code !== "answered") }, assessment);
+    const rows = rowsById(assessment);
     const asked = new Set(openQuestions(assessment).map((question) => text(question.requirement)));
-    const waiting = named.length || matrix.filter((row) => isMandatory(row) && row.status !== "answered" && asked.has(row.requirement)).length || openQuestions(assessment).length;
+    const reasons = list(gate.reasons).filter((reason) => reason.code !== "answered");
+    const both = [...new Set(reasons.map((reason) => rows.get(text(reason.requirement))).filter((row) => answeredBoth(row, asked)))];
+    const named = heldRequirements({ reasons: reasons.filter((reason) => !both.includes(rows.get(text(reason.requirement)))) }, assessment);
+    const askedRows = matrix.filter((row) => isMandatory(row) && row.status !== "answered" && asked.has(row.requirement)).length;
+    const waiting = named.length || (both.length ? openQuestions(assessment).length : askedRows || openQuestions(assessment).length);
+    const said = both.length ? bothSentence(both) : "";
     if (waiting > 0) {
-      return `${plural(waiting, "must-have requirement waits", "must-have requirements wait")} for your answer${lines}`;
+      return `${plural(waiting, "must-have requirement waits", "must-have requirements wait")} for your answer${lines}${said ? `; ${said}` : ""}`;
+    }
+    if (said) {
+      return `${said[0].toUpperCase()}${said.slice(1)}${lines}`;
     }
     return answered > 0 ? `${plural(answered, "drafted line waits", "drafted lines wait")} to be added to your master` : "This job waits for your answers";
   }
@@ -196,6 +211,29 @@ export function holdSentence(gate, assessment) {
   }
   const why = text(assessment && assessment.not_a_match_reason) || named.join("; ");
   return why ? `Not a match: ${why}` : "Not a match";
+}
+
+// 0.3.2 (gyl): a must-have row whose answer on file reads both yes and no: `unclear`, citing an answer (`A <question
+// id>`, `assessment_core.settle_answered_rows`), and no open question on it. It is never asked again.
+function answeredBoth(row, asked) {
+  return Boolean(row) && isMandatory(row) && row.status === "unclear" && list(row.sources).some(isAnswerSource) && !asked.has(row.requirement);
+}
+
+// What settles the rows `answeredBoth` names: the answer said again in one line, or a master line that shows it.
+// There is no page to edit an answer on, so the command is named (`gigai scout answer`, then the job assessed again).
+function bothSentence(rows) {
+  if (rows.length === 1) {
+    const questionId = text(list(rows[0].sources).find(isAnswerSource)).slice(2);
+    return `your answer on “${text(rows[0].requirement)}” reads both yes and no, so it is not asked again: say it in one line with \`gigai scout answer ${questionId} --answer-text "…" --reassess JOB_URL\`, or add a line to your master that shows it and assess the job again`;
+  }
+  return `your answers on ${rows.length} must-have requirements read both yes and no, so they are not asked again: say each in one line with \`gigai scout answer QUESTION_ID --answer-text "…" --reassess JOB_URL\`, or add lines to your master that show them and assess the job again`;
+}
+
+// 0.3.2 (83r): a gate stored by 0.3.1 that holds on `answered` rows only. 0.3.2 does not hold on them; a refresh
+// (`pick("refresh")`, no model call) decides the job again (`pick._regated` on the server, history `regate`).
+export function heldUnderOldRule(gate) {
+  const reasons = list(gate && gate.reasons);
+  return Boolean(gate) && gate.decision === GATE_HOLD_QUESTION && reasons.length > 0 && reasons.every((reason) => reason && reason.code === "answered");
 }
 
 // --- the header's chip ----------------------------------------------------------------------

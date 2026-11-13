@@ -147,7 +147,7 @@ def _payload() -> dict:
             "assessment": {"structured_questions": [{"question_id": "cloud:gcp", "question": "Do you have GCP experience?"}]},
             "assessments": [None, {"structured_questions": [{"question_id": "team:lead", "question": "Have you led a team?"}]}],
         },
-        "triggers": ["answer:cloud:gcp", "answer:team:lead", "answer:unknown:id", "answer:id:as_prompt", "reassess"],
+        "triggers": ["answer:cloud:gcp", "answer:team:lead", "answer:unknown:id", "answer:id:as_prompt", "reassess", "regate"],
         "stored": [
             {"stored_path": "older", "updated_at": "2026-09-25T09:00:00+00:00"},
             {"stored_path": "newest", "updated_at": "2026-09-25T12:00:00+00:00"},
@@ -226,6 +226,7 @@ def test_preview_lines_are_the_responses_own_text_in_markdown_order() -> None:
         ["Re-assessed after you answered unknown:id", "Re-assessed after you answered unknown:id"],
         ["Re-assessed after you answered id:as_prompt", "Re-assessed after you answered id:as_prompt"],
         ["Assessed again", "Assessed again"],
+        ["Decided again under the current rules (no model call)", "Decided again under the current rules (no model call)"],
     ]
 
 
