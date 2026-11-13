@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from gigai.scout.assessment_core import ANSWER_AMBIGUOUS_NOTE
 from gigai.scout.find_jobs.api import static as static_module
 
 UI_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src"
@@ -52,6 +53,9 @@ out.sentences = {
   bothAndAsked: m.holdSentence({ decision: "hold_question", reasons: [{ code: "question_open", requirement: "req-0000b1" }, { code: "question_open", requirement: "req-0000a2" }] }, input.both),
   bothTwo: m.holdSentence({ decision: "hold_question", reasons: [{ code: "question_open", requirement: "req-0000b1" }, { code: "question_open", requirement: "req-0000b2" }] }, { ...input.both, structured_questions: [] }),
   bothAskedAgain: m.holdSentence({ decision: "hold_question", reasons: [{ code: "question_open", requirement: "req-0000b1" }] }, { ...input.both, structured_questions: [{ question_id: "k8s:prod", question: "Kubernetes?", requirement: "Kubernetes in production" }] }),
+  // A row that only cites another question's answer (no note: no answer settled it) is not "reads both".
+  citedOther: m.holdSentence({ decision: "hold_question", reasons: [{ code: "question_open", requirement: "req-0000c1" }] }, { ...input.both, structured_questions: [] }),
+  note: m.ANSWER_AMBIGUOUS_NOTE,
 };
 // 0.3.2 (83r): a 0.3.1 record held on `answered` rows only is held under a dropped rule: the page offers to pick it again.
 out.oldRule = [
@@ -231,13 +235,15 @@ SAID = {
     ],
     "structured_questions": [{"question_id": "cloud:gcp", "question": "Which cloud?", "requirement": "GCP"}],
 }
-#: 0.3.2 (gyl): two must-haves whose answers on file read both yes and no (``unclear``, citing the answer), one still asked.
+#: 0.3.2 (gyl): two must-haves whose answers on file read both yes and no (``unclear`` with the note code sets on them),
+#: one still asked, and one that only cites another question's answer (no note: not one of them).
 BOTH = {
     "verdict": "pending_user_answers",
     "matrix": [
-        {"id": "req-0000b1", "requirement": "Kubernetes in production", "class": "askable", "status": "unclear", "sources": ["A requirement:req.0000b1"]},
+        {"id": "req-0000b1", "requirement": "Kubernetes in production", "class": "askable", "status": "unclear", "sources": ["A requirement:req.0000b1"], "code_note": ANSWER_AMBIGUOUS_NOTE},
         {"id": "req-0000a2", "requirement": "GCP", "class": "askable", "status": "unclear", "sources": []},
-        {"id": "req-0000b2", "requirement": "Helm", "class": "hard", "status": "unclear", "sources": ["A tooling:helm"]},
+        {"id": "req-0000b2", "requirement": "Helm", "class": "hard", "status": "unclear", "sources": ["A tooling:helm"], "code_note": ANSWER_AMBIGUOUS_NOTE},
+        {"id": "req-0000c1", "requirement": "Kubernetes", "class": "askable", "status": "unclear", "sources": ["A cloud:k8s"], "code_note": None},
     ],
     "structured_questions": [{"question_id": "cloud:gcp", "question": "Which cloud?", "requirement": "GCP"}],
 }
@@ -414,6 +420,8 @@ def test_the_gate_is_the_records_then_the_assessments_then_the_verdicts(out: dic
             '`gigai scout answer QUESTION_ID --answer-text "…" --reassess JOB_URL`, or add lines to your master that show them and assess the job again'
         ),
         "bothAskedAgain": "1 must-have requirement waits for your answer",
+        "citedOther": "1 must-have requirement waits for your answer",
+        "note": ANSWER_AMBIGUOUS_NOTE,
     }
     assert out["oldRule"] == [True, False, False, False, False]
 

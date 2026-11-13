@@ -1303,7 +1303,7 @@ def settle_answered_rows(
     question on it was answered cites the answer (``A <question_id>``) and reads by ``assess_strict.answer_denial``:
     ``answered`` on a yes (the job's suggestions draft its line), ``unmet`` on a no (a gap), and on an answer that says
     both it stays ``unclear`` with :data:`ANSWER_AMBIGUOUS_NOTE` (not settled, never asked again: ``_unasked`` passes
-    over a row citing an answer on file). A row ``answered`` (T6) whose cited answer on file says no reads ``unmet``.
+    over a row carrying that note). A row ``answered`` (T6) whose cited answer on file says no reads ``unmet``.
     ``matrix`` rows are changed in place. No model is called.
     """
 
@@ -1352,15 +1352,15 @@ def _unasked(matrix: list[Mapping[str, object]], questions: list[object], verdic
     rule: such an answer keeps no question). A row is named by its own id
     (a listed row's, an ``elig-`` one) or, on a first assessment, by the id
     ``requirements_list.extracted`` gives it: the id its stored row carries.
-    A row that cites an answer on file (``A <question_id>``: one :func:`settle_answered_rows` left ``unclear``, the
-    answer saying no and yes at once) is never asked again, so it is not named here.
+    A row :func:`settle_answered_rows` left ``unclear`` on an answer on file that says no and yes at once (it carries
+    :data:`ANSWER_AMBIGUOUS_NOTE`) is never asked again, so it is not named here. Any other unclear row is, even one
+    citing an answer (``A <question_id>``, another question's): no answer settled it.
     """
 
-    on_file = boundary.answers or {}
     unasked = [
         row for row in unasked_rows(matrix, questions)
         if isinstance(row.get("requirement"), str) and row["requirement"].strip()  # type: ignore[union-attr]
-        and not any(isinstance(item, str) and item.startswith("A ") and item[2:].lower() in on_file for item in row.get("sources") or ())  # type: ignore[union-attr]
+        and row.get("code_note") != ANSWER_AMBIGUOUS_NOTE
     ]
     if not unasked or gate(matrix, questions, verdict).decision != HOLD_QUESTION:
         return []

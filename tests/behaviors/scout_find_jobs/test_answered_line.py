@@ -161,6 +161,8 @@ _DENY = (
     "Nada", "I don't have production experience, only labs", "Nah, not really", "Sadly I can't say I have",
     # Round 2: a denial in the first clause denies, whatever follows.
     "I have no direct experience but I have read the docs", "I have had no exposure",
+    # Round 3: a "don't know" with an object is a no.
+    "I don't know Kubernetes",
 )
 _AFFIRM = (
     "No problem: 5 years running EKS", "No doubt, yes, daily", SAID, "Yes", "story:cut-ci",
@@ -176,6 +178,8 @@ _BOTH = (
     "No Cassandra in production. MongoDB in production at two employers, Quillon Health and Brassline Pay, for about four years in total.",
     # Round 2: unsure is no yes; a yes taken back by a bare no.
     "I'm not sure", "Not certain", "Yes, no",
+    # Round 3: not knowing is no no (on a hard row a no is a gap and not a match).
+    "I don't know", "Don't know.", "No idea", "No clue, sorry", "I do not know whether it counts",
 )
 #: The requirement the table's answers are given to.
 _ASKED_ABOUT = "Kubernetes in production on EKS"
@@ -225,7 +229,7 @@ def test_a_no_the_old_reader_missed_is_a_gap_and_an_answer_saying_both_stays_unc
     assert assessment_core.settle_answered_rows([row], [], {"requirement:req.0a0b0c": SAID}, {})[2] == [] and row["status"] == "answered"
 
 
-def test_a_row_citing_an_answer_on_file_is_never_raised_as_an_unasked_question() -> None:
+def test_only_a_row_left_unclear_on_an_answer_that_reads_both_is_never_raised_as_an_unasked_question() -> None:
     from gigai.scout.assessment_core import Boundary
 
     row = {**_row(sources=["A requirement:req.0a0b0c"]), "code_note": assessment_core.ANSWER_AMBIGUOUS_NOTE}
@@ -234,6 +238,10 @@ def test_a_row_citing_an_answer_on_file_is_never_raised_as_an_unasked_question()
     boundary = Boundary(answers={"requirement:req.0a0b0c": "No gaps: ran EKS for 3 years"})
     raised = assessment_core._unasked([row, other], [], "matched_above_threshold", boundary)  # noqa: SLF001 - the re-ask rule itself
     assert [row_id for row_id, _row_ in raised] == ["req-0d0e0f"]
+    # A row that only cites an answer on file (no note: settle read no answer of its own) is asked like any other.
+    cited = _row(sources=["A requirement:req.0a0b0c"])
+    raised = assessment_core._unasked([cited], [], "matched_above_threshold", boundary)  # noqa: SLF001
+    assert [row_id for row_id, _row_ in raised] == ["req-0a0b0c"]
 
 
 def test_the_strict_read_settles_a_met_row_it_lowers_that_cites_an_answer_as_answered() -> None:
@@ -607,6 +615,28 @@ def test_an_answer_that_reads_both_is_not_asked_again_and_holds_on_its_row(fx: P
     assert question_id not in [item.question_id for item in stored.result.structured_questions]
     assert stored.resume_gate.decision == HOLD_QUESTION and row_id in [reason.requirement for reason in stored.resume_gate.reasons]
     assert not [item for item in _record(fx).suggestions if item.kind == "master_line" and item.requirement == row_id]
+
+
+def test_a_must_have_that_cites_another_questions_answer_is_asked_its_own_question(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    # V13 re-read 2 M1: an answer on file under another id, the model's Kubernetes row `unclear` citing it, no question
+    # on the row. Before: never asked, no note, held on nothing (and named "reads both" on the page).
+    from gigai.scout import story_bank
+
+    _patch_v9_template(monkeypatch)
+    ids = _ids(fx)
+    for old, new in ((KUBERNETES_LINE, PLAIN_LINE), (TERRAFORM_LINE, MODULES_LINE), ("Platform: Python, Kubernetes, PostgreSQL, Terraform", SKILLS_LINE)):
+        _edit(fx, ids[old], new)
+    story_bank.save_answer(home_root=fx.home_root, target=fx.target, question_id="cloud:k8s", answer="Yes, I ran GKE clusters for two years.")
+    answer = json.loads(_answer(fx, said="matched_above_threshold", questions=[HELM_QUESTION]))
+    answer["matrix"][1]["sources"] = ["A cloud:k8s"]
+    stored, _prompt = _assess(fx, json.dumps(answer))
+    row = stored.result.matrix[1]
+    question_id = assessment_core.row_question_id(row.id)
+    assert row.status.value == "unclear" and row.code_note != assessment_core.ANSWER_AMBIGUOUS_NOTE
+    # The row carries its own question: what it holds on can be answered.
+    asked = [item for item in stored.result.structured_questions if item.question_id == question_id]
+    assert asked and asked[0].requirement == row.requirement
+    assert stored.resume_gate.decision == HOLD_QUESTION and row.id in [reason.requirement for reason in stored.resume_gate.reasons]
 
 
 # --- (e) what still holds ---------------------------------------------------------------------------------------------

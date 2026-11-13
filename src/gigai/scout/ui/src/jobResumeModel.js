@@ -174,7 +174,7 @@ function heldRequirements(gate, assessment) {
 // 0.3.2 (83r): it says what the hold waits for. A must-have you said yes to (`answered`) waits for no answer, only for a
 // line on your master: it is named as a drafted line to add. A record held under 0.3.1 on such rows only (every reason
 // `answered`, a rule 0.3.2 dropped) is said to be: picking it again decides it under today's rules (no model call).
-// 0.3.2 (gyl): a must-have whose answer on file reads both yes and no (`unclear`, citing `A <question id>`, no open
+// 0.3.2 (gyl): a must-have whose answer on file reads both yes and no (`unclear` with the note code sets on it, no open
 // question on it) is never asked again, so it waits for no answer of the page's: it is named with what settles it.
 export function holdSentence(gate, assessment) {
   if (!gateHolds(gate)) {
@@ -213,17 +213,22 @@ export function holdSentence(gate, assessment) {
   return why ? `Not a match: ${why}` : "Not a match";
 }
 
-// 0.3.2 (gyl): a must-have row whose answer on file reads both yes and no: `unclear`, citing an answer (`A <question
-// id>`, `assessment_core.settle_answered_rows`), and no open question on it. It is never asked again.
+// 0.3.2 (gyl): the note `assessment_core.settle_answered_rows` sets on a must-have row it leaves `unclear` because the
+// answer on file reads both yes and no (`ANSWER_AMBIGUOUS_NOTE` there, word for word).
+export const ANSWER_AMBIGUOUS_NOTE = "Your answer on file reads both yes and no, so this stays unclear and is not asked again: add or edit a line of your master that shows it, or change your answer and assess the job again.";
+
+// A must-have row code left `unclear` on an answer that reads both (its note), with no open question on it. It is
+// never asked again. A row that only cites an answer (another question's) is not one: no answer settled it.
 function answeredBoth(row, asked) {
-  return Boolean(row) && isMandatory(row) && row.status === "unclear" && list(row.sources).some(isAnswerSource) && !asked.has(row.requirement);
+  return Boolean(row) && isMandatory(row) && row.status === "unclear" && row.code_note === ANSWER_AMBIGUOUS_NOTE && !asked.has(row.requirement);
 }
 
 // What settles the rows `answeredBoth` names: the answer said again in one line, or a master line that shows it.
 // There is no page to edit an answer on, so the command is named (`gigai scout answer`, then the job assessed again).
 function bothSentence(rows) {
   if (rows.length === 1) {
-    const questionId = text(list(rows[0].sources).find(isAnswerSource)).slice(2);
+    // Code appends the answer it read (`A <question id>`) after any the model cited.
+    const questionId = text(list(rows[0].sources).filter(isAnswerSource).pop()).slice(2);
     return `your answer on “${text(rows[0].requirement)}” reads both yes and no, so it is not asked again: say it in one line with \`gigai scout answer ${questionId} --answer-text "…" --reassess JOB_URL\`, or add a line to your master that shows it and assess the job again`;
   }
   return `your answers on ${rows.length} must-have requirements read both yes and no, so they are not asked again: say each in one line with \`gigai scout answer QUESTION_ID --answer-text "…" --reassess JOB_URL\`, or add lines to your master that show them and assess the job again`;

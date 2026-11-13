@@ -146,8 +146,13 @@ _OPENS_YES = re.compile(
 _CLAUSE_SPLIT = re.compile(r"[.,;:!?—–()]|\s-\s|\b(?:but|though|although|however|whereas)\b", re.IGNORECASE)
 #: A clause that is a bare no and nothing else ("Yes, no", "Yes ... not really").
 _BARE_DENIAL = re.compile(r"\W*(?:no|nope|never|nein|nah|nada|not(?:\s+(?:really|quite|exactly|at\s+all))?)\W*", re.IGNORECASE)
-#: Saying one is unsure is no denial; it is no yes either ("I'm not sure", "not certain").
-_UNSURE = re.compile(r"\b(?:not\s+(?:sure|certain)|unsure)\b", re.IGNORECASE)
+#: Saying one is unsure is no denial; it is no yes either ("I'm not sure", "not certain", "I don't know", "no idea"). A "don't
+#: know" with an object ("I don't know Go") is a no, so it counts only where the clause ends or asks "if", "whether" ....
+_UNSURE = re.compile(
+    r"\b(?:not\s+(?:sure|certain)|unsure|no\s+(?:idea|clue)"
+    r"|(?:do\s+not|don['’]?t)\s+know(?=\s*(?:[^\w\s]|\Z)|\s+(?:if|whether|exactly|for\s+sure)\b))",
+    re.IGNORECASE,
+)
 #: Words of a requirement that name nothing of it.
 _REQUIREMENT_FILLER = frozenset(
     "and or the of in on with for to an at by as is are be from into using use used your you our we their this that any such other similar etc it".split()
@@ -178,8 +183,8 @@ def answer_denial(text: str, *, requirement: str) -> str:
     those say both, :data:`AMBIGUOUS`. A denial word in a later clause about something else ("Yes, and it's not hard",
     "Absolutely, couldn't ship without it") affirms. Any other answer with a denial word (no, not, never, nope, nein, nada,
     non, any "n't") denies, or says both beside a clear claim (a "yes" opening a clause, "3 years": "No gaps: ran EKS for
-    3 years"). With no denial word it affirms, unless it says it is unsure ("I'm not sure": :data:`AMBIGUOUS`). Words of
-    another language than these are read as no denial.
+    3 years"). With no denial word it affirms, unless it says it is unsure ("I'm not sure", "I don't know", "No idea":
+    :data:`AMBIGUOUS`; an unsure phrase is not a denial word). Words of another language than these are read as no denial.
     """
 
     rest = _NOT_DENIALS.sub(" ", text or "")

@@ -633,11 +633,12 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
     to answer is a dead end. The model boundary spends its one retry on this
     and then asks the row's own question in code, so only a payload built
     another way meets it here. An optional row is never checked, nor is any
-    row of an older matrix. 0.3.2 gyl: nor is a row that cites an answer
-    (``A <question_id>``): code left it ``unclear`` on an answer on file that
-    reads both yes and no, and it is never asked again; such a row holds a
-    ``pending_user_answers`` verdict with no question (the gate holds on it;
-    the model boundary asks a row whose cited answer is not on file).
+    row of an older matrix. 0.3.2 gyl: nor is a row code left ``unclear`` on
+    an answer on file that reads both yes and no (it carries
+    ``assessment_core.ANSWER_AMBIGUOUS_NOTE``): it is never asked again, and
+    it holds a ``pending_user_answers`` verdict with no question (the gate
+    holds on it). Any other unclear row, even one citing an answer, is not
+    exempt.
 
     Each violation message NAMES the violated rule and the count it found
     ("verdict matched_above_threshold but 1 hard requirement is unmet (rule
@@ -663,15 +664,14 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
     else:
         holds = "any question on a hard or askable row, or two or more list_item questions -> pending_user_answers"
         nothing_holds = "no hard unmet row, and no question but at most one on a list_item row -> matched_above_threshold"
-    # 0.3.2 gyl: a must-have left unclear on an answer on file that reads both (it cites ``A <question_id>``) holds the
-    # verdict pending with no question on it, and is not refused for having none.
+    # 0.3.2 gyl: a must-have left unclear on an answer on file that reads both (the note ``settle_answered_rows`` sets)
+    # holds the verdict pending with no question on it, and is not refused for having none.
     held_on_answer: list[object] = []
     if hard_unmet_rows == 0 and verdict in ("matched_above_threshold", "pending_user_answers"):
+        from .assessment_core import ANSWER_AMBIGUOUS_NOTE  # lazy: this module is imported without assessment_core
+
         unasked = unasked_rows(rows, raw.get("structured_questions"))
-        held_on_answer = [
-            row for row in unasked
-            if isinstance(row, Mapping) and any(isinstance(source, str) and source.startswith("A ") for source in row.get("sources") or ())
-        ]
+        held_on_answer = [row for row in unasked if isinstance(row, Mapping) and row.get("code_note") == ANSWER_AMBIGUOUS_NOTE]
         unasked = [row for row in unasked if not any(row is held for held in held_on_answer)]
         if unasked:
             raise FindJobsContractError("invalid_value", unasked_message(_row_names(rows, unasked)))
