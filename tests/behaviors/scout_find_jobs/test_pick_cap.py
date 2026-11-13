@@ -102,7 +102,8 @@ def _shown(settled: pick.Settled) -> list[str]:
 
 @pytest.fixture
 def no_layout(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Every way the PDF module lays a resume out is set to raise: a pick made under this renders nothing and counts no page."""
+    """Every way the PDF module lays a resume out is set to raise: a model's pick made under this renders nothing and
+    counts no page; a draft picked by code (cut to fit since 0.3.2) asks for one estimate, gets none and is kept as made."""
 
     called: list[str] = []
 

@@ -103,8 +103,9 @@ result exactly as the 0110-10-05 length rule records it
 below every line it keeps; its minimum is what step 1 never cuts (a recent
 role's best line, a project's line, every heading, the title's line, pins and
 evidence).  It measures at ``resume_display.SPACING_DEFAULT`` (``draft_pages``:
-the layout estimate with room for a header, which never counts fewer pages
-than the PDF prints).  A draft that fits is not touched; one still over at its
+the layout estimate with room for a header of ``DRAFT_HEADER_LINES`` lines
+under the name, the saved title and a contact line that wraps once).  A draft
+that fits is not touched; one still over at its
 minimum keeps every such cut and is recorded ``over``; a draft that cannot be
 measured (no renderer) is returned exactly as it was.
 
@@ -440,17 +441,26 @@ def measure_pages(result: TailoredResume) -> int | None:
         return None
 
 
+#: The header lines under the name that ``draft_pages`` keeps room for (0.3.2, V13 read B should-fix 1): a saved title's
+#: line and a contact line that wraps onto a second line, one more than ``resume_pdf.HEADER_RESERVE_LINES``.  GigAI stores
+#: no contact details and a pick never reads the header file, so the fit cannot know the header a PDF will print; it
+#: allows for this one.  A header of fewer lines prints the draft with room to spare; a taller one (a contact line that
+#: wraps twice, a title that wraps) may still run a line past the limit at the default spacing.
+DRAFT_HEADER_LINES = 3
+
+
 def draft_pages(result: TailoredResume) -> int | None:
     """The page ESTIMATE of ``result`` at the DEFAULT spacing (``SPACING_DEFAULT``); ``None`` when the renderer cannot say.
 
-    What ``fit_draft`` cuts a draft picked by code to (0.3.2): one layout query with room for a header, no PDF
-    compiled.  It never counts fewer pages than the PDF prints, so a draft that fits here prints on its page
-    limit at the default spacing, at any tighter one and at the preview's automatic spacing."""
+    What ``fit_draft`` cuts a draft picked by code to (0.3.2): one layout query with ``DRAFT_HEADER_LINES`` header lines
+    kept blank under the name, no PDF compiled.  With a header of at most that many lines (a saved title and a contact
+    line that wraps onto a second line) it never counts fewer pages than the PDF prints, so a draft that fits here prints
+    on its page limit at the default spacing, at any tighter one and at the preview's automatic spacing."""
 
     try:
         from .resume_pdf import SPACING_DEFAULT, pages_at
 
-        return pages_at(result, SPACING_DEFAULT)
+        return pages_at(result, SPACING_DEFAULT, header_lines=DRAFT_HEADER_LINES)
     except Exception:  # noqa: BLE001 - no renderer (Typst missing or failing): the draft is left as it was, never cut on a guess
         return None
 
@@ -1269,6 +1279,7 @@ __all__ = [
     "CANDIDATES",
     "CANDIDATES_VERSION",
     "CANDIDATE_MODES",
+    "DRAFT_HEADER_LINES",
     "MODE_EVIDENCE",
     "MODE_SHORTLIST",
     "MODE_VIEW",

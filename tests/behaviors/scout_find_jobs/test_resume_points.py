@@ -3,7 +3,8 @@
 The job page lists the points of the job's resume beside its preview; each change is ONE request to a route that was
 there already and is saved at once for THIS job's resume. On the pick fixture of ``test_pick_header_room.py`` (a job
 assessed against an invented 56-line master; its resume picked by the assessment: its 20 best bullets, the rest under
-Left out), through the real routes of a real server. THE PICK COUNTS NO PAGE (0.1.11.5 item 1c), so no page count is
+Left out), through the real routes of a real server. A MODEL'S PICK COUNTS NO PAGE (0.1.11.5 item 1c; a draft picked
+by code is cut to fit since 0.3.2, a model's pick is not), so no page count is
 written into this test: the BASELINE is what the preview says for the pick at the job's saved spacing (several pages
 on this fixture's long lines; read again after the edit, whose shorter words can end the resume a page earlier), and
 every count after it is that baseline or one page more:

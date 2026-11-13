@@ -7,8 +7,9 @@ variations x 3 paths = 486 final selections, each checked on separate checks aga
 - H2 adding lines to a master never lowers mandatory coverage, evidence strength or the must-keep lines shown;
 - H3 the same lines in another order give the same pick; the same skills grouped differently change no check;
 - H4 every cell has the shape (no project printed without a bullet, the roles in date order) and is within its limit:
-  a SELECTION (``select``, ``fallback``) holds at most ``master_selection.MAX_PICK_BULLETS`` bullets and counts no page
-  (0.1.11.5 item 1c); ``tailor_copy`` (every candidate line copied; the tailor call fits nothing now) has no cap.
+  a SELECTION (``select``, ``fallback``) holds at most ``master_selection.MAX_PICK_BULLETS`` bullets and is measured
+  for no page here (0.1.11.5 item 1c; the product's draft picked by code is cut to fit since 0.3.2, a model's pick is
+  not); ``tailor_copy`` (every candidate line copied; the tailor call fits nothing now) has no cap.
 
 Regression protection on these cases, not a proof.  The baseline (``sel-1``, 0.1.10.10) fails all four: the worker's
 report holds the table (``python -m tests.evals.run_pick_eval --baseline <a git archive of v0.1.10.10>``).

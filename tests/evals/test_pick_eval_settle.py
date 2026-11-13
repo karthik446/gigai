@@ -68,8 +68,15 @@ def test_the_settle_path_is_the_products_function_and_says_who_picked() -> None:
     assert _bullets(with_pick) == ev.MAX_PICK_BULLETS
     # Without one there is no pick: the code selector's selection, through the same function, with the reason.
     assert (without[ev.SETTLE]["picked_by"], without[ev.SETTLE]["fallback"]) == ("code", "no_pick")
-    shown = lambda final: (final["summary"], final["entries"], final["other"], final["skills"])  # noqa: E731
+    shown = lambda final: (final["summary"], final["other"], final["skills"])  # noqa: E731
     assert shown(without[ev.SETTLE]) == shown(without["fallback"])  # the fallback of 3.4 IS ``tailor_master.code_only``
+    # 0.3.2 (gigai-39o): ``settle`` also cuts a code draft to fit the page limit, lowest score first, and says how many it
+    # cut; the bullets it shows are the fallback's minus exactly those cuts (this medium master is over 2 pages).
+    cut_lines = {(entry, line) for entry, lines in without["fallback"]["entries"].items() for line in lines} - {
+        (entry, line) for entry, lines in without[ev.SETTLE]["entries"].items() for line in lines
+    }
+    assert len(cut_lines) == without[ev.SETTLE]["cuts"] == without["fallback"]["bullets"] - without[ev.SETTLE]["bullets"] > 0
+    assert without["fallback"]["cuts"] == 0
     # A case may carry its own pick: unknown ids and a Skills line are dropped and recorded, the rest is settled.
     own = ev.payload(["agentic"], ["medium"], ["base"], [ev.SETTLE], assessed=True)
     lines = [line for bullets in with_pick["entries"].values() for line in bullets]

@@ -8,8 +8,10 @@ answer on stdout (``run_in_tree``).  That is how ``tools/pick_report.py --baseli
 ``tests/evals/run_pick_eval.py --baseline`` compare an old selector with the current one.
 
 PAGES AND THE CAP (0.1.11.5 item 1c).  A tree from ``sel-7`` on makes a selection by score up to a cap of bullets
-(``master_selection.MAX_PICK_BULLETS``) and counts no page: for its ``select``, ``fallback`` and ``settle`` paths the
-answer's ``pages`` is ``None`` (not counted) and ``bullets`` / ``max_bullets`` say what the cap held.  An older tree
+(``master_selection.MAX_PICK_BULLETS``): for its ``select``, ``fallback`` and ``settle`` paths the answer's ``pages``
+is ``None`` (not counted here) and ``bullets`` / ``max_bullets`` say what the cap held.  A model's pick is cut for no
+page; a draft picked by code is cut to fit the page limit at the default spacing since 0.3.2 (``settle`` of a code
+draft; the ``fallback`` path is the code selector's draft before that fit).  An older tree
 has no cap (``max_bullets`` ``None``) and its ``pages`` are measured, as before.  ``tailor_copy`` mirrors what the
 PRODUCT makes of a tailor call's answer (``MasterTailoring.finish``): from ``sel-7`` on that is fitted to no page
 (``tailor_master.whole_selection``), so its ``pages`` is ``None`` too, and its ``max_bullets`` is ``None`` because

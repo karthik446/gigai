@@ -4,7 +4,8 @@ off, add one. Each change is saved at once and the preview follows.
 Real Chromium against a REAL server of its own (the product's own handler, served from this process on a free
 port), nothing stubbed, on a synthetic home: the pick fixture of
 `tests/behaviors/scout_find_jobs/test_pick_header_room.py` (a job assessed against an invented 56-line master; its
-resume picked by the assessment). SINCE 0.1.11.5 (item 1c) A PICK COUNTS NO PAGE AND IS NEVER CUT FOR LENGTH, so the
+resume picked by the assessment). SINCE 0.1.11.5 (item 1c) A MODEL'S PICK COUNTS NO PAGE AND IS NEVER CUT FOR LENGTH (a
+draft picked by code is cut to fit since 0.3.2; a model's pick is not), so the
 stored resume is put in the shape a pick BEFORE 0.1.11.5 stored (`tests/support/old_pick_fixture.py`: twelve of its bullets
 shown, the others cut for length on its length record, with Restore): that is the only resume Restore still shows
 for, and the re-check below is about it. No page count is written into this test: the BASELINE is what the preview

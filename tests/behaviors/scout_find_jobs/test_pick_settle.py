@@ -11,7 +11,8 @@ No model: every pick here is hand-written, the way the eval's fixtures are.  Two
 What is pinned: V1 to V8, what code fixes whatever the model returned, the protected lines and the order lines are
 left out in, that the Other lines, the Skills and the roles' heading lines are never left out, the conflict codes, the
 fill, every fallback code, that every line of a selection is a copy of a master line, and (0.1.11.5 item 1c) that a
-selection counts no page and needs no renderer.
+model's pick counts no page and needs no renderer (a draft picked by code is cut to fit since 0.3.2 when a renderer is
+there; a model's pick is not).
 """
 
 from __future__ import annotations

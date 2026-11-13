@@ -10,6 +10,9 @@ printed on 3 pages at the default spacing, nothing listed as cut for length. A d
 - when the lines that always stay are over the limit on their own, every free cut stays applied, the record says it
   is over (an ``over_budget`` conflict) and the draft is still ready (the page limit never holds a resume back);
 - a renderer that cannot lay the draft out changes nothing;
+- the fit leaves room for a header of a title line and a contact line that wraps onto a second line
+  (``tm.DRAFT_HEADER_LINES``): with that header the PDF prints the fitted draft on 2 pages at the default spacing,
+  as the estimate says, and a draft that already had that room is cut as before;
 - a model's pick is never cut for a page (``test_pick_cap``).
 
 And the left-out reason of a role's lines past its share no longer names a line limit the role does not keep
@@ -20,7 +23,7 @@ No model: every pick here is the fallback of an answer with no pick. Invented pe
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 import json
 
 import pytest
@@ -31,6 +34,8 @@ from gigai.scout import tailor_master as tm
 from gigai.scout.find_jobs.assess_contracts import AssessmentBody
 from gigai.scout.find_jobs.contracts import MatrixStatus, RequirementClass, RequirementMatrixRow, Verdict
 from gigai.scout.master_resume import Master, parse_master
+from gigai.scout.resume_display import ContactItem, PdfHeader
+from gigai.scout.resume_pdf import _body, _render
 from gigai.scout.tailor_length import STATUS_CUT
 
 from tests.support import pick_cap_fixture as fx
@@ -45,6 +50,25 @@ LONG_MASTER = parse_master("\n".join(
     for line in fx.master_markdown().splitlines()
 ))
 SHORT_MASTER = parse_master(fx.master_markdown())
+#: A little more on every role line: the draft fits 2 pages with room for 2 header lines, not for 3.
+WRAP = " Partnered with product and finance on the plan and wrote the design doc."
+WRAP_MASTER = parse_master("\n".join(
+    line.replace(" <!-- id:r", WRAP + " <!-- id:r", 1) if line.startswith("- ") and "id:r" in line else line
+    for line in fx.master_markdown().splitlines()
+))
+STAMP = datetime(2026, 10, 6, tzinfo=timezone.utc)
+#: Invented header values on reserved domains.  A title line and ONE contact line that fits the page.
+ONE_LINE_HEADER = PdfHeader("Avery Example", "Staff Software Engineer", (
+    ContactItem("Denver, CO", None), ContactItem("avery@example.com", "mailto:avery@example.com"), ContactItem("555-0100", None),
+    ContactItem("github.com/avery-example", "https://github.com/avery-example"),
+))
+#: A title line and a contact line that wraps onto a second line (six items and a work authorization).
+WRAPPED_HEADER = PdfHeader("Avery Quinn Example-Longname", "Staff Software Engineer, Platform and Infrastructure", (
+    ContactItem("Denver, Colorado, United States", None), ContactItem("avery.quinn.example@example.com", "mailto:avery@example.com"),
+    ContactItem("+1 555-0100", None), ContactItem("github.com/avery-quinn-example", "https://github.com/avery-quinn-example"),
+    ContactItem("linkedin.com/in/avery-quinn-example", "https://linkedin.com/in/avery-quinn-example"),
+    ContactItem("averyquinn.example.com", "https://averyquinn.example.com"),
+), work_authorization="US citizen, no sponsorship needed")
 
 
 def _row(number: int, source: str) -> RequirementMatrixRow:
@@ -74,6 +98,19 @@ def _shown_bullets(settled: pick.Settled) -> list[str]:
 def _values(master: Master, profile: ms.SelectionProfile = PROFILE) -> dict[str, float]:
     candidates = tm.job_candidates(master, profile, POSTING, mode=tm.MODE_VIEW, today=TODAY, max_bullets=ms.MAX_PICK_BULLETS)
     return dict(candidates.selected.values)
+
+
+def _two_line_room(result) -> int:
+    """The estimate before V13 read B: room for ``resume_pdf.HEADER_RESERVE_LINES`` (2) header lines."""
+    return resume_pdf.pages_at(result, resume_pdf.SPACING_DEFAULT)
+
+
+def _printed(result, header: PdfHeader) -> int:
+    """The pages the PDF with ``header`` prints at the default spacing, held there (the job page's slider at 1.0)."""
+    return _render(
+        _body(result), header, company="Larkspur Table Systems", timestamp=STAMP, spacing_scale=resume_pdf.SPACING_DEFAULT, auto_fit=False,
+        count_pages=True, max_pages=tm.MAX_PAGES, fixed=True,
+    ).pages
 
 
 def test_a_code_draft_over_two_pages_is_cut_to_two_by_its_lowest_scored_lines(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -152,6 +189,31 @@ def test_a_renderer_that_cannot_lay_the_draft_out_changes_nothing(monkeypatch: p
     assert settled.result == before.result and settled.result.length is None
     assert settled.record.cut_for_length == () and settled.printed == before.printed
     assert settled.conflicts == () and settled.check.ready and settled.layouts == 1
+
+
+def test_a_code_draft_leaves_room_for_a_title_and_a_contact_line_that_wraps(monkeypatch: pytest.MonkeyPatch) -> None:
+    with monkeypatch.context() as patch:
+        patch.setattr(tm, "draft_pages", _two_line_room)
+        before = _settle(WRAP_MASTER)
+    assert _two_line_room(before.result) == 2 and _printed(before.result, WRAPPED_HEADER) == 3, (
+        "the fixture: room for 2 header lines lets through a draft the wrapped header prints on 3 pages"
+    )
+    # The fit's estimate counts what that PDF prints, before the cut and after it.
+    assert tm.draft_pages(before.result) == 3
+    settled = _settle(WRAP_MASTER)
+    assert len(settled.record.cut_for_length) > len(before.record.cut_for_length)
+    assert tm.draft_pages(settled.result) == _printed(settled.result, WRAPPED_HEADER) == 2
+    assert _printed(settled.result, ONE_LINE_HEADER) == 2 and settled.conflicts == () and settled.check.ready
+
+
+def test_a_code_draft_with_room_for_the_wrapped_header_is_cut_as_before(monkeypatch: pytest.MonkeyPatch) -> None:
+    with monkeypatch.context() as patch:
+        patch.setattr(tm, "draft_pages", _two_line_room)
+        before = _settle(LONG_MASTER)
+    settled = _settle(LONG_MASTER)
+    assert settled.record.cut_for_length, "the fixture: a draft the fit cuts"
+    assert settled.result == before.result and settled.record.cut_for_length == before.record.cut_for_length
+    assert _printed(settled.result, ONE_LINE_HEADER) == _printed(settled.result, WRAPPED_HEADER) == 2
 
 
 def test_a_roles_lines_past_its_share_say_they_score_lower_and_name_no_limit() -> None:

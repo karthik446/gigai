@@ -57,7 +57,11 @@ on the job's page (`resume pick --shorten` is retired: it changes nothing and sa
 
 **When Scout's own rules picked the lines** (a draft for a held job, or no usable pick from the
 assessment: `picked_by` is `code`), the resume is cut to **2 pages at the default spacing**
-before it is stored. The lowest-scored lines go first; a line that backs a must-have
+before it is stored. The count allows for a header that wraps onto a second contact line (your
+name, a title line and two contact lines), so with such a header, or a shorter one, the PDF
+prints on 2 pages at the default spacing; a taller header can still push it onto a third page.
+Scout does not read your header to pick, so a resume close to the limit is cut by a line even
+when your header is one line. The lowest-scored lines go first; a line that backs a must-have
 requirement, a pinned line, the line of the role the posting's title names, the best line of
 each recent role, one line per project and every role heading always stay (an older role that
 loses its last line is listed under Earlier experience). What was cut is shown as **Cut for
@@ -66,7 +70,9 @@ that always stay are more than 2 pages on their own, the resume keeps them and s
 over. Without a PDF renderer nothing is cut.
 
 A resume picked before 0.1.11.5 stays as it is until you pick it again (**Re-pick** on the
-job's page, or `gigai scout resume pick --job-url <url> --refresh`).
+job's page, or `gigai scout resume pick --job-url <url> --refresh`). The same goes for a
+resume Scout's own rules picked with an earlier version: it is cut to 2 pages the next time it
+is picked again (Re-pick or `--refresh`), not before.
 
 No employer is dropped. A role none of whose lines is shown (an older role, usually) is still
 listed, on one line, under **Earlier experience** at the end of the Experience section, newest

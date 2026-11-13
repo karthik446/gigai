@@ -1,7 +1,8 @@
 """The pick fixture's stored resume as a pick BEFORE 0.1.11.5 left it: some bullets shown, the others cut for length.
 
-A pick of 0.1.11.5 counts no page: it holds its best bullets with no length record, so nothing is cut for length and
-Restore has nothing to put back. The tests of Restore (``tests/ui/test_job_page_resume_points.py``,
+A MODEL'S pick of 0.1.11.5 on counts no page: it holds its best bullets with no length record, so nothing is cut for
+length and Restore has nothing to put back (a draft picked by code is cut to fit since 0.3.2; the fixture's pick is the
+model's). The tests of Restore (``tests/ui/test_job_page_resume_points.py``,
 ``tests/api_e2e/test_ui_resume_points_model.py``) seed the old shape with this, on the home of the pick fixture
 (``tests/behaviors/scout_find_jobs/test_pick_header_room.py``), after its job is assessed. Synthetic lines only.
 """
