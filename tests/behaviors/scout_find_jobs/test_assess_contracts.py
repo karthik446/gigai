@@ -108,7 +108,7 @@ def _fetched(kind: str) -> ResolvedJob:
 
 
 def test_resolved_job_round_trips_every_fetch_kind() -> None:
-    assert FETCH_KINDS == ("pasted", "ats_single", "ats_board", "generic")
+    assert FETCH_KINDS == ("pasted", "ats_single", "ats_board", "generic", "jsonld")
     for kind in FETCH_KINDS[1:]:
         assert _round_trip(_fetched(kind)) == _fetched(kind)
     pasted = ResolvedJob(

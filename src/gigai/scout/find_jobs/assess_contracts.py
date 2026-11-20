@@ -46,8 +46,9 @@ from .contracts import (
 )
 from .rank_contracts import RankScore
 
-#: ``ResolvedJob.fetch_kind`` values, in the order ``resolve_job`` tries them.
-FETCH_KINDS: tuple[str, ...] = ("pasted", "ats_single", "ats_board", "generic")
+#: ``ResolvedJob.fetch_kind`` values, in the order ``resolve_job`` tries them (``jsonld``, 0.3.4: a script-only
+#: page's own schema.org ``JobPosting``, tried after the boards and before giving up).
+FETCH_KINDS: tuple[str, ...] = ("pasted", "ats_single", "ats_board", "generic", "jsonld")
 
 _TEXT_IDENTITY_PREFIX = "text:"
 

@@ -25,9 +25,19 @@ v0.1.9 plan (§P4, operator answer 6):
    only over ``https`` at a public address, and vets every redirect hop the
    same way (``outbound_guard``). A stored address that is refused is a
    posting with no text here (``job_text_unavailable``), never a request.
-5. A page with no posting text fails ``job_text_unavailable`` (the caller is
-   told to pass ``--job-text``); a network/HTTP failure with nothing to fall
-   back on fails ``job_fetch_failed``.  Messages are redacted like
+5. 0.3.4: a page whose visible text is still under ``MIN_POSTING_TEXT_CHARS``
+   after that (a script-only page on any host, no board row for it) is
+   read for a schema.org ``JobPosting`` the page carries for search engines:
+   every ``<script type="application/ld+json">`` block, and the Next.js
+   Flight chunks (``self.__next_f.push``) a React page ships the same
+   object in before its script builds the tag.  The posting's
+   ``description`` goes through ``html_to_text`` like a board's; title,
+   company and location come from the object (``_jsonld_job``).  No second
+   request: only the page already fetched.  ``fetch_kind`` is ``jsonld``.
+6. A page with no posting text and no ``JobPosting`` in it fails
+   ``job_text_unavailable`` (the caller is told to pass ``--job-text``); a
+   network/HTTP failure with nothing to fall back on fails
+   ``job_fetch_failed``.  Messages are redacted like
    ``ATSBoardClientError``: host, provider, status -- never a body or query.
 
 Reused, never re-derived: ``normalize_url``/``parse_board_url``
@@ -63,6 +73,8 @@ from .market_acquisition import job_id_from_url
 from .outbound_guard import pinned_stream, safe_path_segment, safe_public_target
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
+    from collections.abc import Iterator
+
     import httpx
 
 
@@ -262,6 +274,21 @@ def resolve_job(
             text=page.text,
             text_sha256=_text_digest(page.text),
         )
+    if page is not None:
+        # 0.3.4 (rule 5): a script-only page's own ``JobPosting`` object, from the page already in hand.
+        posting = _jsonld_job(page.html)
+        if posting is not None and len(posting.text) >= MIN_POSTING_TEXT_CHARS:
+            return ResolvedJob(
+                job_identity=normalized,
+                source_url=url,
+                normalized_url=normalized,
+                fetch_kind="jsonld",
+                title=posting.title or page.title,
+                company=posting.company,
+                location=posting.location,
+                text=posting.text,
+                text_sha256=_text_digest(posting.text),
+            )
     if page is not None:
         raise FindJobsContractError(
             "job_text_unavailable",
@@ -582,6 +609,267 @@ def _posting_text(html: str) -> str:
         if len(text) >= MIN_POSTING_TEXT_CHARS:
             return text
     return whole
+
+
+# --- the page's own JobPosting (0.3.4, rule 5) ---------------------------------------------------------
+
+#: ``<script type="application/ld+json">`` blocks read per page (a real page carries one to three; a hostile page's
+#: thousands are not all parsed).  Tags are found by forward searches on the page itself (case-insensitive literals,
+#: never offsets from a lowercased copy: ``str.lower`` changes length for ``İ``), so the scan is one pass.
+_LD_JSON_BLOCKS = 20
+_SCRIPT_OPEN = re.compile(r"<script", re.IGNORECASE)
+_SCRIPT_CLOSE = re.compile(r"</script", re.IGNORECASE)
+_LD_JSON_TYPE = re.compile(r"\btype\s*=\s*[\"']?application/ld\+json", re.IGNORECASE)
+# Next.js (React Flight) ships a page's data as JS string chunks; a ``JobPosting`` rendered into an ld+json tag by the
+# client's script is in there as text.  Only the string literal is read, never the script.
+_FLIGHT_PUSH = 'self.__next_f.push([1,"'
+_JOBPOSTING_TYPE = re.compile(r'"@type"\s*:\s*"JobPosting"')
+#: ``"@type": "JobPosting"`` occurrences tried per page, and how many ``{`` before each are tried as the object's
+#: start (the type is among the first keys of a schema.org object).  Each ``{`` is decoded at most once per page.
+_FLIGHT_TYPE_MATCHES = 20
+_FLIGHT_OBJECT_STARTS = 16
+_JSON_DECODER = json.JSONDecoder()
+_LD_SALARY_KEYS = ("minValue", "maxValue", "value")
+#: A salary figure must be a plain number in ``(0, _LD_SALARY_MAX]``: zero, negative, NaN, infinite and absurd amounts
+#: are a broken or hostile page's, not a posting's.
+_LD_SALARY_MAX = 10**9
+#: Location parts (addresses, then applicant countries) kept after de-duplication; a longer list ends in ", ...".
+_LD_LOCATION_PARTS = 10
+
+
+@dataclass(frozen=True)
+class _JsonLdPosting:
+    title: str
+    company: str
+    location: str
+    text: str
+
+
+def _jsonld_job(html: str) -> _JsonLdPosting | None:
+    """The first schema.org ``JobPosting`` with a description in the page, as text; ``None`` when it carries none.
+
+    Every ``<script type="application/ld+json">`` block (comment/CDATA wrapper
+    stripped; a malformed block is skipped) and then the Next.js Flight
+    chunks are read.  The object itself, an item of a top-level list, or an
+    item of ``@graph`` counts; ``@type`` may be the string or a list holding
+    it.  Wrong types in any field are skipped, never raised on; nothing in
+    the object is used as an address.  Every string is made encodable (a
+    lone surrogate, what ``JSON.stringify`` emits for a string cut
+    mid-emoji, becomes ``?``) so the result is a normal posting.
+    """
+
+    for posting in _jobpostings_in_page(html):
+        description = posting.get("description")
+        if type(description) is not str:
+            continue
+        text = html_to_text(_ld_encodable(description)).strip()
+        if not text:
+            continue
+        salary = _ld_salary_line(posting.get("baseSalary"))
+        if salary:
+            text = f"{text}\n\n{salary}"
+        return _JsonLdPosting(
+            title=_ld_str(posting.get("title")),
+            company=_ld_name(posting.get("hiringOrganization")),
+            location=_ld_location(posting),
+            text=text,
+        )
+    return None
+
+
+def _jobpostings_in_page(html: str) -> Iterator[dict]:
+    for block in _ld_json_blocks(html):
+        try:
+            data = json.loads(block)
+        except (ValueError, RecursionError):  # malformed, or nested deeper than the decoder follows
+            continue
+        yield from _jobpostings_in(data)
+    yield from _flight_jobpostings(html)
+
+
+def _ld_json_blocks(html: str) -> Iterator[str]:
+    """The text of the first ``_LD_JSON_BLOCKS`` ``<script type="application/ld+json">`` blocks, wrappers stripped."""
+
+    position = 0
+    found = 0
+    while found < _LD_JSON_BLOCKS:
+        opened = _SCRIPT_OPEN.search(html, position)
+        if opened is None:
+            return
+        tag_end = html.find(">", opened.end())
+        if tag_end < 0:
+            return
+        closed = _SCRIPT_CLOSE.search(html, tag_end)
+        if closed is None:
+            return
+        position = closed.end()
+        if _LD_JSON_TYPE.search(html, opened.end(), tag_end) is None:
+            continue
+        found += 1
+        yield _unwrap_ld_json(html[tag_end + 1 : closed.start()])
+
+
+def _unwrap_ld_json(block: str) -> str:
+    """A block minus the ``<!-- ... -->`` or ``//<![CDATA[ ... //]]>`` wrapper some pages add for old browsers."""
+
+    block = block.strip()
+    if block.startswith("//"):
+        block = block[2:].lstrip()
+    for opener in ("<!--", "<![CDATA["):
+        if block.startswith(opener):
+            block = block[len(opener) :]
+            break
+    for closer in ("-->", "]]>"):
+        if block.endswith(closer):
+            block = block[: -len(closer)].rstrip()
+            break
+    if block.endswith("//"):
+        block = block[:-2]
+    return block
+
+
+def _is_jobposting(node: dict) -> bool:
+    kind = node.get("@type")
+    return kind == "JobPosting" or (type(kind) is list and "JobPosting" in kind)
+
+
+def _jobpostings_in(data: object) -> Iterator[dict]:
+    """``JobPosting`` dicts in a decoded block, in document order: the block itself, list items, ``@graph`` items."""
+
+    stack = [data]
+    while stack:
+        node = stack.pop()
+        if type(node) is list:
+            stack.extend(reversed(node))
+        elif type(node) is dict:
+            if _is_jobposting(node):
+                yield node
+            graph = node.get("@graph")
+            if graph is not None:
+                stack.append(graph)
+
+
+def _flight_chunks(html: str) -> str:
+    """The Flight string literals a Next.js page pushes, decoded and joined in page order (``""`` when none).
+
+    One pass with ``str.find``; a literal the JSON decoder cannot read ends the
+    read (the page's script is broken past it either way).
+    """
+
+    chunks: list[str] = []
+    position = 0
+    while True:
+        start = html.find(_FLIGHT_PUSH, position)
+        if start < 0:
+            return "".join(chunks)
+        quote = start + len(_FLIGHT_PUSH) - 1
+        try:
+            chunk, end = _JSON_DECODER.raw_decode(html, quote)
+        except ValueError:
+            return "".join(chunks)
+        position = end
+        if type(chunk) is str and html.startswith("])", end):
+            chunks.append(chunk)
+
+
+def _flight_jobpostings(html: str) -> Iterator[dict]:
+    """``JobPosting`` objects in a Next.js page's Flight chunks."""
+
+    flight = _flight_chunks(html)
+    tried: set[int] = set()
+    matches = 0
+    for match in _JOBPOSTING_TYPE.finditer(flight):
+        matches += 1
+        if matches > _FLIGHT_TYPE_MATCHES:
+            return
+        before = match.start()
+        for _ in range(_FLIGHT_OBJECT_STARTS):
+            start = flight.rfind("{", 0, before)
+            if start < 0:
+                break
+            before = start
+            if start in tried:
+                continue
+            tried.add(start)
+            try:
+                node, _end = _JSON_DECODER.raw_decode(flight, start)
+            except (ValueError, RecursionError):
+                continue
+            if type(node) is dict and _is_jobposting(node):
+                yield node
+                break
+
+
+def _ld_encodable(text: str) -> str:
+    """``text`` with any lone surrogate (unencodable, so a digest or a stored record would fail) replaced by ``?``."""
+
+    return text.encode("utf-8", "replace").decode("utf-8")
+
+
+def _ld_str(value: object) -> str:
+    return _ld_encodable(value.strip()) if type(value) is str else ""
+
+
+def _ld_name(value: object) -> str:
+    """A schema.org thing given as its name or as ``{"name": ...}``."""
+
+    return _ld_str(value.get("name")) if type(value) is dict else _ld_str(value)
+
+
+def _ld_items(value: object) -> list[object]:
+    return value if type(value) is list else [value]
+
+
+def _ld_location(posting: dict) -> str:
+    """``jobLocation`` addresses (locality, region, country) then ``applicantLocationRequirements`` names, de-duplicated,
+    the first ``_LD_LOCATION_PARTS`` joined by ", " (then ", ..." when the list went on)."""
+
+    parts: list[str] = []
+    for place in _ld_items(posting.get("jobLocation")):
+        address = place.get("address") if type(place) is dict else place  # a bare string names the place itself
+        if type(address) is dict:
+            parts.append(", ".join(part for part in (_ld_name(address.get(key)) for key in ("addressLocality", "addressRegion", "addressCountry")) if part))
+        else:
+            parts.append(_ld_name(address))
+    for region in _ld_items(posting.get("applicantLocationRequirements")):
+        parts.append(_ld_name(region))
+    unique = list(dict.fromkeys(part for part in parts if part))
+    if len(unique) > _LD_LOCATION_PARTS:
+        unique = unique[:_LD_LOCATION_PARTS] + ["..."]
+    return ", ".join(unique)
+
+
+def _ld_salary_line(salary: object) -> str:
+    """One ``Salary: ...`` line from ``baseSalary``'s plain amounts (a range, ``from``/``up to`` one bound, or a single
+    figure; then currency and unit), else ``""``."""
+
+    if type(salary) is not dict:
+        return ""
+    value = salary.get("value")
+    amounts = value if type(value) is dict else salary
+    low, high, single = (_ld_number(amounts.get(key)) for key in _LD_SALARY_KEYS)
+    if low is not None and high is not None:
+        figure = f"{low} - {high}"
+    elif low is not None:
+        figure = f"from {low}"
+    elif high is not None:
+        figure = f"up to {high}"
+    elif single is not None:
+        figure = str(single)
+    else:
+        return ""
+    unit = _ld_str(amounts.get("unitText"))
+    return " ".join(part for part in ("Salary:", figure, _ld_str(salary.get("currency")), f"per {unit.lower()}" if unit else "") if part)
+
+
+def _ld_number(value: object) -> int | float | None:
+    """A plain amount in ``(0, _LD_SALARY_MAX]`` (so never a bool, NaN, infinity, zero, a negative or an absurd figure),
+    rounded to cents, whole amounts as ints; else ``None``."""
+
+    if type(value) not in (int, float) or not 0 < value <= _LD_SALARY_MAX:
+        return None
+    rounded = round(value, 2)
+    return int(rounded) if rounded == int(rounded) else rounded
 
 
 def _fetch_page(client: "httpx.Client", url: str, *, trust: str = TRUST_USER) -> _Page:

@@ -69,8 +69,9 @@ from .contracts import BOARD_PATH_HOSTS, BOARD_SUBDOMAIN_HOSTS, FindJobsContract
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
     import httpx
 
-#: ``ResolvedJob.fetch_kind`` values whose text is the board's own.
-ATS_FETCH_KINDS = frozenset({"ats_single", "ats_board"})
+#: ``ResolvedJob.fetch_kind`` values whose text is the posting's own (the board's, or the page's schema.org
+#: ``JobPosting``), never a scraped page's menu and footer.
+ATS_FETCH_KINDS = frozenset({"ats_single", "ats_board", "jsonld"})
 
 
 def resolve_job_for_assessment(
