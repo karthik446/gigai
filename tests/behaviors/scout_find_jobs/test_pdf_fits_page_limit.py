@@ -155,10 +155,11 @@ def test_the_fixture_is_the_failing_size(fx: PipelineFixture) -> None:
     pages = _pages(unfitted.pdf)
     assert unfitted.pages == len(pages) == 3
     assert _is_the_four_line_header(pages[0]), "the header is not four lines"
-    # ... and the 3rd page holds the end of the resume: the Skills are never alone on a page (0.1.11.5 PE, the orphan
-    # rule), so the last two bullets and Education come with them.  (Before it: nothing but the end of the Skills.)
+    # ... and the 3rd page holds the end of the resume: the Skills, whole (0.3.3, gigai-0rs: a short section breaks like
+    # any other, and its title stays with its first line; the orphan rule of 0.1.11.5 PE, which brought the last two
+    # bullets and Education with them, is gone).  (Before PE: nothing but the end of the Skills.)
     last = pages[2].strip()
-    assert last.startswith("•") and "EDUCATION" in last and "SKILLS" in last and last.endswith(LAST_SKILL) and len(last.splitlines()) <= 12
+    assert last.startswith("SKILLS") and "EDUCATION" in pages[1] and last.endswith(LAST_SKILL) and len(last.splitlines()) <= 6
 
 
 def test_cli_pdf_of_the_stored_job_resume_stays_on_two_pages(fx: PipelineFixture, tmp_path: Path) -> None:

@@ -7,8 +7,11 @@ resume of that size (``tests/support/real_shaped_resume_fixture.py``):
 - THE FIXTURE has a real pick's size: 20 bullets of two or three printed lines under six employers, four earlier
   roles, two projects with a line of technologies, 60 skills, two degrees with long names;
 - THE PAGES at every slider position from 0.70 to 1.40 and the automatic spacing (``PAGES``, ``AUTO_FIT``);
-- NO PAGE OF A SHORT BLOCK ALONE: at every slider position every page holds a bullet, whatever ends the resume
-  (Education, the Skills, the earlier roles), and a section title is never the last line of a page;
+- NO PAGE OF A LINE ALONE: at every slider position every page before the last holds a bullet, whatever ends the
+  resume (Education, the Skills, the earlier roles); the last page holds a bullet or the end of the short sections, two
+  lines at least; a section title is never the last line of a page (0.3.3, gigai-0rs: the orphan rule of PE, which
+  kept the last bullet with the short sections so that the last page held a bullet too, is gone: that piece moved
+  whole to a new page and left a third of the page before it empty);
 - A DEGREE WITH A LONG NAME IS ONE LINE when it can be: its degree is set a step smaller (never below 8.3pt), the
   school and the years keep their size; one too long for that keeps the school and the degree on one line and puts
   the years on a second; one too long even for that wraps;
@@ -155,7 +158,7 @@ def test_the_pages_at_every_slider_position_and_the_automatic_spacing() -> None:
     assert len(PdfReader(io.BytesIO(fitted.pdf)).pages) == 2
 
 
-# --- no page of a short block alone ----------------------------------------------------------------------------------
+# --- no page of a line alone -----------------------------------------------------------------------------------------
 
 #: What ends the resume: Education (a master pick's order), the Skills, the earlier roles, and two longer resumes.
 ENDINGS = {
@@ -169,17 +172,22 @@ ENDINGS = {
 
 
 @pytest.mark.parametrize("ending", sorted(ENDINGS))
-def test_no_page_holds_only_a_short_block_at_any_slider_position(ending: str) -> None:
+def test_no_page_holds_a_line_alone_at_any_slider_position(ending: str) -> None:
     alone: list[str] = []
     for bullets in ((20,) if ENDINGS[ending].get("order") != () else range(14, 21)):  # the earlier roles end a page only at some lengths
         markdown = real.resume(bullets=bullets, **ENDINGS[ending])  # type: ignore[arg-type]
         for spacing in SLIDER:
             rows = _rows(_pdf(markdown, spacing).pdf)
-            for page in sorted({row[0] for row in rows}):
+            pages = sorted({row[0] for row in rows})
+            for page in pages:
                 on_page = [row for row in rows if row[0] == page]
                 titles = [row[4].title() for row in on_page if row[3] == SECTION_TITLE]
-                if not any(row[4].startswith("•") for row in on_page):
+                if page != pages[-1] and not any(row[4].startswith("•") for row in on_page):
                     alone.append(f"{bullets} bullets at {spacing:.2f}: page {page + 1} holds only {' + '.join(titles) or _lines(on_page)[0][:40]}")
+                # The last page holds two lines at least: never a degree, a role shown by its heading alone or one of
+                # the Skills' lines alone.
+                if len(_lines(on_page)) < 2:
+                    alone.append(f"{bullets} bullets at {spacing:.2f}: page {page + 1} holds only {_lines(on_page)[0][:40]}")
                 # A section title is never the last line of a page.
                 assert on_page[-1][3] != SECTION_TITLE, f"at {spacing:.2f} page {page + 1} ends with the title {on_page[-1][4]}"
             if "EDUCATION" in {row[4] for row in rows if row[3] == SECTION_TITLE}:

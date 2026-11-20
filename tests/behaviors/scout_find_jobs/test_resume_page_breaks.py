@@ -13,8 +13,11 @@ two bullets right after the longest role, two projects of three and two bullets 
 - (b) A BULLET IS ONE PIECE: no bullet's lines are on two pages (a bullet of up to four printed lines; a longer one
   may break, two lines or more on each side, as it always could);
 - (c) THE EMPTY BAND at the foot of a page is small: under ``BAND_LINES`` body lines on every page but the last two,
-  under ``TAIL_BAND_LINES`` on the page before the last (the tail: one bullet, the Skills and Education);
-- (d) THE LAST PAGE HOLDS A BULLET (the orphan rule of PE, kept): never Education, the Skills or the earlier roles alone;
+  under ``TAIL_BAND_LINES`` on the page before the last (0.3.3, gigai-0rs: the short sections no longer move whole);
+- (d) A PAGE BEFORE THE LAST HOLDS A BULLET, and no page holds a line alone (0.3.3, gigai-0rs: the orphan rule of PE,
+  which kept the last bullet, the Skills and Education in one piece so that the last page held a bullet too, is gone:
+  that piece moved whole to a new page and left a third of the page before it empty; see
+  ``test_resume_tail_chain.py``).  The last page may hold only the end of the short sections;
 - AN ENTRY SPLITS: a role's bullets are on two pages where the page ends inside it, and ONE bullet may end or start a page;
 - THE AUTOMATIC SPACING opens looser, and the preview's pictures are the PDF's pages (one render path).
 
@@ -165,10 +168,10 @@ def test_a_heading_is_on_the_page_of_its_first_bullet_and_no_bullet_is_split(nam
                 # (2) a bullet's further line is on the page of the line before it.
                 assert lines[index - 1][2] in ("bullet", "wrap") and lines[index - 1][0] == page, f"{where}: a bullet is split before {text[:40]!r}"
         assert headings >= 6
-        # No page ends with a heading or a section title.
+        # No page ends with a heading or a section title (a degree is a whole entry on one line: it may).
         for page in sorted({row[0] for row in lines})[:-1]:
             last = [row for row in lines if row[0] == page][-1]
-            assert last[2] not in ("heading", "title"), f"{where}: page {page + 1} ends with {last[4][:40]}"
+            assert last[2] not in ("heading", "title") or last[3] == "EDUCATION", f"{where}: page {page + 1} ends with {last[4][:40]}"
 
 
 def test_an_entry_splits_across_a_page_break_and_one_bullet_may_end_or_start_a_page() -> None:
@@ -205,10 +208,12 @@ def test_an_entry_splits_across_a_page_break_and_one_bullet_may_end_or_start_a_p
 #: a three-line bullet with their gaps do not fit (rules 1 and 2), so the page ends before them.  Reached: 6.0 (the PE
 #: fixture at 1.10).  BEFORE this change: 14.8 (a whole role of three bullets left the page).
 BAND_LINES = 7.0
-#: The same for the page before the last: the tail (ONE bullet, the Skills and Education, kept together so that the last
-#: page holds a bullet) does not fit and starts the last page.  Reached: 14.3 (16 bullets at 0.85).  BEFORE: 21.2 (the
-#: last project, whole, moved with the tail).
-TAIL_BAND_LINES = 15.0
+#: The same for the page before the last.  0.3.3 (gigai-0rs): the short sections no longer move whole, so the page
+#: before the last is short by one piece like any other, and the largest piece is a section title with its first
+#: entry (its heading, two lines of technologies and a three-line bullet).  Reached: 7.9 (the Skills last at 1.00:
+#: the Projects start the last page).  BEFORE: 14.3 (the tail, ONE bullet with the Skills and Education kept together,
+#: did not fit and started the last page), and 21.2 before PB5 (the last project, whole, moved with the tail).
+TAIL_BAND_LINES = 9.0
 
 
 def test_the_empty_band_at_the_foot_of_a_page_is_small() -> None:
@@ -224,24 +229,30 @@ def test_the_empty_band_at_the_foot_of_a_page_is_small() -> None:
     assert BAND_LINES - 1.5 < worst and TAIL_BAND_LINES - 1.5 < worst_tail, (worst, worst_tail)
 
 
-# --- (d) the last page holds a bullet ------------------------------------------------------------------------------------
+# --- (d) a page before the last holds a bullet, no page holds a line alone -----------------------------------------------
 
 
 @pytest.mark.parametrize("name", sorted(FIXTURES))
-def test_every_page_holds_a_bullet_and_the_tail_is_in_one_piece(name: str) -> None:
+def test_a_page_before_the_last_holds_a_bullet_and_no_page_holds_a_line_alone(name: str) -> None:
     for spacing in SLIDER:
         lines = _lines(name, spacing)
-        for page in sorted({row[0] for row in lines}):
+        pages = sorted({row[0] for row in lines})
+        for page in pages[:-1]:
             assert any(row[2] == "bullet" for row in lines if row[0] == page), f"{name} at {spacing:.2f}: page {page + 1} holds no bullet"
-        # The short sections that end the resume are on one page, with the last bullet before them.
-        ending = [row for row in lines if row[3] in ("SKILLS", "EDUCATION")]
-        if ending:
-            last_bullet = [row for row in lines if row[2] == "bullet"][-1]
-            assert {row[0] for row in ending} == {last_bullet[0]}, f"{name} at {spacing:.2f}: the Skills and Education are not on the last bullet's page"
+        # The last page holds a bullet, or the end of the short sections: never one line (a degree, a role shown by its
+        # heading alone, one of the Skills' lines) alone.
+        last = [row for row in lines if row[0] == pages[-1]]
+        assert len(last) >= 2, f"{name} at {spacing:.2f}: the last page holds only {last[0][4][:40]!r}"
+        if not any(row[2] == "bullet" for row in last):
+            assert {row[3] for row in last} <= {"SKILLS", "EDUCATION", "EXPERIENCE"}, f"{name} at {spacing:.2f}: the last page holds {sorted({row[3] for row in last})} and no bullet"
+        # Education (two degrees) is on one page.
+        education = {row[0] for row in lines if row[3] == "EDUCATION"}
+        assert len(education) <= 1, f"{name} at {spacing:.2f}: Education is on pages {sorted(education)}"
 
 
-def test_the_tail_takes_one_bullet_with_it_and_not_the_whole_project() -> None:
-    """Before, the last project (title, technologies, every bullet of up to three) moved with the Skills and Education."""
+def test_the_last_project_may_end_a_page_before_its_last_bullet() -> None:
+    """A bullet is never kept with what follows it (0.3.3, gigai-0rs).  Before PB5 the last project (title, technologies,
+    every bullet of up to three) moved whole with the Skills and Education; PB5 took ONE bullet with them."""
 
     found = False
     for name in ("split", "split, 16 bullets", "split, the Skills last"):
@@ -253,7 +264,7 @@ def test_the_tail_takes_one_bullet_with_it_and_not_the_whole_project() -> None:
             pages = [row[0] for row in final]
             if pages == [last_page - 1, last_page - 1, last_page]:
                 found = True
-    assert found, "at no spacing does the last project end one page and its last bullet start the next with the Skills and Education"
+    assert found, "at no spacing does the last project end one page and its last bullet start the next"
 
 
 # --- the pages and the automatic spacing ---------------------------------------------------------------------------------

@@ -95,10 +95,11 @@ line. A project's line of technologies is set on the project's title line when b
 page ends, between two points. Its heading (the employer and role lines, or a project's title)
 stays with its first point, so no heading ends a page. A point of up to four printed lines is
 never cut in two; a longer one can break, with at least two lines on each side. A section
-title stays with the first block under it. And no page holds only Education, only the Skills
-or only the roles listed by their heading: when they end the resume, the last point before
-them moves to that page with them, at every spacing. For that the page before the last can
-end a few lines early.
+title stays with the first block under it. A short block keeps only what spares a line alone on
+a page: Education's title stays with its first degree, and its last two degrees stay together;
+the Skills break between lines like any text. Nothing is held back to fill out the last page,
+so a page before the last never ends more than one piece early, and the last page can hold
+only Education, or the last lines of the Skills and Education.
 
 ### The preview and the spacing slider
 
