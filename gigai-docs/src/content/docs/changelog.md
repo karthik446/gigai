@@ -22,6 +22,14 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.3.3
+
+A patch release: one fix to the resume PDF. It changes no stored data and no model call.
+
+#### Fixed (Scout)
+
+- **A resume PDF no longer leaves the page before the last a third empty.** The last project, the Skills and Education used to move together to a new page whenever they missed the room left by a few points. Now they break where the page ends: a page before the last is short by at most one bullet or heading, the Skills break between lines, and the last page can hold only Education. (gigai-0rs)
+
 ### 0.3.2
 
 This release fixes what the first live `eval base` run showed about how the run picks the sets it gates and how it
