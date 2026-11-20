@@ -302,22 +302,43 @@ def test_deep_nesting_falls_through_to_todays_error(block: str) -> None:
     assert error.code == "job_text_unavailable" and str(error) == _TODAYS_MESSAGE
 
 
+def _chain_page(tail: str, size: int = 2 * 1024 * 1024) -> str:
+    """The reader's nested-chain Flight page: 20 type matches, each with 16 untried ``{`` whose parse would run to the
+    end of an unterminated 2 MiB list — the case a decode count alone does not bound."""
+
+    unit = '{"a":' * 16 + '{"@type":"JobPosting","b":'
+    head = "<script>self.__next_f.push([1," + json.dumps(unit * 20 + "[")[:-1]
+    room = size - len(head) - 20
+    return head + tail * (room // len(tail)) + '"])</script>'
+
+
 def test_hostile_pages_do_bounded_work_and_fall_through(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Thousands of ld+json tags, unterminated tags, a 2 MiB whitespace block, a Flight chunk repeating the type:
-    at most ``_LD_JSON_BLOCKS`` blocks parsed, push literals decoded in one forward pass (never the same text twice),
-    at most ``_FLIGHT_TYPE_MATCHES * _FLIGHT_OBJECT_STARTS`` object decodes; and a generous wall-clock bound against a hang."""
+    """Thousands of ld+json tags, unterminated tags, a 2 MiB whitespace block, a Flight chunk repeating the type, nested
+    chains: at most ``_LD_JSON_BLOCKS`` blocks parsed, push literals decoded in one forward pass (never the same text
+    twice), at most ``_FLIGHT_TYPE_MATCHES * _FLIGHT_OBJECT_STARTS`` object decodes that together consume at most the
+    scan budget (plus the one decode that overran it); and a generous wall-clock bound against a hang."""
 
     loads: list[str] = []
     literal_starts: list[int] = []
     object_starts: list[int] = []
+    object_chars: list[int] = []
 
     class _Counting:
         def __init__(self, page: str) -> None:
             self.page = page
 
         def raw_decode(self, text: str, index: int = 0):
-            (literal_starts if text is self.page else object_starts).append(index)
-            return json.JSONDecoder().raw_decode(text, index)
+            if text is self.page:
+                literal_starts.append(index)
+                return json.JSONDecoder().raw_decode(text, index)
+            object_starts.append(index)
+            try:
+                node, end = json.JSONDecoder().raw_decode(text, index)
+            except json.JSONDecodeError as exc:
+                object_chars.append(exc.pos - index)
+                raise
+            object_chars.append(end - index)
+            return node, end
 
     real_loads = json.loads
 
@@ -334,17 +355,46 @@ def test_hostile_pages_do_bounded_work_and_fall_through(monkeypatch: pytest.Monk
         "whitespace": '<script type="application/ld+json">' + " " * (two_mib - 50) + "</script>",
         "flight-dup-keys": "<script>self.__next_f.push([1," + json.dumps("1c:{" + ", ".join('"@type": "JobPosting"' for _ in range(20_000)) + "}") + "])</script>",
         "flight-unterminated": ('self.__next_f.push([1,"' * 90_000)[:two_mib],
+        "chain-ints": _chain_page("1,"),
+        "chain-floats": _chain_page("1.5,"),
+        "chain-objects": _chain_page("{},"),
+        "chain-strings": _chain_page('"a",'),
     }
+    scan_budget = (job_input._FLIGHT_SCAN_FACTOR + 1) * two_mib + job_input._FLIGHT_SCAN_SLACK
     for name, page in pages.items():
         assert len(page) <= two_mib, name  # at the fetch cap, where the reader timed the old code in minutes
         monkeypatch.setattr(job_input, "_JSON_DECODER", _Counting(page))
-        loads.clear(), literal_starts.clear(), object_starts.clear()
+        loads.clear(), literal_starts.clear(), object_starts.clear(), object_chars.clear()
         started = time.perf_counter()
         assert job_input._jsonld_job(page) is None, name  # (some of these pages are visible text to ``resolve_job``, so the reader is called directly)
         assert len(loads) <= job_input._LD_JSON_BLOCKS, name
         assert literal_starts == sorted(set(literal_starts)), name  # one forward pass
         assert len(object_starts) <= job_input._FLIGHT_TYPE_MATCHES * job_input._FLIGHT_OBJECT_STARTS, (name, len(object_starts))
+        assert sum(object_chars) <= scan_budget, (name, sum(object_chars))  # bytes, not only decodes
         assert time.perf_counter() - started < 10.0, name
+
+
+def test_flight_type_given_as_a_list_counts_too() -> None:
+    posting = json.dumps(_posting()).replace('"@type": "JobPosting"', '"@type": ["Thing", "JobPosting"]')
+    assert '"@type": ["Thing", "JobPosting"]' in posting
+    resolved = _resolve(_flight_page(json.dumps("1c:" + posting)))
+    assert resolved.fetch_kind == "jsonld" and resolved.title == "Staff Platform Engineer"
+
+
+@pytest.mark.parametrize(
+    "padding",
+    [" " * 500, "\n" * 500, "&nbsp;" * 500, ("&nbsp;" * 5 + "&#8203;") * 100],
+    ids=["spaces", "newlines", "nbsp-entities", "nbsp-and-zero-width-entities"],
+)
+def test_whitespace_padding_does_not_make_a_short_description_a_posting(padding: str) -> None:
+    """The 400-char gate is on the collapsed text (a zero-width space is not whitespace to ``str.split`` and still
+    counts, as on the generic path); the text returned for a real posting is still kept as-is."""
+
+    short = "Example Robotics is hiring." + padding + "Apply on our site."
+    error = _unavailable(_script_only_page(json.dumps(_posting(description=short))))
+    assert error.code == "job_text_unavailable"
+    kept = _resolve(_script_only_page(json.dumps(_posting(description=_DESCRIPTION_HTML.replace("</p>", "</p>" + padding, 1)))))
+    assert kept.fetch_kind == "jsonld" and "\n" in kept.text
 
 
 def _with_lone_surrogate(block: str) -> str:

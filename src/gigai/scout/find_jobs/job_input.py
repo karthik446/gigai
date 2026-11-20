@@ -277,7 +277,7 @@ def resolve_job(
     if page is not None:
         # 0.3.4 (rule 5): a script-only page's own ``JobPosting`` object, from the page already in hand.
         posting = _jsonld_job(page.html)
-        if posting is not None and len(posting.text) >= MIN_POSTING_TEXT_CHARS:
+        if posting is not None:
             return ResolvedJob(
                 job_identity=normalized,
                 source_url=url,
@@ -623,11 +623,17 @@ _LD_JSON_TYPE = re.compile(r"\btype\s*=\s*[\"']?application/ld\+json", re.IGNORE
 # Next.js (React Flight) ships a page's data as JS string chunks; a ``JobPosting`` rendered into an ld+json tag by the
 # client's script is in there as text.  Only the string literal is read, never the script.
 _FLIGHT_PUSH = 'self.__next_f.push([1,"'
-_JOBPOSTING_TYPE = re.compile(r'"@type"\s*:\s*"JobPosting"')
-#: ``"@type": "JobPosting"`` occurrences tried per page, and how many ``{`` before each are tried as the object's
-#: start (the type is among the first keys of a schema.org object).  Each ``{`` is decoded at most once per page.
+#: ``"@type": "JobPosting"`` or ``"@type": [..., "JobPosting"]`` as Flight text (the list form is bounded so a hostile
+#: page cannot make the regex crawl).
+_JOBPOSTING_TYPE = re.compile(r'"@type"\s*:\s*(?:"JobPosting"|\[[^\]]{0,200}"JobPosting")')
+#: ``@type`` occurrences tried per page, and how many ``{`` before each are tried as the object's start (the type is
+#: among the first keys of a schema.org object).  Each ``{`` is decoded at most once per page, and the characters all
+#: decodes consume together (a failed decode consumed up to where it failed) are capped at ``_FLIGHT_SCAN_FACTOR``
+#: times the Flight text plus ``_FLIGHT_SCAN_SLACK``: a nested chain cannot make every start re-read the whole text.
 _FLIGHT_TYPE_MATCHES = 20
 _FLIGHT_OBJECT_STARTS = 16
+_FLIGHT_SCAN_FACTOR = 2
+_FLIGHT_SCAN_SLACK = 65_536
 _JSON_DECODER = json.JSONDecoder()
 _LD_SALARY_KEYS = ("minValue", "maxValue", "value")
 #: A salary figure must be a plain number in ``(0, _LD_SALARY_MAX]``: zero, negative, NaN, infinite and absurd amounts
@@ -646,7 +652,8 @@ class _JsonLdPosting:
 
 
 def _jsonld_job(html: str) -> _JsonLdPosting | None:
-    """The first schema.org ``JobPosting`` with a description in the page, as text; ``None`` when it carries none.
+    """The first schema.org ``JobPosting`` whose text (description, plus a salary line) collapses to at least
+    ``MIN_POSTING_TEXT_CHARS``; ``None`` when the page carries none.
 
     Every ``<script type="application/ld+json">`` block (comment/CDATA wrapper
     stripped; a malformed block is skipped) and then the Next.js Flight
@@ -668,6 +675,8 @@ def _jsonld_job(html: str) -> _JsonLdPosting | None:
         salary = _ld_salary_line(posting.get("baseSalary"))
         if salary:
             text = f"{text}\n\n{salary}"
+        if len(" ".join(text.split())) < MIN_POSTING_TEXT_CHARS:  # whitespace padding is not posting text
+            continue
         return _JsonLdPosting(
             title=_ld_str(posting.get("title")),
             company=_ld_name(posting.get("hiringOrganization")),
@@ -688,7 +697,11 @@ def _jobpostings_in_page(html: str) -> Iterator[dict]:
 
 
 def _ld_json_blocks(html: str) -> Iterator[str]:
-    """The text of the first ``_LD_JSON_BLOCKS`` ``<script type="application/ld+json">`` blocks, wrappers stripped."""
+    """The text of the first ``_LD_JSON_BLOCKS`` ``<script type="application/ld+json">`` blocks, wrappers stripped.
+
+    HTML comments are not understood: a block commented out with ``<!-- -->`` (an old posting a site kept) is read
+    like any other.
+    """
 
     position = 0
     found = 0
@@ -776,6 +789,7 @@ def _flight_jobpostings(html: str) -> Iterator[dict]:
     """``JobPosting`` objects in a Next.js page's Flight chunks."""
 
     flight = _flight_chunks(html)
+    budget = _FLIGHT_SCAN_FACTOR * len(flight) + _FLIGHT_SCAN_SLACK
     tried: set[int] = set()
     matches = 0
     for match in _JOBPOSTING_TYPE.finditer(flight):
@@ -792,12 +806,23 @@ def _flight_jobpostings(html: str) -> Iterator[dict]:
                 continue
             tried.add(start)
             try:
-                node, _end = _JSON_DECODER.raw_decode(flight, start)
-            except (ValueError, RecursionError):
+                node, end = _JSON_DECODER.raw_decode(flight, start)
+            except json.JSONDecodeError as exc:
+                budget -= max(exc.pos - start, 1)
+                if budget < 0:
+                    return
                 continue
+            except (ValueError, RecursionError):  # a number past int's digit limit, or nesting past the stack
+                budget -= len(flight)
+                if budget < 0:
+                    return
+                continue
+            budget -= end - start
             if type(node) is dict and _is_jobposting(node):
                 yield node
                 break
+            if budget < 0:
+                return
 
 
 def _ld_encodable(text: str) -> str:
