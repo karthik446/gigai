@@ -21,6 +21,8 @@
 // last. That is one model call, with every answer already recorded when it
 // runs.
 
+import { jobTextError } from "./assessModel.js";
+
 const key = (value) => (typeof value === "string" ? value.trim().toLowerCase() : "");
 
 // Which row each open question belongs to. `rows` maps a requirement (as
@@ -185,6 +187,9 @@ export function assessSummaryLines(summary) {
   ];
 }
 
+// 0.3.4 (gigai-9j8): the job page has no paste field; its words for the assess form's paste path.
+export const REASSESS_PASTE_HINT = "Assess it again from Assess a job with the posting text pasted.";
+
 // What a failed re-assessment of an old assessment says. The assessment shown stays: nothing was replaced.
 export function reassessErrorText(err) {
   const code = err && err.code;
@@ -194,6 +199,10 @@ export function reassessErrorText(err) {
   }
   if (code === "posting_requirements_unreadable") {
     return "The posting's requirements could not be read, so it was not assessed again. The assessment shown stays.";
+  }
+  const noText = jobTextError(err, REASSESS_PASTE_HINT);
+  if (noText) {
+    return `${noText} The assessment shown stays.`;
   }
   if (err && err.status === 504) {
     return "The model timed out assessing this posting. Try again, or a faster model target.";

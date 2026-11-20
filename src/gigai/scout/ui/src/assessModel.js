@@ -86,3 +86,31 @@ export function assessPrivacyNote(mode) {
     ? "A pasted resume is sent to the assessment model for this call only and is never stored."
     : "Your resume is sent to your own model target only, the one that assesses and ranks postings.";
 }
+
+// 0.3.4 (gigai-9j8): the server could not read the posting's text and says why: `job_text_unavailable` (the URL was
+// reached but carries no posting text: a script-only page, a posting its board dropped, a board that gave no
+// description), `job_fetch_failed` (fetching it failed; the failures are named, redacted server-side) and, on a
+// re-assess, `reassess_unavailable` (the job was assessed from pasted text, which is never stored). Before, the
+// generic per-status text hid the reason ("The server rejected this request as invalid. Reload and try again.").
+//
+// The server's message is the CLI's and ends with "; pass --job-text with the posting text instead" (or "; re-assess
+// with --job-text again"); that tail is replaced by the page's own words for its paste path (`hint`). null for any
+// other error, so the callers' other rules stay as they are.
+export const JOB_TEXT_CODES = new Set(["job_text_unavailable", "job_fetch_failed", "reassess_unavailable"]);
+export const PASTE_POSTING_TEXT_HINT = "Switch to Paste text and paste the posting's text instead.";
+const CLI_JOB_TEXT_TAIL = /[;,.]?\s*(?:pass --job-text with the posting text instead|re-assess with --job-text again)\.?\s*$/;
+const REASON_FALLBACK = {
+  job_text_unavailable: "the page at this URL carries no posting text",
+  job_fetch_failed: "fetching the job failed",
+  reassess_unavailable: "this job was assessed from pasted text, which is never stored",
+};
+
+export function jobTextError(err, hint = PASTE_POSTING_TEXT_HINT) {
+  const code = err && typeof err.code === "string" ? err.code : "";
+  if (!JOB_TEXT_CODES.has(code)) {
+    return null;
+  }
+  const own = String(err.detail || err.message || "").replace(CLI_JOB_TEXT_TAIL, "").trim().replace(/\.$/, "");
+  const reason = own || REASON_FALLBACK[code];
+  return `${reason.charAt(0).toUpperCase()}${reason.slice(1)}. ${hint}`;
+}

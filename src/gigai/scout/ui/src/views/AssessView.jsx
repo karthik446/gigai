@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { ApiError, postAssess } from "../api.js";
 import { assessCauseText } from "../answersModel.js";
 import Breadcrumb from "../components/Breadcrumb.jsx";
-import { assessPrivacyNote, assessResume, assessingAgainst, canAssess, otherProfiles } from "../assessModel.js";
+import { assessPrivacyNote, assessResume, assessingAgainst, canAssess, jobTextError, otherProfiles } from "../assessModel.js";
 import { REQUIREMENTS_UNREADABLE_TEXT, isRequirementsUnreadable } from "../rankModel.js";
 import { ORIGIN_QUICK_ASSESS } from "../jobModel.js";
 import { ASSESSMENTS_HASH } from "../routing.js";
@@ -43,6 +43,10 @@ export default function AssessView({ profiles, selectedProfileId, config, config
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  // 0.3.4 (gigai-9j8): the server could not read the posting at the URL (assessModel.jobTextError): the error names its
+  // reason and the callout offers the paste path, which switches to Paste text and focuses its field once it is shown.
+  const [offerPaste, setOfferPaste] = useState(false);
+  const [focusText, setFocusText] = useState(false);
   // uat-bug-029: the posting's requirements could not be read; not an error.
   const [unreadable, setUnreadable] = useState(false);
 
@@ -58,6 +62,21 @@ export default function AssessView({ profiles, selectedProfileId, config, config
     }
   }, [mode, otherProfileId, selectedProfileId]);
 
+  useEffect(() => {
+    if (focusText && jobMode === "text") {
+      const field = document.getElementById("quick-assess-text");
+      if (field) {
+        field.focus();
+      }
+      setFocusText(false);
+    }
+  }, [focusText, jobMode]);
+
+  function pastePostingText() {
+    setJobMode("text");
+    setFocusText(true);
+  }
+
   function backToActive() {
     setMode("active");
     setChoosing(false);
@@ -67,6 +86,7 @@ export default function AssessView({ profiles, selectedProfileId, config, config
     event.preventDefault();
     setSubmitting(true);
     setError(null);
+    setOfferPaste(false);
     setUnreadable(false);
     try {
       const job = jobMode === "url" ? { job_url: jobUrl.trim() } : { job_text: jobText };
@@ -78,6 +98,9 @@ export default function AssessView({ profiles, selectedProfileId, config, config
         setUnreadable(true);
       } else if (assessCauseText(err)) {
         setError(assessCauseText(err)); // 0110-10-13: a typed cause says its facts and next action
+      } else if (jobTextError(err)) {
+        setError(jobTextError(err));
+        setOfferPaste(true);
       } else if (err instanceof ApiError && err.status === 504) {
         setError("The model timed out assessing this posting. Try again, or a smaller/faster model target.");
       } else {
@@ -203,7 +226,19 @@ export default function AssessView({ profiles, selectedProfileId, config, config
               {REQUIREMENTS_UNREADABLE_TEXT}. Nothing was assessed.
             </div>
           )}
-          {error && <div className="callout danger">{error}</div>}
+          {error && (
+            <div className="callout danger" data-role="assess-error" role="alert">
+              {error}
+              {offerPaste && jobMode === "url" && (
+                <>
+                  {" "}
+                  <button type="button" className="link-button" data-action="assess-paste-text" onClick={pastePostingText}>
+                    Paste the posting text
+                  </button>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="actions" style={{ justifyContent: "flex-start" }}>
             <button type="submit" className="button" disabled={submitting || !ready}>

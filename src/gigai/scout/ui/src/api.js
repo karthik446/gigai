@@ -57,6 +57,21 @@ const CODES_WITH_OWN_MESSAGE = new Set([
   // the row or in the dialog (learning_running is above).
   "master_unreadable",
   "invalid_shipped",
+  // 0.3.4 (gigai-9j8): the assess family's "no posting text here" refusals name the reason and the way out (POST /api/assess
+  // 422/502; the job page's re-assess through POST /api/answers answers `reassess_unavailable` with the same reason, where
+  // the generic text hid it). assessModel.jobTextError turns their CLI tail ("pass --job-text") into the page's own paste words.
+  "job_text_unavailable",
+  "job_fetch_failed",
+  "reassess_unavailable",
+  // POST /api/postings/assess 409: "an assess batch is already running; wait for it to finish".
+  "assess_batch_running",
+  // DELETE /api/profiles/{id} and POST .../archive 409s: each says which profile rule refused and what to do
+  // ("the only profile cannot be deleted; add another one first"), where the generic 409 text read as a stale config.
+  "scout_profile_default_delete",
+  "scout_profile_last_active",
+  "profile_archive_requires_replacement",
+  "scout_profile_archived",
+  "scout_profile_deleted",
 ]);
 
 class ApiError extends Error {
