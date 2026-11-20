@@ -30,6 +30,15 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.3.4
+
+A patch release: two fixes to assessing a job by its URL. It changes nothing in the data you already have and makes no new model call.
+
+#### Fixed (Scout)
+
+- **A job page that only draws its text with a script can now be assessed by its URL.** Some job pages (a Workable listing, a micro1 post) show almost no text until a script runs, so Scout stopped with "the page carries no posting text" even though the page holds the full posting for search engines. Scout now reads that posting (title, company, location, description and a stated salary) from the page it already fetched; no second request is made. A page with no such posting, or with a posting too short to assess, still stops with the same message and still accepts pasted text. (gigai-9j8)
+- **The assess form now says why a URL could not be read.** It used to show "The server rejected this request as invalid. Reload and try again." for a page with no posting text. It now shows the reason and a "Paste the posting text" button that opens the paste box; the job page's re-assess and a few other refusals (an assess batch already running, the profile rules on delete and archive) show their own reason the same way. (gigai-9j8)
+
 ### 0.3.3
 
 A patch release: one fix to the resume PDF. It changes no stored data and no model call.
