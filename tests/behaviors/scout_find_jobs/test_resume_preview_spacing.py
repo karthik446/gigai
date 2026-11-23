@@ -8,11 +8,12 @@ any spacing. Pinned here, on the PDF that comes back (pypdf reads it) and on Typ
 same resume is 2 pages up to 1.05 and every number below was measured again; that what is NOT one of those blocks
 did not move at 1.0 and above is pinned in ``test_resume_layout_blocks.py``.)
 
-- AT 1.0 AND ABOVE NOTHING MOVES: where the resume ends is what the template before this change measured, to the
-  last digit, and a body line is 14.3pt from the next;
-- BELOW 1.0 the body's lines tighten too: 11.5pt at 0.7 (the 9.5pt type's own single-spaced line: the readability
-  floor), the type size never changes, and the slider's range moves the resume by MANY bullets (the table in the
-  test); the 20-bullet resume reaches 2 pages inside the range;
+- AT 1.0 AND ABOVE only the bullet gap moved (0.3.5, gigai-lc3: a constant 4pt between bullets at every spacing;
+  it was 1.71pt x the spacing): where the resume ends is pinned to the last digit, and a body line is 14.3pt from
+  the next;
+- BELOW 1.0 the body's lines tighten too: 12.5pt at 0.7 (0.3.5; the floor was 11.5pt, the 9.5pt type's own
+  single-spaced line, which read as a wall), the type size never changes, and the slider's range moves the resume by
+  MANY bullets (the table in the test); the 20-bullet resume reaches 2 pages inside the range;
 - THE PREVIEW AND THE PDF ARE ONE RENDER: ``POST /api/tailored-resumes/preview`` answers as many page pictures as the
   PDF of the same header and spacing has pages (the route, and the CLI with the person's header file);
 - it OPENS at the fitted spacing (2 pages, nothing saved) and a spacing where 2 is not reached says "3 pages" plainly;
@@ -61,12 +62,16 @@ FORM = {
 #: Skills, kept together (0.3828..., 0.4104...).  0.3.3 (gigai-0rs) took the orphan rule out again (that piece moved
 #: whole and left a third of the page before it empty): the 3rd page holds the Skills' last two lines at 1.2 and the
 #: Skills (its title and all its lines, a step smaller) at 1.4 (0.1205...).  1.0 (2 pages) is as it was.
-BEFORE = {1.0: (2, 0.9829624277456647), 1.2: (3, 0.04132947976878614), 1.4: (3, 0.1205953757225434)}
+#: 0.3.5 (gigai-lc3): the bullet gap is 4pt at every spacing (was 1.7pt at 1.0), so at 1.0 the 3rd page holds the
+#: Skills' last two lines (the fill 1.2 had) and at 1.2 the Skills whole (as at 1.4, the gaps a step smaller); 1.4 is as it was.
+BEFORE = {1.0: (3, 0.04132947976878614), 1.2: (3, 0.11664161849710986), 1.4: (3, 0.1205953757225434)}
 #: Role bullets that fit on 2 pages, with the header's room kept (measured 2026-10-07 after part (d); part (a):
 #: 28 / 20 / 14 / 11; before 0.1.11.5: 19 at 0.7, 14 at 1.0).
 #: 0.1.11.5 PE (the gaps tighten faster below 1.0): 0.7 holds 36 (was 30) and 0.85 holds 26 (was 25); 1.0 and 1.4 as before.
 #: 0.1.11.5 PB5 (an entry splits across pages): 0.85 holds 27 (was 26: a role's last bullets no longer leave the page together).
-ROOM = {0.7: 36, 0.85: 27, 1.0: 21, 1.4: 17}
+#: 0.3.5 (gigai-lc3, readable at every spacing: 4pt between bullets, lines never under 12.5pt, the gap unit the
+#: scale's own below 1.0): 0.7 holds 27 (was 36), 0.85 holds 24 (was 27), 1.0 holds 19 (was 21), 1.4 holds 16 (was 17).
+ROOM = {0.7: 27, 0.85: 24, 1.0: 19, 1.4: 16}
 
 
 def _pages(pdf: bytes) -> int:
@@ -96,7 +101,7 @@ def _fits(spacing: float) -> int:
     return count
 
 
-def test_at_one_and_above_the_layout_is_what_it_was() -> None:
+def test_at_one_and_above_only_the_bullet_gap_moved() -> None:
     for spacing, (page, fill) in BEFORE.items():
         measured = measure_markdown(PICKED, spacing_scale=spacing, printed=True)
         assert measured[0] == page and measured[1] == pytest.approx(fill, abs=1e-12), f"the layout at {spacing} moved: {measured}"
@@ -105,10 +110,10 @@ def test_at_one_and_above_the_layout_is_what_it_was() -> None:
 
 def test_below_one_the_lines_tighten_down_to_the_readable_floor_and_the_type_never_shrinks() -> None:
     pitch, sizes = _body_lines(SPACING_MIN)
-    # The floor: the 9.5pt type's own single-spaced line (Inter: ascender + descender = 1.21 x the size), so a line's
-    # descenders never reach into the next line's ascenders.
-    assert pitch == 11.5 and pitch >= (0.96875 + 0.2412109375) * 9.5 and sizes == {9.5}
-    assert _body_lines(0.85) == (12.9, {9.5})
+    # The floor (0.3.5): 12.5pt, about 1pt of air over the 9.5pt type's own single-spaced line (Inter: ascender +
+    # descender = 1.21 x the size = 11.49pt, the floor until 0.3.4), so lines never read as one block.
+    assert pitch == 12.5 and pitch >= (0.96875 + 0.2412109375) * 9.5 + 1.0 and sizes == {9.5}
+    assert _body_lines(0.85) == (13.4, {9.5})
 
 
 def test_the_slider_range_moves_a_twenty_bullet_resume_by_many_bullets() -> None:
@@ -119,7 +124,9 @@ def test_the_slider_range_moves_a_twenty_bullet_resume_by_many_bullets() -> None
     # A page ESTIMATE (what a pick and the length rule budget with) keeps the full line height: it counts as it did.
     # 0.1.11.5 PB5: the estimate breaks its pages by the PDF's own rules, so at 0.7 it ends higher on page 2 (was
     # 0.9080881502890178: a role had left page 1 whole); at 0.85 no block had left a page early and nothing moved.
-    assert {spacing: measure_markdown(PICKED, spacing_scale=spacing) for spacing in (0.7, 0.85)} == {0.7: (2, pytest.approx(0.8202398843930637)), 0.85: (2, pytest.approx(0.9455252890173411))}
+    # 0.3.5 (gigai-lc3): the estimate's gaps are the PDF's (4pt between bullets; the unit the scale's own below 1.0),
+    # so it ends lower on page 2 (was 0.8202398843930637 at 0.7, 0.9455252890173411 at 0.85) and still on 2 pages.
+    assert {spacing: measure_markdown(PICKED, spacing_scale=spacing) for spacing in (0.7, 0.85)} == {0.7: (2, pytest.approx(0.8404927745664741)), 0.85: (2, pytest.approx(0.9676047687861271))}
 
 
 def _invoke(fx: PipelineFixture, *args: str) -> dict:
@@ -193,7 +200,7 @@ def test_the_preview_opens_fitted_on_two_pages_and_saves_nothing(fx: PipelineFix
     before = _home_files(fx)
     opened = server.preview(header=FORM)
     assert (opened["pages"], opened["max_pages"], opened["saved"], opened["note"]) == (2, 2, False, None)
-    assert opened["spacing_scale"] == 1.05 and opened["spacing"] == {"min": SPACING_MIN, "max": SPACING_MAX, "step": 0.05}
+    assert opened["spacing_scale"] == 0.95 and opened["spacing"] == {"min": SPACING_MIN, "max": SPACING_MAX, "step": 0.05}  # 0.3.5 (gigai-lc3): 0.95, was 1.05
     # Asked again it is the same spacing, and the PDF that names no spacing is rendered at it: the same 2 pages.
     assert server.preview(header=FORM)["spacing_scale"] == opened["spacing_scale"]
     fitted = server.pdf(header=FORM)
@@ -222,7 +229,7 @@ def test_the_preview_and_the_pdf_are_the_same_pages_at_every_spacing(fx: Pipelin
         # Without a header the count is the headerless PDF's (a blank block of the header's height is kept).
         assert server.preview()["pages"] == _pages(server.pdf().content)
         counts[spacing] = shown["pages"]
-    assert counts == {0.7: 2, 0.8: 2, 0.85: 2, 0.9: 2, 1.0: 2, 1.2: 3, 1.4: 3}
+    assert counts == {0.7: 2, 0.8: 2, 0.85: 2, 0.9: 2, 1.0: 3, 1.2: 3, 1.4: 3}  # 0.3.5 (gigai-lc3): 3 pages at 1.0, was 2
 
 
 def test_a_spacing_that_does_not_reach_two_pages_says_three_pages_plainly(fx: PipelineFixture, server: _Server) -> None:

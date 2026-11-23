@@ -36,6 +36,7 @@ from gigai.scout.resume_pdf import HEADER_RESERVE_LINES, _data, _end, parse_resu
 
 STAMP = datetime(2026, 10, 6, tzinfo=timezone.utc)
 MARKDOWN = "## Summary\n\nEngineer with twelve years on data platforms.\n\n## Skills\n\n- Python, Go\n"
+SUMMARY_START = "Engineer with twelve years"  # 0.3.5 (gigai-lc3): the Summary prints under the header with no title; its first words end the header
 NAME = "Zora Quillfeather"
 FORM = {
     "name": NAME, "email": "zq@example.invalid", "phone": "555-0142-ZQ", "location": "Quillshire, ZZ",
@@ -58,9 +59,9 @@ def _header(form: dict[str, object], title: str = ""):
             runs.append((round(abs(size * tm[3]), 2), text.strip()))
 
     text = page.extract_text(visitor_text=visit)
-    lines = [line.strip() for line in text.split("SUMMARY")[0].splitlines() if line.strip()]
+    lines = [line.strip() for line in text.split(SUMMARY_START)[0].splitlines() if line.strip()]
     assert lines[0] == NAME.upper()
-    stop = next(index for index, (_size, run) in enumerate(runs) if run == "SUMMARY")
+    stop = next(index for index, (_size, run) in enumerate(runs) if run.startswith(SUMMARY_START))
     targets = [annotation.get_object()["/A"]["/URI"] for annotation in page.get("/Annots", [])]
     return lines[1:], [size for size, _run in runs[1:stop]], targets
 

@@ -10,12 +10,12 @@ synthetic data (``tests/support/resume_spacing_fixture.py`` and ``tests/support/
 - EARLIER EXPERIENCE has no title of its own with 3 roles or fewer (its lines follow the last role, newest first)
   and keeps it with 4 or more;
 - SKILLS are plain comma-separated lines, at most 4, what the posting asks for first, no skill twice, nothing that
-  the master does not list; a list too long for 4 lines even at 8.3pt is cut from the end and nothing marks the cut;
+  the master does not list; a list too long for 4 lines even at 8pt is cut from the end and nothing marks the cut;
 - THE SUMMARY is a plain paragraph at the left margin (no bullet, no indent);
 - ONE RENDER PATH: the stored resume and its own markdown give the template the same data, and the preview's
   pictures are the PDF's pages;
 - WHAT IS NOT ONE OF THE FOUR BLOCKS DOES NOT MOVE at 1.0 and above (where the roles and the project end is what the
-  template before this change measured, to the last digit);
+  template measured at 0.3.5 (gigai-lc3: the 4pt bullet gap, Regular 400 and the one-line role), to the last digit);
 - THE PAGES: both fixtures with a header fit 2 pages at the automatic spacing, and that spacing is 0.85 or looser;
 - AN EDITED RESUME is set by the same rules and none of its words change: every stored line is in the PDF as it is
   stored, and rendering writes nothing.
@@ -97,6 +97,14 @@ def _section(rows: list[tuple[int, float, float, float, str]], title: str) -> li
     return rows[start + 1 : end]
 
 
+def _summary(rows: list[tuple[int, float, float, float, str]]) -> list[tuple[int, float, float, float, str]]:
+    """The rows of the leading Summary: 0.3.5 (gigai-lc3) prints it under the header with no title, so it is every
+    body-size row before the first section title."""
+
+    end = next(index for index, row in enumerate(rows) if row[3] == SECTION_TITLE)
+    return [row for row in rows[:end] if row[3] == 9.5]
+
+
 def _lines(rows: list[tuple[int, float, float, float, str]]) -> list[str]:
     """The printed lines of ``rows``: the runs that share a page and a baseline, joined."""
 
@@ -174,7 +182,7 @@ def test_earlier_experience_has_no_title_of_its_own_with_three_roles_or_fewer_an
         following = min(index for index in (markdown.find("\n### ", start), markdown.find("\n## ", start)) if index != -1)
         markdown = markdown[:start] + markdown[following + 1 :]
     result = _picked(markdown)
-    listed = [f"{title}, {company} {dates}" for company, title, dates in cap.EARLIER[:roles]]
+    listed = [f"{title}, {company} | {dates}" for company, title, dates in cap.EARLIER[:roles]]  # 0.3.5: a role line prints "Title | dates"
     experience = _lines(_section(_rows(_pdf(result)), "EXPERIENCE"))
     titled = EARLIER_HEADING.upper() in experience
     assert titled is (roles >= EARLIER_TITLE_MIN), f"{roles} earlier roles: the title is {'printed' if titled else 'not printed'}"
@@ -192,8 +200,9 @@ def test_earlier_experience_in_resume_markdown_follows_the_same_rule() -> None:
         text = spacing_fixture.resume(5).replace("\n".join(spacing_fixture.EARLIER), "\n".join(spacing_fixture.EARLIER[:roles]))
         return _lines(_section(_rows(resume_pdf.render_markdown_pdf(text, None, timestamp=STAMP, spacing_scale=1.0, auto_fit=False).pdf), "EXPERIENCE"))
 
-    assert EARLIER_HEADING.upper() not in experience(3) and experience(3)[-3:] == [role.replace(" | ", " ") for role in spacing_fixture.EARLIER[:3]]
-    assert experience(4)[-5:] == [EARLIER_HEADING.upper(), *(role.replace(" | ", " ") for role in spacing_fixture.EARLIER)]
+    # 0.3.5 (gigai-lc3): a role line prints as the source writes it, "Title | dates", the dates after a pipe on the title's line.
+    assert EARLIER_HEADING.upper() not in experience(3) and experience(3)[-3:] == list(spacing_fixture.EARLIER[:3])
+    assert experience(4)[-5:] == [EARLIER_HEADING.upper(), *spacing_fixture.EARLIER]
 
 
 # --- (3) the Skills ------------------------------------------------------------------------------------------------
@@ -203,7 +212,10 @@ def _skills(pdf: bytes) -> tuple[list[str], list[tuple[int, float, float, float,
     """``(the names the PDF prints, the printed rows)`` of the Skills section."""
 
     rows = _section(_rows(pdf), "SKILLS")
-    return [name.strip() for name in " ".join(row[4] for row in rows).split(",") if name.strip()], rows
+    # 0.3.5 (gigai-lc3): at Regular 400 Typst ends a run of text at the "/" of "CI/CD" (a break opportunity), so the
+    # name arrives as two rows on one baseline; joined with a space they would read "CI/ CD".  The PDF prints no
+    # space there (``extract_text`` without a visitor reads "CI/CD").
+    return [name.strip() for name in " ".join(row[4] for row in rows).replace("/ ", "/").split(",") if name.strip()], rows
 
 
 def _with_skills(*lines: str) -> str:
@@ -244,7 +256,7 @@ def test_a_list_too_long_for_four_lines_is_cut_from_the_end_and_nothing_marks_th
     result = _picked(_with_skills(cap.SKILLS, ", ".join(extra)))
     names, rows = _skills(_pdf(result))
     assert len({(row[0], row[1]) for row in rows}) == 4, "a long Skills list does not take exactly 4 lines"
-    assert {row[3] for row in rows} == {8.3}, "a long list is not set at the smallest Skills size before it is cut"
+    assert {row[3] for row in rows} == {8.0}, "a long list is not set at the smallest Skills size before it is cut"
     whole = [name for name in " ".join(section.lines[0].text for section in result.sections if section.heading == "skills").lstrip("- ").split(", ")]
     assert len(whole) == 156 and 40 < len(names) < len(whole)
     assert names == whole[: len(names)], "what is printed is not the front of the list, in its order"
@@ -253,7 +265,7 @@ def test_a_list_too_long_for_four_lines_is_cut_from_the_end_and_nothing_marks_th
     assert "..." not in text and "…" not in text and "more" not in text.casefold(), "the cut is marked"
     # A list that fits in 4 lines at a smaller size is printed whole at that size.
     some, some_rows = _skills(_pdf(_picked(_with_skills(cap.SKILLS, ", ".join(extra[:10])))))
-    assert len(some) == 46 and len({(row[0], row[1]) for row in some_rows}) == 4 and {row[3] for row in some_rows} < {9.0, 8.5, 8.3}
+    assert len(some) == 46 and len({(row[0], row[1]) for row in some_rows}) == 4 and {row[3] for row in some_rows} < {9.0, 8.5, 8.3, 8.0}
 
 
 # --- (4) the Summary -----------------------------------------------------------------------------------------------
@@ -263,7 +275,7 @@ def test_the_summary_is_a_plain_paragraph_at_the_left_margin() -> None:
     result = _picked()
     stored = next(section for section in result.sections if section.heading == "summary")
     assert stored.lines[0].text.startswith("- "), "the fixture's Summary is not stored as a bullet"
-    rows = _section(_rows(_pdf(result)), "SUMMARY")
+    rows = _summary(_rows(_pdf(result)))
     assert {row[2] for row in rows} == {LEFT}, "the Summary is indented"
     assert not any("•" in row[4] for row in rows), "the Summary has a bullet"
     assert _squashed(" ".join(row[4] for row in rows)) == _squashed(shown_text(stored.lines[0]))
@@ -278,7 +290,11 @@ def test_the_summary_is_a_plain_paragraph_at_the_left_margin() -> None:
 #: 0.1.11.5 PB5 (an entry splits across pages) moved 1.2 on purpose, from (2, 0.6041618497109827): there a role had left
 #: page 1 whole and page 2 began with it; page 1 now runs to its foot and page 2 ends higher.  1.0 and 1.4, where no
 #: block had left a page early, are as they were to the last digit.
-UNMOVED = {1.0: (2, 0.45052023121387297), 1.2: (2, 0.5126069364161852), 1.4: (2, 0.6239306358381504)}
+#: 0.3.5 (gigai-lc3): every spacing moved on purpose, from (2, 0.4505...), (2, 0.5126...), (2, 0.6239...): the bullet gap
+#: is a constant 4pt (was 2 * 1.71pt * scale), the role line prints "Title | dates" on one line and the body is
+#: Regular 400, wider than Light 300, so more bullets wrap.  The rule the test keeps: the roles end where the PDF
+#: prints them at 1.0 and above, and nothing moves between runs.
+UNMOVED = {1.0: (2, 0.5108670520231215), 1.2: (2, 0.6210520231213873), 1.4: (2, 0.6378554913294799)}
 
 
 def test_at_one_and_above_the_roles_their_bullets_and_the_project_end_where_they_did() -> None:
@@ -296,9 +312,11 @@ def test_at_one_and_above_the_roles_their_bullets_and_the_project_end_where_they
 #: spacing fixture 3 pages at 1.0 and automatic 0.85; the pick fixture 3 pages at 1.0 and automatic 0.95.
 #: 0.1.11.5 PB5 (an entry splits across pages): the pick fixture's automatic spacing is 1.25 (was 1.0: from 1.05 up a
 #: role that did not fit page 1 left it whole, and the resume ran to a 3rd page).
+#: 0.3.5 (gigai-lc3): the spacing fixture is 3 pages at 1.0 and automatic 0.95 (were 2 and 1.05): the 4pt bullet gap,
+#: the 12.5pt line floor and Regular 400 hold fewer lines on a page; the pick fixture's automatic spacing is 1.3 (was 1.25).
 PAGES = {
-    "spacing_fixture": ({1.0: 2, 0.85: 2, 0.75: 2, 0.7: 2}, 1.05),
-    "pick_cap_fixture": ({1.0: 2, 0.85: 2, 0.75: 2, 0.7: 2}, 1.25),
+    "spacing_fixture": ({1.0: 3, 0.85: 2, 0.75: 2, 0.7: 2}, 0.95),
+    "pick_cap_fixture": ({1.0: 2, 0.85: 2, 0.75: 2, 0.7: 2}, 1.3),
 }
 
 
@@ -353,10 +371,10 @@ def test_an_edited_resume_is_set_by_the_same_rules_and_none_of_its_words_change(
         "EXAMPLE STATE UNIVERSITY | M.S., Information Systems 2010 - 2012", "EXAMPLE INSTITUTE OF TECHNOLOGY | B.Tech., Computer Science 2000 - 2004",
     ]
     experience = _lines(_section(rows, "EXPERIENCE"))
-    assert EARLIER_HEADING.upper() not in experience and experience[-3:] == [role.replace(" | ", " ") for role in spacing_fixture.EARLIER[:3]]
+    assert EARLIER_HEADING.upper() not in experience and experience[-3:] == list(spacing_fixture.EARLIER[:3])  # 0.3.5: "Title | dates" on one line
     names, skill_rows = _skills(rendered.pdf)
     assert names == [name.strip() for name in spacing_fixture.SKILLS.split(",")] and len({(row[0], row[1]) for row in skill_rows}) <= 4
-    assert {row[2] for row in _section(rows, "SUMMARY")} == {LEFT}
+    assert {row[2] for row in _summary(rows)} == {LEFT}
     # WHAT IT LOSES: the three words of the block's title, and nothing else.  Every line it stores is printed as stored.
     printed = _printed(rendered.pdf)
     stored_lines = [

@@ -58,7 +58,6 @@ from tests.behaviors.scout_find_jobs.test_pick_header_room import (
     _bullets,
     _cli_pdf,
     _no_layout_in_the_pick,
-    _header_lines,
     _line,
     _ok,
     _pages,
@@ -191,7 +190,9 @@ def test_a_role_none_of_whose_lines_is_shown_still_prints_its_heading_in_the_mar
     # counted none), and the three roles are in its text, newest first.
     payload, pages = _cli_pdf(fx, tmp_path)
     text = "\n".join(pages)
-    assert len(_header_lines(pages[0])) == 3, f"the header is not at its largest: {_header_lines(pages[0])}"
+    # 0.3.5 (gigai-lc3): the Summary prints under the header with no title; its first words end the header.
+    header = [line for line in pages[0].split("Engineer with 14+ years")[0].splitlines() if line.strip()]
+    assert len(header) == 3, f"the header is not at its largest: {header}"
     assert len(pages) == payload["pages"] >= 2, f"the PDF with the header is {len(pages)} pages; it says {payload['pages']}"
     # 0.1.11.5 (d): three roles or fewer have no title of their own in the PDF; their lines follow the last role.
     assert len(OLD) < EARLIER_TITLE_MIN and EARLIER_HEADING.upper() not in text

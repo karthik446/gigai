@@ -61,10 +61,11 @@ HEADER_TEXT = (
 
 
 def _is_the_four_line_header(page: str) -> bool:
-    """The page starts with the four header lines (where the contact line wraps is the layout's business)."""
+    """The page starts with the four header lines (where the contact line wraps is the layout's business), then the
+    Summary's own text (0.3.5, gigai-lc3: it prints under the header with no title)."""
 
     lines = [line.strip() for line in page.splitlines()]
-    return "".join("".join(lines[:4]).split()) == "".join(HEADER_TEXT.split()) and lines[4] == "SUMMARY"
+    return "".join("".join(lines[:4]).split()) == "".join(HEADER_TEXT.split()) and lines[4].startswith("Engineer with twelve years building data platforms")
 SKILLS = (
     "Python, Go, TypeScript, Kubernetes, PostgreSQL, Terraform, AWS, GCP, Kafka, Redis, Airflow, dbt, Snowflake, Spark, Docker, Helm, ArgoCD, "
     "Prometheus, Grafana, OpenTelemetry, gRPC, GraphQL, React, Node.js, FastAPI, PyTorch, LangChain, RAG, Vector search, CI/CD"
@@ -96,17 +97,17 @@ def resume(long_lines: int = 0, short_lines: int = 3, roles: int = 5) -> str:
 #: The failing size: 2 pages where the fit measures (spacing 0.9), a 3rd page of skills at the saved spacing 1.0.
 #: (0.1.11.5 (d): the Skills are plain lines and a degree is one line, so every size here is longer than it was.)
 #: (0.1.11.5 PB5: a role splits across pages, so the two-line size no longer needs a 3rd page at 1.0; three extra lines do.)
-FAILING = resume(long_lines=3)
-#: (0.1.11.5 PE: below 1.0 the gaps tighten faster, so the three sizes below are longer again: 8 / 14 / 18 extra
-#: lines, were 7 / 9 / 13.)
+#: (0.3.5, gigai-lc3: a 4pt bullet gap, a 12.5pt line floor and Regular 400 hold fewer lines on a page, so every size
+#: here is shorter again: 3+1 / 4+4 / 6+3 extra lines, were 3 / 8 / 14; 18 is still 3 pages whatever is done.)
+FAILING = resume(long_lines=3, short_lines=1)
 #: Longer: 3 pages at every spacing above the floor (0.8), 2 pages there.
-NEEDS_FLOOR = resume(long_lines=8, short_lines=3)
+NEEDS_FLOOR = resume(long_lines=4, short_lines=4)
 #: Longer: 2 pages only at the tightest spacing.
-NEEDS_TIGHTEST = resume(long_lines=14, short_lines=3)
+NEEDS_TIGHTEST = resume(long_lines=6, short_lines=3)
 #: Longer still: 3 pages whatever is done.
 TOO_LONG = resume(long_lines=18, short_lines=3)
 #: The master: nine roles, 4 pages. ``FAILING`` is its first five roles, line for line.
-LONG = resume(long_lines=3, roles=9)
+LONG = resume(long_lines=3, short_lines=1, roles=9)
 
 
 def _pages(pdf: bytes) -> list[str]:

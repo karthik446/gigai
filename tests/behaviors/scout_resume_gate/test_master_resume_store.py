@@ -411,7 +411,7 @@ def test_the_stored_master_is_a_printable_resume_in_the_shipped_format(tmp_path:
     # 1.0. Auto fit ends it on 6 since 0.1.11.5 (below 1.0 the spacing also tightens the body's lines: 7; then part
     # (d) set the Skills as plain lines and a degree on one line: 6).
     assert render_markdown_pdf(markdown, None, timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc), spacing_scale=1.0, auto_fit=False).pages == 8
-    assert render_markdown_pdf(markdown, None, timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc)).pages == 6
+    assert render_markdown_pdf(markdown, None, timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc)).pages == 7  # 0.3.5 (gigai-lc3): 7, the 4pt bullet gap, 12.5pt line floor and Regular 400 hold fewer lines
     assert "<!--" not in stored.master.markdown(ids=False)
 
 

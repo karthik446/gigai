@@ -108,7 +108,7 @@ def test_the_parsed_shape_and_the_header_comes_from_the_form_not_the_markdown() 
     rendered = render_markdown_pdf(MARKDOWN, PdfHeader("Sam Saved", "", ()), timestamp=STAMP)
     text = _text(rendered.pdf)
     assert rendered.pdf.startswith(b"%PDF") and rendered.pages == len(PdfReader(io.BytesIO(rendered.pdf)).pages) == 1
-    assert text.startswith("SAM SAVED\nSUMMARY")
+    assert text.startswith("SAM SAVED\nPlatform engineer with nine years building billing systems.")  # 0.3.5: the leading Summary has no title
     assert "riley@example.test" not in text and "555-010-0100" not in text and "RILEY EXAMPLE" not in text
     assert "<!--" not in text and "edited" not in text and "Ran the release calendar for 4 teams." in text
 
@@ -177,14 +177,14 @@ def test_cli_renders_markdown_headerless_with_the_saved_layout_and_creates_nothi
     code, payload = _cli("--in", str(source), "--out", str(out), "--home", str(home))
     assert code == 0 and payload["ok"] is True and payload["source"] == "markdown" and payload["pages"] == 1
     assert out.read_bytes().startswith(b"%PDF") and payload["bytes"] == out.stat().st_size
-    assert _text(out.read_bytes()).startswith("SUMMARY")
+    assert _text(out.read_bytes()).startswith("Platform engineer with nine years")  # 0.3.5 (gigai-lc3): the leading Summary has no title
     assert not home.exists(), "rendering a file creates no GigAI home or Scout folder"
 
     # The saved layout is followed; a saved title does not print on a headerless PDF.
     save_display(home, DisplaySettings({"prof_1": "Staff Engineer"}, spacing_scale=0.8, auto_fit=False))
     code, payload = _cli("--in", str(source), "--out", str(out), "--home", str(home), "--profile", "prof_1")
     assert code == 0 and payload["spacing_scale"] == 0.8
-    assert _text(out.read_bytes()).startswith("SUMMARY")
+    assert _text(out.read_bytes()).startswith("Platform engineer with nine years")
     saved_bytes = out.read_bytes()
 
     # --spacing overrides for this render only; --auto-fit picks the scale.

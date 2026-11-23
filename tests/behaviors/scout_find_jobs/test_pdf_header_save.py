@@ -411,7 +411,8 @@ def test_the_command_prints_the_real_fields_and_no_placeholder_into_the_pdf(fx: 
     assert answer["header_note"].endswith("header.json still has placeholder values: replace the REPLACE: fields (or save your details here). Skipped: location, links, work_authorization.")
     text = _text(fx["out"])
     squeezed = "".join(text.split())
-    assert squeezed.startswith("ZORAQUILLFEATHER" + "github.com/zq-invalid-7731|555-0142-ZQ" + "SUMMARY"), text[:300]
+    # 0.3.5 (gigai-lc3): the Summary prints under the header with no title, so its own line follows the contact line.
+    assert squeezed.startswith("ZORAQUILLFEATHER" + "github.com/zq-invalid-7731|555-0142-ZQ" + "Platformengineerwithnineyears"), text[:300]
     assert "REPLACE" not in text, "no placeholder prints"
     _no_placeholder(text, made.output)
     _silent(made.output.replace(str(fx["home"]), "").replace(str(fx["work"]), ""))

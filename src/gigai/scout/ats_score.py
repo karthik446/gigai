@@ -5,7 +5,8 @@ Three parts, 100 points in all:
 
 * **Parse fidelity (40)**: what the extracted text keeps of the source the PDF was rendered from (words,
   section headings, date ranges, an email, and role lines whose title and dates stay adjacent).  Scout holds
-  the source, so this is a diff against known truth, never a guess at fields.
+  the source, so this is a diff against known truth, never a guess at fields.  One heading may go unprinted:
+  a leading Summary whose own text is the first body block (0.3.5: how Scout prints it) counts as found.
 * **Keyword coverage (40)**: posting must-haves (weight 2), nice-to-haves and title words (weight 1), matched
   on word boundaries with the shipped alias table against the EXTRACTED text, i.e. what a reader sees.
 * **Format rules (20)**: text layer, single column, no tables, no images, fonts embedded, plain characters,
@@ -45,6 +46,9 @@ _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 _FILE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*-\d{4}-\d{2}-\d{2}\.pdf$")
 _WORD = re.compile(r"[a-z0-9][a-z0-9+#.]*[a-z0-9+#]|[a-z0-9]")
 _ROLE_LINE = re.compile(r"(?m)^(.+?) \| ((?:[A-Z][a-z]{2} )?\d{4} - .+)$")
+_SUMMARY_BODY = re.compile(r"(?ims)^## summary[ \t]*$\n(.*?)(?=^## |\Z)")
+_SUMMARY_TITLE = re.compile(r"(?im)^## summary[ \t]*$\n?")
+_SUMMARY_OPENING_WORDS = 5
 _LETTER_SPACED = re.compile(r"(?:\b\S {1,2}){5,}\S\b")  # "J O R D A N" (tracking can double the gaps)
 _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _SECOND_COLUMN_START = 0.30  # a row whose FIRST fragment starts past this share of the page width
@@ -144,24 +148,45 @@ def _row_order_text(frags: list[tuple[int, int, float, str, float]]) -> str:
 
 
 def _entries_intact(text: str, markdown: str) -> float:
-    """Share of source role lines ("Title | dates") that come out with title and dates adjacent.
+    """Share of source role lines ("Title | dates") that come out with title and dates adjacent: white space or the
+    source's own " | " between them (0.3.5: Scout prints the dates on the title's line after a pipe).
 
     1 when the source has no such line: nothing to split.  A degree's one line (0.1.11.5 (d): ``### School | Degree
     | dates``) is read as its last part and its dates (``Degree``, ``dates``): the school is the entry's heading."""
     roles = [(title.rsplit(" | ", 1)[-1], dates) for title, dates in _ROLE_LINE.findall(markdown)]
     if not roles:
         return 1.0
-    ok = sum(1 for title, dates in roles if re.search(re.escape(title) + r"\s+" + re.escape(dates).replace("\\ ", r"\s+"), text))
+    ok = sum(1 for title, dates in roles if re.search(re.escape(title) + r"\s+(?:\|\s+)?" + re.escape(dates).replace("\\ ", r"\s+"), text))
     return ok / len(roles)
 
 
-def _fidelity(markdown: str, read: _Read) -> tuple[float, dict[str, object]]:
-    source_words = [w for w in _words(re.sub(r"(?m)^#+\s*|^- ", "", markdown)) if len(w) > 2]
+def _summary_leads(markdown: str, read: _Read) -> bool:
+    """Whether the source Summary's own text is the first body block of the PDF: before every other source heading.
+
+    0.3.5 (gigai-lc3): Scout prints a leading Summary under the header with no title of its own, as the reference
+    resumes do; its heading then counts as printed (fidelity's headings and their words, the standard-headings
+    rule).  Only the Summary: every other heading must be printed."""
+    body = _SUMMARY_BODY.search(markdown)
+    first = next((line.strip()[2:] if line.strip().startswith("- ") else line.strip() for line in (body.group(1) if body else "").splitlines() if line.strip()), "")
+    opening = " ".join(first.split()[:_SUMMARY_OPENING_WORDS]).upper()
+    if not opening:
+        return False
+    headings = {h.strip().upper() for h in re.findall(r"(?m)^## (.+)$", markdown)} - {"SUMMARY"}
+    lines = read.text.splitlines()
+    start = next((index for index, line in enumerate(lines) if opening in " ".join(line.split()).upper()), None)
+    first_heading = next((index for index, line in enumerate(lines) if line.strip().upper() in headings), len(lines))
+    return start is not None and start < first_heading
+
+
+def _fidelity(markdown: str, read: _Read, untitled_summary: bool) -> tuple[float, dict[str, object]]:
+    # An untitled leading Summary: its heading's word is not a word to recall, and the heading counts as found.
+    source = _SUMMARY_TITLE.sub("", markdown) if untitled_summary else markdown
+    source_words = [w for w in _words(re.sub(r"(?m)^#+\s*|^- ", "", source)) if len(w) > 2]
     got_words = set(_words(read.text))
     recall = sum(w in got_words for w in source_words) / max(1, len(source_words))
     lines = {line.strip().upper() for line in read.text.splitlines()}
     wanted = {h.strip().upper() for h in re.findall(r"(?m)^## (.+)$", markdown)}
-    found = wanted & lines
+    found = wanted & lines | ({"SUMMARY"} & wanted if untitled_summary else set())
     source_dates, got_dates = len(_DATE_RANGE.findall(markdown)), len(_DATE_RANGE.findall(read.text))
     # Kept when the source has none to lose: Scout's markdown never holds one and an agent's PDF has no header.
     email = _EMAIL.search(read.text) is not None or _EMAIL.search(markdown) is None
@@ -199,9 +224,9 @@ def _coverage(keywords: PostingKeywords, text: str) -> tuple[float, dict[str, ob
     }
 
 
-def _format(read: _Read, file_name: str | None, markdown: str) -> tuple[float, dict[str, object]]:
+def _format(read: _Read, file_name: str | None, markdown: str, untitled_summary: bool) -> tuple[float, dict[str, object]]:
     odd = sum(1 for ch in read.text if 0x1D400 <= ord(ch) <= 0x1D7FF or 0xE000 <= ord(ch) <= 0xF8FF)
-    heads = {line.strip().upper() for line in read.text.splitlines()}
+    heads = {line.strip().upper() for line in read.text.splitlines()} | ({"SUMMARY"} if untitled_summary else set())
     share = _first_column_share(read.frags)
     rules = {
         # Most of a page's worth of text, or of the source's when the resume itself is shorter than that.
@@ -235,9 +260,10 @@ def score(pdf_bytes: bytes, source: str | TailoredResume, keywords: PostingKeywo
     except Exception:  # noqa: BLE001 - pypdf raises many types on damaged or encrypted input; all mean "no readable text layer"
         return _unreadable()
     markdown = _source_markdown(source)
-    fidelity, fidelity_detail = _fidelity(markdown, read)
+    untitled_summary = "SUMMARY" not in {line.strip().upper() for line in read.text.splitlines()} and _summary_leads(markdown, read)
+    fidelity, fidelity_detail = _fidelity(markdown, read, untitled_summary)
     coverage, coverage_detail = _coverage(keywords, read.text)
-    fmt, format_detail = _format(read, file_name, markdown)
+    fmt, format_detail = _format(read, file_name, markdown, untitled_summary)
     failed = format_detail["failed"]
     assert isinstance(failed, list)
     total = min([round(fidelity + coverage + fmt), *(CAPS[rule] for rule in failed if rule in CAPS)])

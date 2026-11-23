@@ -23,6 +23,8 @@ from gigai.scout.pdf_header_file import SPONSORSHIP_DEFAULT
 from tests.behaviors.scout_find_jobs.test_pdf_header_file import FILE, MARKERS
 
 MARKDOWN = "## Summary\n\n- Platform engineer with nine years building billing systems.\n\n## Skills\n\n- Python, SQL\n"
+#: 0.3.5 (gigai-lc3): the Summary prints under the header with no title, so its own line is the first after the header.
+SUMMARY_LINE = "Platform engineer with nine years building billing systems."
 #: 0.1.11.3 items 15/16: ONE contact line: location | work authorization | links | email | phone.
 CONTACT = "Quillshire, ZZ | VISA: H1B (ZQ-7731) | github.com/zq-invalid-7731 | zq-invalid-7731.example.invalid | linkedin.com/in/zq-invalid-7731 | zora.q@example.invalid | 555-0142-ZQ"
 
@@ -91,7 +93,7 @@ def test_header_file_makes_the_full_pdf_and_prints_no_value(fx: dict[str, Path])
     assert payload["header"] is True and payload["header_file"] == str(fx["header"]) and payload["header_note"] is None
     assert payload["finish_url"] is None and payload["in_resumes_folder"] is False, "nothing is left to finish in the browser"
     assert _line(fx["out"]) == "ZORAQUILLFEATHER"
-    assert _squeezed(fx["out"]).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT, "SUMMARY")), _lines(fx["out"])[:5]
+    assert _squeezed(fx["out"]).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT, SUMMARY_LINE)), _lines(fx["out"])[:5]
     _silent(done.output)
     text = _pdf(fx, "--out", str(fx["out"]), "--header", str(fx["header"]), as_json=False)
     assert text.exit_code == 0 and f"with your name and contact details from {fx['header']}." in text.output
@@ -117,14 +119,14 @@ def test_the_default_file_is_used_with_out_and_never_for_the_resumes_folder(fx: 
     assert payload["header_note"].endswith("was not used: pass --out FILE to make the PDF with your name and contact details.")
     assert payload["finish_url"], "the headerless PDF is still finished in Scout"
     saved = [path for path in (fx["home"] / "resumes").iterdir() if path.suffix == ".pdf"]
-    assert len(saved) == 1 and _line(saved[0]) == "SUMMARY"
+    assert len(saved) == 1 and _line(saved[0]) == _squeeze(SUMMARY_LINE)
     _silent(in_folder.output.replace(str(fx["home"]), ""))
 
     # --no-header: headerless to --out too, and the file is not even mentioned.
     fx["out"].unlink()
     plain = _pdf(fx, "--out", str(fx["out"]), "--no-header")
     assert plain.exit_code == 0 and json.loads(plain.output)["header"] is False and json.loads(plain.output)["header_note"] is None
-    assert _line(fx["out"]) == "SUMMARY"
+    assert _line(fx["out"]) == _squeeze(SUMMARY_LINE)
     _disk_is_clean(fx)
 
 
@@ -133,7 +135,7 @@ def test_no_header_file_changes_nothing(fx: dict[str, Path]) -> None:
     assert done.exit_code == 0, done.output
     payload = json.loads(done.output)
     assert payload["header"] is False and payload["header_file"] is None and payload["header_note"] is None and payload["finish_url"]
-    assert _line(fx["out"]) == "SUMMARY"
+    assert _line(fx["out"]) == _squeeze(SUMMARY_LINE)
 
 
 def test_a_file_other_users_can_read_is_used_and_warned_about(fx: dict[str, Path]) -> None:
@@ -211,7 +213,7 @@ def test_the_work_authorization_line_file_then_the_profiles_sponsorship_answer(f
         short = {**content, "links": []}  # a contact line that does not wrap
         done = _pdf(fx, "--out", str(fx["out"]), "--header", str(_header(fx["header"], short)), "--target", str(target))
         assert done.exit_code == 0, done.output
-        assert _line(fx["out"], 2) == "SUMMARY", "the header is the name and one line"
+        assert _line(fx["out"], 2) == _squeeze(SUMMARY_LINE), "the header is the name and one line"
         return _line(fx["out"], 1)
 
     plain = _squeeze("Quillshire, ZZ | zora.q@example.invalid | 555-0142-ZQ")

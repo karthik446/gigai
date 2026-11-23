@@ -198,7 +198,8 @@ def _earlier_entry(roles: list[str]) -> dict[str, object]:
 
 
 def _heading_line(text: str) -> dict[str, str]:
-    """A role line \"Title | Jun 2022 - Present\" splits so the dates can sit at the right margin."""
+    """A role line \"Title | Jun 2022 - Present\" splits into text and dates; the template prints a role's as
+    ``Title | dates`` on one line (0.3.5) and a degree's or a project's years at the right margin."""
     shown = _flat(_display(text))
     head, sep, tail = shown.rpartition(" | ")
     if sep and _YEAR.search(tail):
@@ -433,8 +434,9 @@ def _estimate(sections: list[dict[str, object]], spacing_scale: float, header_li
     its largest (``HEADER_RESERVE_LINES``).  No PDF is compiled.
 
     0.1.11.5: an estimate keeps the body's FULL line height at every spacing (the template's ``fixed_lines``), as
-    it did before the spacing scale also tightened the lines: what a pick or the length rule budgets does not move,
-    and the PDF, whose lines do tighten below 1.0, never takes more pages than the estimate counted.  ``printed``
+    it did before the spacing scale also tightened the lines; every gap is the PDF's own (0.3.5: the bullet gap is
+    a constant 4pt, the rest the unit's multiples at every scale).  What a pick or the length rule budgets does not
+    move, and the PDF, whose lines do tighten below 1.0, never takes more pages than the estimate counted.  ``printed``
     measures as the PDF prints instead."""
     root = resources.files("gigai.scout").joinpath("data", "resume")
     with ExitStack() as stack:

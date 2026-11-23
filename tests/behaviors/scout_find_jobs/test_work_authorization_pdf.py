@@ -106,7 +106,8 @@ def test_generate_pdf_with_the_line_still_fits_the_picks_two_pages(fx, monkeypat
         response = client.post("/api/tailored-resumes/pdf", json={**key, "header": {**LONG_FORM, "work_authorization": LINE}})
         assert response.status_code == 200, response.text
         pages = [page.extract_text() for page in PdfReader(io.BytesIO(response.content)).pages]
-        header = " ".join(line.strip() for line in pages[0].split("SUMMARY")[0].splitlines())
+        # 0.3.5 (gigai-lc3): the Summary prints under the header with no title; its first words end the header.
+        header = " ".join(line.strip() for line in pages[0].split("Engineer with twelve years")[0].splitlines())
         assert f"Nowhere Springs, Colorado | {LINE} | linkedin.example.invalid" in header, "the line is in the contact line, after the location"
         assert len(pages) == 2, f"Generate PDF made {len(pages)} pages; the last holds: {pages[-1][:80]!r}"
         assert "x-gigai-fit-note" not in response.headers

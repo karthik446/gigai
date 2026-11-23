@@ -160,14 +160,17 @@ def test_an_agent_changes_two_bullets_and_renders_a_new_pdf(tmp_path: Path, monk
         assert _pages(from_markdown.content) == _pages(stored_pdf.content) == int(from_markdown.headers["x-gigai-pages"]) == 1
         assert from_markdown.headers["x-gigai-finish-url"] == f"http://127.0.0.1:{server.port}/#/pdf"
         assert stored_pdf.headers["x-gigai-finish-url"].startswith(f"http://127.0.0.1:{server.port}/#/pdf/")
+        # 0.3.5 (gigai-lc3): the leading Summary prints with no title, so the first printed line is its own text (the
+        # fixture's summary is the one line "## Experience").
+        assert markdown.startswith("## Summary\n\n- ## Experience <!--")
         header_area = _text(from_markdown.content).split("\n")[0]
-        assert header_area == "SUMMARY" and "RILEY" not in _text(from_markdown.content), "no header: GigAI stores no name or contact details"
+        assert header_area == "## Experience" and "RILEY" not in _text(from_markdown.content), "no header: GigAI stores no name or contact details"
 
         # An agent's own markdown: no header, and the markdown's own name/contact lines never print.
         own = client.post(md_url, json={"markdown": _OWN_MARKDOWN, "spacing_scale": 0.8})
         assert own.status_code == 200 and own.headers["x-gigai-spacing-scale"] == "0.8", own.text
         own_text = _text(own.content)
-        assert own_text.startswith("SUMMARY") and "riley@example.test" not in own_text and "RILEY" not in own_text
+        assert own_text.startswith("Clinical applications manager") and "riley@example.test" not in own_text and "RILEY" not in own_text
         assert "555-010-0100" not in own_text and _MARKER in own_text and "Python, SQL, HL7" in own_text
         looser = client.post(md_url, json={"markdown": _OWN_MARKDOWN, "spacing_scale": 1.4, "auto_fit": False})
         assert looser.status_code == 200 and looser.headers["x-gigai-spacing-scale"] == "1.4" and looser.content != own.content

@@ -268,7 +268,8 @@ def server(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch):
 
 
 def _header_lines(page: str) -> list[str]:
-    return [line.strip() for line in page.split("SUMMARY")[0].splitlines() if line.strip()]
+    # 0.3.5 (gigai-lc3): the Summary prints under the header with no title; its first words end the header.
+    return [line.strip() for line in page.split("Engineer with twelve years")[0].splitlines() if line.strip()]
 
 
 # --- the pick holds its bullets and counts no page; the PDF says its real pages ------------------------------------------

@@ -231,14 +231,62 @@ def test_a_headerless_render_scores_like_a_headered_one(markdown: str) -> None:
     assert headerless.score == headered.score >= 90 and headerless.fidelity == headered.fidelity == 40.0, (headerless.line, headered.line)
     assert headerless.breakdown["fidelity"]["lost"] == [] and ": parses cleanly · " in headerless.line  # type: ignore[index]
     text = "\n".join(page.extract_text(space_width=250.0) for page in PdfReader(io.BytesIO(_headerless(markdown))).pages)
-    assert {"SUMMARY", "EXPERIENCE", "SKILLS", "EDUCATION"} <= set(text.splitlines()), text
+    # 0.3.5 (gigai-lc3): a leading Summary prints under the header with no title; the other headings are whole lines.
+    assert {"EXPERIENCE", "SKILLS", "EDUCATION"} <= set(text.splitlines()) and "SUMMARY" not in text.splitlines(), text
 
 
 def test_a_heading_font_with_no_space_glyph_is_the_case_under_test() -> None:
     """Guards the regression test itself: the one-word headerless PDF really has a font without a space."""
     fonts = PdfReader(io.BytesIO(_headerless(ONE_WORD))).pages[0]["/Resources"]["/Font"]
     spaces = {str(font.get_object()["/BaseFont"]).split("+")[1]: b"<0020>" in font.get_object()["/ToUnicode"].get_data() for font in fonts.values()}
-    assert spaces["Inter-SemiBold"] is False and spaces["Inter-Light"] is True, spaces
+    assert spaces["Inter-SemiBold"] is False and spaces["Inter-Regular"] is True, spaces  # 0.3.5: the body is Regular 400 (was Light 300)
+
+
+# --- 0.3.5 (gigai-lc3): the reference look, "Title | dates" on one line and a leading Summary with no title, reads as the source ---
+
+
+def _plain(body: str) -> bytes:
+    """A one-column PDF of ``body`` (Typst markup) in the test's plain page, for a reading the renderer does not make."""
+    return _typst(PAGE + "= Jordan Example\n\n" + body)
+
+
+def test_a_role_line_with_a_pipe_between_title_and_dates_is_intact() -> None:
+    """Scout prints the dates on the title's line after " | " (the source's own form); a reader that keeps the pipe
+    has not split the line.  The dates apart from their title (here, above it) still count as split."""
+    markdown = "## Summary\nPlatform engineer with 8 years building delivery workflows.\n\n## Experience\n" + "".join(
+        f"### {c}\n{r} | {d}\n- {b}\n\n" for c, r, d, b in EXPERIENCE) + "## Skills\nPython · Go · Terraform\n"
+    def pdf(role: str) -> bytes:
+        return _plain("== Summary\nPlatform engineer with 8 years building delivery workflows.\n== Experience\n" + "".join(
+            f"*{c}*\\\n" + role.format(r=r, d=d) + f"\\\n- {b}\n" for c, r, d, b in EXPERIENCE) + "== Skills\nPython, Go, Terraform\n")
+    piped = _score(pdf("{r} | {d}"), markdown, PostingKeywords())
+    assert piped.breakdown["fidelity"]["role_lines_intact_stream"] == piped.breakdown["fidelity"]["role_lines_intact_rows"] == 1.0  # type: ignore[index]
+    assert "role lines split" not in piped.breakdown["fidelity"]["lost"] and piped.fidelity == 40.0, piped.line  # type: ignore[operator]
+    split = _score(pdf("{d}\\\n{r}"), markdown, PostingKeywords())
+    assert "role lines split" in split.breakdown["fidelity"]["lost"] and split.breakdown["fidelity"]["role_lines_intact_stream"] == 0.0  # type: ignore[index,operator]
+
+
+def test_a_leading_summary_printed_without_its_title_counts_as_its_heading() -> None:
+    """Scout's own render: the Summary's text is the first body block, under the header (or first of all with none).
+    Its heading is found, its word is not a word to recall, and the standard-headings rule counts it: a three-section
+    resume parses cleanly at 100.  The same resume with the Summary moved under Experience has lost its heading."""
+    markdown = "## Summary\nPlatform engineer with 8 years building delivery workflows on AWS.\n\n## Experience\n### Northwind\n- Built Terraform modules for 40 services.\n\n## Skills\nPython · Go · Terraform\n"
+    for pdf in (_headerless(markdown), render_markdown_pdf(markdown, HEADER, timestamp=STAMP, company="Example Corp").pdf):
+        result = _score(pdf, markdown, PostingKeywords())
+        assert "SUMMARY" not in "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages).splitlines()
+        assert result.fidelity == 40.0 and _failed(result) == [] and result.score == 100, result.line
+        assert result.breakdown["fidelity"]["sections"] == "3/3" and result.breakdown["fidelity"]["word_recall"] == 1.0  # type: ignore[index]
+    moved = _score(_plain("== Experience\n*Northwind*\\\n- Built Terraform modules for 40 services.\n\nPlatform engineer with 8 years building delivery workflows on AWS.\n== Skills\nPython, Go, Terraform\n"), markdown, PostingKeywords())
+    lost = moved.breakdown["fidelity"]["lost"]
+    assert "summary heading" in lost and moved.fidelity < 40.0 and "standard headings" in _failed(moved), moved.line  # type: ignore[operator]
+
+
+def test_a_pdf_that_drops_a_heading_other_than_the_summary_loses_fidelity() -> None:
+    """Only the Summary may go untitled: the Skills printed as a bare line under the Experience lose their heading."""
+    markdown = "## Summary\nPlatform engineer with 8 years building delivery workflows on AWS.\n\n## Experience\n### Northwind\n- Built Terraform modules for 40 services.\n\n## Skills\nPython · Go · Terraform\n"
+    result = _score(_plain("Platform engineer with 8 years building delivery workflows on AWS.\n== Experience\n*Northwind*\\\n- Built Terraform modules for 40 services.\n\nPython, Go, Terraform\n"), markdown, PostingKeywords())
+    lost = result.breakdown["fidelity"]["lost"]
+    assert "skills heading" in lost and "summary heading" not in lost and result.breakdown["fidelity"]["sections"] == "2/3", result.breakdown["fidelity"]  # type: ignore[index,operator]
+    assert result.fidelity < 40.0 and "skills heading" in result.line and "summary heading" not in result.line, result.line
 
 
 def test_skill_separators_are_plain_characters() -> None:

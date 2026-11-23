@@ -12,20 +12,20 @@
 #let d = json(bytes(sys.inputs.data))
 #let scale = float(sys.inputs.at("scale", default: "1.0"))
 #let s = 1.71pt * scale
-#let ink = rgb("#323336")
-#let soft = rgb("#434343")
+#let ink = rgb("#1C1C1E")
+#let soft = rgb("#2B2B2E")
 #let margin-x = 65pt
 #let margin-y = 50pt
 // Inter's vertical metrics (hhea, all weights): ascender 1984/2048, descender 494/2048.
 #let asc = 0.96875
 #let desc = 0.2412109375
 #let edges(size, lh) = (top-edge: (lh + (asc - desc) * size) / 2, bottom-edge: -(lh - (asc - desc) * size) / 2)
-#let t(body, size: 9.5pt, lh: 14.3pt, weight: 300, fill: ink, tracking: 0pt) = text(size: size, weight: weight, fill: fill, tracking: tracking, ..edges(size, lh), body)
+#let t(body, size: 9.5pt, lh: 14.3pt, weight: 400, fill: ink, tracking: 0pt) = text(size: size, weight: weight, fill: fill, tracking: tracking, ..edges(size, lh), body)
 // The resume's header, line for line (resume.typ): its placeholder form is the resume PREVIEW's only; a letter's data never sets it.
 #let placeholder = d.at("placeholder", default: false)
 #let faint = rgb("#A6A8AD")
 #set document(title: d.doc_title, author: if d.name == "" or placeholder { () } else { d.name })
-#set text(font: "Inter", size: 9.5pt, weight: 300, fill: ink, lang: "en", ..edges(9.5pt, 14.3pt))
+#set text(font: "Inter", size: 9.5pt, weight: 400, fill: ink, lang: "en", ..edges(9.5pt, 14.3pt))
 #set par(leading: 0pt, spacing: 0pt)
 #set block(spacing: 0pt)
 #set page(paper: "us-letter", margin: (x: margin-x, y: margin-y))

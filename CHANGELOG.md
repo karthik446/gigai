@@ -30,6 +30,17 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.3.5
+
+A patch release: one change to how the resume PDF looks. It changes no stored data, and your points and their words are untouched; it makes no new model call.
+
+#### Changed (Scout)
+
+- **The resume PDF reads as separate points, not as one grey block.** Every point now has a clear gap of 4 pt below it at every spacing, the body is set in Regular weight and a darker ink, and the line height never goes below 12.5 pt (it was as low as 11.5 pt at the tightest spacing). Moving the spacing slider now changes the space between roles and sections; the gap between points stays. The employer is set in capitals, the role line reads `Title | Jun 2022 - Present` on one line with the dates after a bar, and the Summary sits under your header with no title of its own. The cover letter PDF uses the same Regular weight and darker ink, so the two documents still match.
+- **A resume now holds fewer points on a page.** The room the old layout won by squeezing the gaps and the line height is given back: about a quarter fewer points fit on two pages at the tightest spacing. A tailored resume picked for two pages may now be cut a little shorter, and one you picked before may print on three pages until you Re-pick it. The page count beside the slider is always the count the PDF will have.
+- **The Skills list is set down to 8 pt before any skill is cut.** The Regular body is wider than the Light one was, so a long Skills list that fitted its four lines before would have lost its last names; it is now set a step smaller (8 pt, the size of the contact line) first. A list too long even then is cut from the end, as before.
+- **Scout's own ATS check reads the new layout as it should.** A role line with a bar between title and dates counts as one line, and a Summary printed right under the header counts as the Summary heading; every other heading must still be printed.
+
 ### 0.3.4
 
 A patch release: two fixes to assessing a job by its URL. It changes nothing in the data you already have and makes no new model call.
