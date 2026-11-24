@@ -4,7 +4,8 @@ Real Chromium against the real server, nothing stubbed, on the small home's tail
 stored resume is a synthetic 20-bullet one (`tests/support/resume_spacing_fixture.py`, stored through the real CLI on
 a throwaway gig and put in the job's own file; the file is put back afterwards). That resume is 3 pages at spacing
 1.2 and reaches 2 pages at a lower spacing (0.1.11.5 (d) set four of its blocks in fewer lines: it fits 2 pages
-up to 1.05, where the preview opens; before that it opened at 0.85 and was 3 pages at 1.0).
+up to 1.05, where the preview opened; before that it opened at 0.85 and was 3 pages at 1.0).  0.3.5 (gigai-lc3): the
+4pt bullet gap and the Regular body hold less: it fits 2 pages up to 1.0, where the preview opens (3 pages at 1.05).
 
 Pinned, on what the page shows and on the PDF the browser downloads:
 
@@ -167,7 +168,7 @@ def test_the_job_page_previews_the_resume_and_the_slider_sets_and_saves_its_spac
     _ready(ui)
     opened = _shown(ui)
     assert (opened["pages"], opened["pictures"], opened["count"], opened["over"]) == (2, 2, "2 pages", "false"), opened
-    assert opened["spacing"] == "1.05" and float(opened["slider"]) == 1.05 and opened["label"] == "1.05x", opened
+    assert opened["spacing"] == "1.00" and float(opened["slider"]) == 1.0 and opened["label"] == "1.00x", opened
     assert ui.page.locator(f"{PANEL} .md-preview").count() == 0, "the markdown is shown in place of the rendered pages"
     assert "Led the redesign of scheduling service 0" in (ui.page.locator(PREVIEW).text_content() or ""), "the pictures have no text behind them"
     assert ui.requests_after("open", ROUTE) == 1, "the preview is asked for once when the panel opens"
@@ -186,7 +187,7 @@ def test_the_job_page_previews_the_resume_and_the_slider_sets_and_saves_its_spac
     ui.step("moved")
     slider = ui.page.locator(SLIDER)
     slider.focus()
-    for _ in range(3):  # 1.05 -> 1.20, a step a key press: one request once the slider rests
+    for _ in range(4):  # 1.00 -> 1.20, a step a key press: one request once the slider rests
         ui.page.keyboard.press("ArrowRight")
     assert (ui.page.locator(f'{PREVIEW} [data-role="preview-spacing-value"]').text_content() or "").strip() == "1.20x", "the number follows the slider at once"
     ui.page.locator(f'{PREVIEW}[data-state="updating"]').wait_for()
