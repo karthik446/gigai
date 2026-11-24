@@ -27,7 +27,7 @@ gigai --version
 Or pin a release tag:
 
 ```bash
-uv tool install "git+https://github.com/karthik446/gigai@v0.3.4"
+uv tool install "git+https://github.com/karthik446/gigai@v0.3.5"
 ```
 
 ## Upgrade
