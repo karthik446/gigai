@@ -44,15 +44,17 @@ TODAY = date(2026, 10, 6)
 PROFILE = ms.SelectionProfile(titles=("Staff Software Engineer",))
 POSTING = ms.SelectionPosting(fx.TITLE, fx.POSTING, "Larkspur Table Systems", "Remote")
 #: A little more on every role line: the fixture's draft is cut for length, the same with room for 2 or 3 header lines.
-#: (0.3.5, gigai-lc3: shorter than before, the 4pt bullet gaps and Regular 400 hold less on a page.)
-LONG = " Worked with product, design, finance and support on every step and wrote the runbook."
+#: (0.3.5, gigai-lc3: shortened to "... wrote the runbook.", the 4pt bullet gaps and Regular 400 held less on a page;
+#: 0.3.6, gigai-3jj: 0.3.4's line again, with 0.3.4's gaps the short one fit the same draft differently with each room.)
+LONG = " Worked with product, design, finance and support on every step and wrote the runbook the on-call team still uses today."
 LONG_MASTER = parse_master("\n".join(
     line.replace(" <!-- id:r", LONG + " <!-- id:r", 1) if line.startswith("- ") and "id:r" in line else line
     for line in fx.master_markdown().splitlines()
 ))
 SHORT_MASTER = parse_master(fx.master_markdown())
 #: A little more on every role line: the draft fits 2 pages with room for 2 header lines, not for 3.
-WRAP = " Partnered with product and finance on the plan and wrote up the design doc."
+#: (0.3.6, gigai-3jj: "for the team" added; with 0.3.4's gaps and the -0.08pt tracking the wrapped header fit 0.3.5's.)
+WRAP = " Partnered with product and finance on the plan and wrote up the design doc for the team."
 WRAP_MASTER = parse_master("\n".join(
     line.replace(" <!-- id:r", WRAP + " <!-- id:r", 1) if line.startswith("- ") and "id:r" in line else line
     for line in fx.master_markdown().splitlines()

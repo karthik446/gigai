@@ -109,16 +109,17 @@ def _lines(shape: tuple[int, int, int], spacing: float) -> tuple[Line, ...]:
 
 
 def _body_line(spacing: float) -> float:
-    """The body's line box at ``spacing`` (``lh-body`` in resume.typ; 0.3.5: the floor is 12.5pt, was 11.5pt)."""
+    """The body's line box at ``spacing`` (``lh-body`` in resume.typ; the floor is 11.5pt: 0.3.5 raised it to 12.5pt,
+    0.3.6, gigai-3jj, put it back)."""
 
-    return 14.3 if spacing >= 1.0 else max(12.5, 14.3 - (14.3 - 12.5) * (1.0 - spacing) / 0.3)
+    return 14.3 if spacing >= 1.0 else max(11.5, 14.3 - (14.3 - 11.5) * (1.0 - spacing) / 0.3)
 
 
 def _gap_unit(spacing: float) -> float:
-    """The spacing unit ``s`` at ``spacing``, in points (0.3.5: the scale's own at every scale; until 0.3.4 it shrank
-    twice as fast below 1.0, ``gap-tighten``)."""
+    """The spacing unit ``s`` at ``spacing``, in points (``gap-scale`` in resume.typ: below 1.0 it shrinks twice as fast;
+    0.3.5 dropped that, 0.3.6, gigai-3jj, put it back)."""
 
-    return 1.71 * spacing
+    return 1.71 * (spacing if spacing >= 1.0 else 1.0 - 2.0 * (1.0 - spacing))
 
 
 def _box_bottom(y: float, spacing: float) -> float:

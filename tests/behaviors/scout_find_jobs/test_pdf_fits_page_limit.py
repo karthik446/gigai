@@ -97,17 +97,19 @@ def resume(long_lines: int = 0, short_lines: int = 3, roles: int = 5) -> str:
 #: The failing size: 2 pages where the fit measures (spacing 0.9), a 3rd page of skills at the saved spacing 1.0.
 #: (0.1.11.5 (d): the Skills are plain lines and a degree is one line, so every size here is longer than it was.)
 #: (0.1.11.5 PB5: a role splits across pages, so the two-line size no longer needs a 3rd page at 1.0; three extra lines do.)
-#: (0.3.5, gigai-lc3: a 4pt bullet gap, a 12.5pt line floor and Regular 400 hold fewer lines on a page, so every size
-#: here is shorter again: 3+1 / 4+4 / 6+3 extra lines, were 3 / 8 / 14; 18 is still 3 pages whatever is done.)
-FAILING = resume(long_lines=3, short_lines=1)
+#: (0.3.5, gigai-lc3: a 4pt bullet gap, a 12.5pt line floor and Regular 400 held fewer lines on a page: 3+1 / 4+4 / 6+3
+#: extra lines.  0.3.6, gigai-3jj: 0.3.4's gaps and floor again, so near 0.3.4's sizes again, 4 / 10 / 14, were 3 / 8 /
+#: 14: with the -0.08pt tracking 3 fit 2 pages at 1.0 without a header (the CLI's PDF) and 8 fit 2 pages at 0.85;
+#: 18 is still 3 pages whatever is done.)
+FAILING = resume(long_lines=4)
 #: Longer: 3 pages at every spacing above the floor (0.8), 2 pages there.
-NEEDS_FLOOR = resume(long_lines=4, short_lines=4)
+NEEDS_FLOOR = resume(long_lines=10, short_lines=3)
 #: Longer: 2 pages only at the tightest spacing.
-NEEDS_TIGHTEST = resume(long_lines=6, short_lines=3)
+NEEDS_TIGHTEST = resume(long_lines=14, short_lines=3)
 #: Longer still: 3 pages whatever is done.
 TOO_LONG = resume(long_lines=18, short_lines=3)
 #: The master: nine roles, 4 pages. ``FAILING`` is its first five roles, line for line.
-LONG = resume(long_lines=3, short_lines=1, roles=9)
+LONG = resume(long_lines=4, roles=9)
 
 
 def _pages(pdf: bytes) -> list[str]:
@@ -203,7 +205,9 @@ def test_api_pdf_with_a_four_line_header_stays_on_two_pages(fx: PipelineFixture,
         over = client.post("/api/tailored-resumes/pdf", json={**key, "header": FORM})
         assert over.status_code == 200 and over.content.startswith(b"%PDF")
         count = len(_pages(over.content))
-        assert count > 2 and over.headers["x-gigai-fit-note"] == over_limit_note(count, 2)
+        # 0.3.6 (gigai-3jj): the tightest spacing's note names about how many lines to leave out (measured: 13 with the
+        # four-line header, 12 without it, the CLI's below).
+        assert count > 2 and over.headers["x-gigai-fit-note"] == over_limit_note(count, 2, lines=13)
     finally:
         client.close()
         server.shutdown()
@@ -217,11 +221,12 @@ def test_a_resume_that_cannot_fit_says_so_in_plain_words(fx: PipelineFixture, tm
     count = len(_pages(out.read_bytes()))
     assert count == payload["pages"] == 4 and payload["spacing_scale"] == 1.0, "a resume no spacing fits renders as saved"
     note = payload["note"]
+    # 0.3.5 (gigai-lc3): "remove a point or two".  0.3.6 (gigai-3jj): about how many lines (measured: 12).
     assert note == (
         "This resume takes 4 pages: it does not fit on 2 pages even with the tightest spacing. "
-        "To get 2 pages, remove a point or two on the job's page, then generate the PDF again. Or keep it at 4 pages."
+        "To get 2 pages, leave out about 12 lines on the job's page, then generate the PDF again. Or keep it at 4 pages."
     )
-    # 0.1.11.5: "Shorten automatically" is retired; the sentence names what replaced it (Remove a point on the job's page).
+    # 0.1.11.5: "Shorten automatically" is retired; the sentence names what replaced it (leave out lines on the job's page).
     assert "--shorten" not in note and "Shorten automatically" not in note and "remove a few lines" not in note
     assert note.isascii() and "\n" not in note
     for internal in ("max_pages", "spacing_scale", "auto_fit", "over_page_limit", "LengthFit", "scout.pick", "Typst", "_"):
@@ -253,7 +258,8 @@ def test_a_saved_spacing_is_tightened_to_the_floor_then_to_the_tightest_and_a_fi
     tightest = render(NEEDS_TIGHTEST, 1.0, 2)
     assert (tightest.pages, tightest.spacing_scale, tightest.note) == (2, SPACING_MIN, None) and len(_pages(tightest.pdf)) == 2
     over = render(TOO_LONG, 1.0, 2)
-    assert (over.pages, over.spacing_scale, over.note) == (3, 1.0, over_limit_note(3, 2)) and over.pdf == render(TOO_LONG, 1.0, None).pdf
+    # 0.3.6 (gigai-3jj): 18 extra lines, 16 fit 2 pages at the tightest spacing, so about 2 to leave out.
+    assert (over.pages, over.spacing_scale, over.note) == (3, 1.0, over_limit_note(3, 2, lines=2)) and over.pdf == render(TOO_LONG, 1.0, None).pdf
 
     # A resume that fits at the saved spacing is rendered exactly as it was (the same bytes as with no limit).
     small = replace(stored, result=replace(stored.result, sections=tuple(

@@ -189,8 +189,9 @@ def test_the_pdf_of_the_capped_pick_with_a_header_is_two_pages_at_the_automatic_
         assert rendered.pages == 2, f"20 bullets, a header and every block: 2 pages at the automatic spacing ({rendered.spacing_scale:g})"
         # 0.1.11.5 (d): the Skills are plain lines and a degree is one line, so the fit is looser than 0.95 now ...
         assert 1.0 <= rendered.spacing_scale <= resume_pdf.SPACING_MAX
-        # ... and at the loosest spacing it is 3 pages, and that is the user's to see and change.
-        assert resume_pdf.render_markdown_pdf(render_markdown(settled.result), header, timestamp=STAMP, spacing_scale=resume_pdf.SPACING_MAX, auto_fit=False).pages == 3
+        # ... and at the loosest spacing it is 3 pages, and that is the user's to see and change.  0.3.6 (gigai-3jj): the
+        # untitled Summary and the one-line role (0.3.5) with 0.3.4's gaps fit it on 2 pages even at the loosest.
+        assert resume_pdf.render_markdown_pdf(render_markdown(settled.result), header, timestamp=STAMP, spacing_scale=resume_pdf.SPACING_MAX, auto_fit=False).pages == 2
 
 
 def test_a_pinned_line_stays_under_the_cap_whatever_its_rank() -> None:

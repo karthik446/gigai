@@ -1,36 +1,37 @@
 // Data arrives as JSON via sys.inputs (never string-templated, so no markup injection).
 //
 // TYPE SCALE (0110-017; 0.3.5 gigai-lc3: the look of Standard Resume's "Design" view): Inter, body Regular 400 in
-// near-black `ink`; every role has a size, weight, line height, tracking and colour.  Each text line is a box exactly
-// one line height tall (the CSS model: the half-leading sits above and below the glyphs), so the baseline-to-baseline
-// distance between two blocks is their line boxes plus the gap.
+// near-black `ink`, tracked -0.08pt (0.3.6, gigai-3jj: `t`'s default and `set text`; Regular is wider than the Light
+// 300 of 0.3.4, and untracked it pushed resumes that fit two pages on 0.3.4 onto a third); every role has a size,
+// weight, line height, tracking and colour.  Each text line is a box exactly one line height tall (the CSS model: the
+// half-leading sits above and below the glyphs), so the baseline-to-baseline distance between two blocks is their line
+// boxes plus the gap.
 //
-// SPACING: every vertical gap but one is a whole multiple of ONE unit `s` = 1.71pt x the spacing scale (sys.inputs,
-// 0.7..1.4; the renderer picks it when auto fit is on).  After the title/contact/role line 2s, tag rows 3s, after the
-// name 6s, after a section title 8s, between entries 7s (12pt at 1.0: the last bullet's baseline to the next
-// employer's is two line pitches), between sections 15s.  The ONE exception: the gap between two BULLETS is a
-// CONSTANT `bullet-gap` = 4pt at every scale (0.3.5, gigai-lc3), so each bullet reads as its own unit however tight
-// the resume is set (before, it was 1s: 1.7pt at 1.0 and 0.7pt at 0.7, a grey wall).  Below 1.0 the hierarchy holds
-// with no floor: at 0.7 a bullet gap is 4pt, an entry gap 7s = 8.4pt and a section gap 15s = 18pt.  (0.1.11.5 PE had
-// the unit shrink twice as fast below 1.0, `gap-tighten`; with the bullet gap fixed that bought some five lines at
-// 0.7 and put an entry gap, 4.8pt, under the bullet gap, so the unit is the scale's own at every scale again.)
+// SPACING: every vertical gap is a whole multiple of ONE unit `s` = 1.71pt x `gap-scale` (the spacing scale,
+// sys.inputs, 0.7..1.4; the renderer picks it when auto fit is on).  Bullets 1s, after the title/contact/role line 2s,
+// tag rows 3s, after the name 6s, after a section title 8s, between entries 7s (12pt at 1.0: the last bullet's baseline
+// to the next employer's is two line pitches), between sections 15s.  Below 1.0 the unit shrinks `gap-tighten` (2.0)
+// times as fast as the scale: at 0.7 `gap-scale` is 0.4, so a bullet gap is 0.68pt, an entry gap 4.8pt and a section
+// gap 10.3pt; the hierarchy holds at every scale because every gap is the same unit's multiple.  (0.3.5 had a constant
+// 4pt bullet gap and the scale's own unit below 1.0; with the Regular body and the 12.5pt line floor that cost some
+// 200pt at 0.7 and a third page for two-page resumes, so 0.3.6 restores 0.3.4's gaps.)
 // Block spacing collapses to the larger of the two neighbours (Typst's weak spacing).
 //
 // BODY LINE HEIGHT (0.1.11.5): BELOW 1.0 the scale also tightens the body's line box (bullets, paragraphs, role
-// lines), in a straight line from 14.3pt at 1.0 down to `lh-tight` at 0.7, because the gaps alone are too little
-// room.  At 1.0 and above the line box is 14.3pt as before: only the gaps grow.  READABILITY FLOOR (0.3.5): `lh-tight`
-// is 12.5pt, 1.32 x the 9.5pt body (Inter's ascender + descender = 1.21 x the size = 11.49pt, the single-spaced line
-// that was the floor until 0.3.4: there a line's descenders ended where the next line's ascenders began, and a page
-// of such lines read as one block); at 12.5pt about 1pt of air separates them on every line.  The type SIZE never
-// changes (the line box alone gives the room), an entry heading (10.7pt) keeps a line box of at least its own 13pt,
-// and the header's lines and the section titles keep theirs.  `fixed_lines` (a page ESTIMATE: resume_pdf._estimate)
-// keeps 14.3pt at every scale and every gap as the PDF has it: the pick and the length rule budget with a line box
-// never smaller than the PDF's, and the PDF never takes more pages than they counted.
+// lines), in a straight line from 14.3pt at 1.0 down to `lh-tight` at 0.7 (12.4pt at 0.8), because the gaps alone are
+// too little room.  At 1.0 and above the line box is 14.3pt: only the gaps grow.  READABILITY FLOOR: `lh-tight` is
+// 11.5pt, the 9.5pt body's own single-spaced line (Inter's ascender + descender = 1.21 x the size = 11.49pt): at the
+// floor a line's descenders end where the next line's ascenders begin, and they never overlap (0.3.6 restores it from
+// 0.3.4; 0.3.5's 12.5pt floor was one of the costs above).  The type SIZE never changes (the line box alone gives the
+// room), an entry heading (10.7pt) keeps a line box of at least its own 13pt, and the header's lines and the section
+// titles keep theirs.  `fixed_lines` (a page ESTIMATE: resume_pdf._estimate) keeps 14.3pt and the untightened unit
+// (`gap-scale` = the scale) at every scale: the pick and the length rule budget with a line box and gaps never smaller
+// than the PDF's, and the PDF never takes more pages than they counted.
 //
-// AUTO FIT (resume_pdf.fit_scale): the renderer queries <fit-end> below at a few scales and keeps the largest
-// that still ends on the fewest pages.  Range: above 1.0 only the gaps grow (~20% of a page's height); below it the
-// body's lines tighten too, so 0.7x holds roughly a tenth more text than
-// 1.0x (less than until 0.3.4, when the bullet gap and the unit shrank with it).  Type sizes and margins never change.
+// AUTO FIT (resume_pdf.fit_scale): the renderer queries <fit-end> below at a few scales and keeps the largest that
+// still ends on the fewest pages; with a page limit no scale reaches, it takes the tightest, 0.7x (0.3.6).  Range:
+// above 1.0 only the gaps grow (~20% of a page's height); below it the gaps shrink faster and the body's lines tighten
+// too, so 0.7x holds about a quarter more text than 1.0x.  Type sizes and margins never change.
 //
 // THE LOOK (0.3.5, gigai-lc3): the header is the name in letterspaced capitals, the headline, ONE contact line, and
 // the Summary paragraph straight under them with NO title of its own when the Summary is the first section
@@ -61,13 +62,14 @@
 //   rule of 0.1.11.5 is gone: see the comment above the section loop).
 #let d = json(bytes(sys.inputs.data))
 #let scale = float(sys.inputs.at("scale", default: "1.0"))
-// A page ESTIMATE (resume_pdf._estimate): the full line height at every scale; the gaps are the PDF's own.
+// A page ESTIMATE (resume_pdf._estimate): the full line height and the untightened gap unit at every scale.
 #let fixed = d.at("fixed_lines", default: false)
-// The gap unit, the scale's own at every scale (see SPACING above); the bullet gap is a constant, not a multiple of it.
-#let s = 1.71pt * scale
-#let bullet-gap = 4pt
+// The gap unit (see SPACING above): below 1.0 it shrinks `gap-tighten` times as fast as the scale.
+#let gap-tighten = 2.0
+#let gap-scale = if scale >= 1.0 or fixed { scale } else { 1.0 - gap-tighten * (1.0 - scale) }
+#let s = 1.71pt * gap-scale
 #let lh-full = 14.3pt
-#let lh-tight = 12.5pt
+#let lh-tight = 11.5pt
 // The line box of the body's text (`t`'s default, 14.3pt, stays the header's).
 #let lh-body = if scale >= 1.0 or fixed { lh-full } else { calc.max(lh-tight, lh-full - (lh-full - lh-tight) * (1.0 - scale) / 0.3) }
 #let accent = rgb(d.at("accent", default: "#1F65F5"))
@@ -79,13 +81,13 @@
 #let asc = 0.96875
 #let desc = 0.2412109375
 #let edges(size, lh) = (top-edge: (lh + (asc - desc) * size) / 2, bottom-edge: -(lh - (asc - desc) * size) / 2)
-#let t(body, size: 9.5pt, lh: 14.3pt, weight: 400, fill: ink, tracking: 0pt) = text(size: size, weight: weight, fill: fill, tracking: tracking, ..edges(size, lh), body)
+#let t(body, size: 9.5pt, lh: 14.3pt, weight: 400, fill: ink, tracking: -0.08pt) = text(size: size, weight: weight, fill: fill, tracking: tracking, ..edges(size, lh), body)
 // A PLACEHOLDER HEADER (0.1.11.5 PH; the job page's preview only, never a PDF: resume_pdf._render): "Your Name" and
 // one contact line stand where the person's own header will print, the same lines in the same boxes, in a lighter grey.
 #let placeholder = d.at("placeholder", default: false)
 #let faint = rgb("#A6A8AD")
 #set document(title: d.doc_title, author: if d.name == "" or placeholder { () } else { d.name })
-#set text(font: "Inter", size: 9.5pt, weight: 400, fill: ink, lang: "en", ..edges(9.5pt, 14.3pt))
+#set text(font: "Inter", size: 9.5pt, weight: 400, fill: ink, lang: "en", tracking: -0.08pt, ..edges(9.5pt, 14.3pt))
 #set par(leading: 0pt, spacing: 0pt)
 #set block(spacing: 0pt)
 #set page(paper: "us-letter", margin: (x: margin-x, y: margin-y))
@@ -93,7 +95,8 @@
 // SKILLS (0.1.11.5 (d)): plain comma-separated lines of real text, in the order given (what the posting asks for
 // first), at most `skill-max-lines` lines.  SHRINK BEFORE CUT: the whole list is set at the body's size when it fits
 // in those lines, else a step smaller, down to the last of `skill-sizes` (8pt, as small as `contact-sizes` goes; never
-// below it).  The Regular 400 body is wider than the Light 300 it was: at 8.3pt a real list lost two skills.  Only a
+// below it).  The Regular 400 body is wider than the Light 300 it was: at 8.3pt a real list lost two skills (measured
+// on 0.3.5, before the body's -0.08pt tracking).  Only a
 // list too long even at 8pt is cut: the names that fit, from the front, and the rest are not
 // printed.  Nothing marks the cut (no "..." and no "and more"): the list claims nothing it does not show.
 #let skill-sizes = (9.5pt, 9pt, 8.5pt, 8.3pt, 8pt)
@@ -123,8 +126,8 @@
 #let whole-chars = 330
 #let bullet(x) = {
   let body = pad(left: 17.8pt, {place(left, dx: -11.8pt, t([•], lh: lh-body)); t(x, lh: lh-body)})
-  if x.len() <= whole-chars { block(below: bullet-gap, breakable: false, body) } else {
-    context block(below: bullet-gap, breakable: measure(block(width: page.width - 2 * margin-x, body)).height > whole-lines * lh-body + 0.01pt, body)
+  if x.len() <= whole-chars { block(below: s, breakable: false, body) } else {
+    context block(below: s, breakable: measure(block(width: page.width - 2 * margin-x, body)).height > whole-lines * lh-body + 0.01pt, body)
   }
 }
 #let para(x) = block(below: 2 * s, t(x, lh: lh-body, fill: soft))

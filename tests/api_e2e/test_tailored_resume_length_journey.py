@@ -35,8 +35,8 @@ _CASE = CASES["over_long"]
 #: 0.1.11.3 item 15: the length rule keeps room for the PDF's header (then the third-oldest role was cut too).
 #: 0.1.11.5 (d): the Skills are plain lines and a degree is one line, so that role (Harrow Analytics) fits again.
 #: 0.3.5 (gigai-lc3): the 4pt bullet gaps and the Regular body hold less on a page, so that role is cut again.
+#: 0.3.6 (gigai-3jj): 0.3.4's gaps and line floor again, so it fits again.
 _CUT = [
-    "Software Engineer — Harrow Analytics (2011–2013)",
     "Junior Developer — Bellweather Retail (2009–2011)",
     "Junior Developer — Dunmore Telecom (2007–2009)",
 ]
@@ -85,7 +85,7 @@ def test_length_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         length = first["result"]["length"]
         assert (length["status"], length["pages"], length["full_pages"]) == ("cut", 2, 3)
         assert [role["role"] for role in length["cut"]] == _CUT and len(length["trimmed"]) == 5
-        assert _roles(first) == [10, 10, 10, 3, 3] and pdf_pages() == 2
+        assert _roles(first) == [10, 10, 10, 3, 3, 3] and pdf_pages() == 2
         body = {**key, "updated_at": stamp, "use": "restore"}
 
         # (a) restore: every role and bullet is back, and GET, the .md and the PDF follow.
@@ -101,8 +101,9 @@ def test_length_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         # 0.1.11.5 PE: the restored resume PRINTS on 2 pages (was 3): below 1.0 the gaps tighten faster and auto fit goes
         # down to 0.7.  The length rule's own count (``full_pages`` above: 3) is the page ESTIMATE, which keeps the
         # plain gaps and the full line height, so it did not move.
-        # 0.3.5 (gigai-lc3): the 4pt bullet gaps and the Regular body no longer let it down to 2: it prints on 3, as counted.
-        assert pdf_pages() == 3 and payload["result"]["length"]["full_pages"] == 3
+        # 0.3.5 (gigai-lc3): the 4pt bullet gaps and the Regular body no longer let it down to 2: it printed on 3.
+        # 0.3.6 (gigai-3jj): 0.3.4's gaps again, and auto fit aims at the page limit: 2 pages again.
+        assert pdf_pages() == 2 and payload["result"]["length"]["full_pages"] == 3
 
         # (b) the same action again changes nothing.
         again = client.put(url, json=body)

@@ -106,9 +106,9 @@ only Education, or the last lines of the Skills and Education.
 The resume card on a job's page has one view: the resume as the PDF prints it, one picture a
 page, with the controls beside it. There is no other view to switch to.
 
-- **Spacing** is one slider, from 0.70 ("Tighter") to 1.40 ("Looser"). It changes the gaps between roles and
-  sections and, below 1.00, the line height (never below 12.5 pt); the 4 pt gap between points and
-  the type size never change. Until you move it the page says
+- **Spacing** is one slider, from 0.70 ("Tighter") to 1.40 ("Looser"). It changes the gaps, the
+  gap between points included, and, below 1.00, the line height (never below 11.5 pt); it never
+  changes the type size. Until you move it the page says
   "Fitted automatically. Move the slider to set this job's spacing; it is saved for this job."
   After a move it says "Saved for this job. Generate PDF uses this spacing." There is no Save
   button, and the spacing of one job changes no other job.
