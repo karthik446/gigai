@@ -102,7 +102,7 @@ def test_length_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         # down to 0.7.  The length rule's own count (``full_pages`` above: 3) is the page ESTIMATE, which keeps the
         # plain gaps and the full line height, so it did not move.
         # 0.3.5 (gigai-lc3): the 4pt bullet gaps and the Regular body no longer let it down to 2: it printed on 3.
-        # 0.3.6 (gigai-3jj): 0.3.4's gaps again, and auto fit aims at the page limit: 2 pages again.
+        # 0.3.6 (gigai-3jj): 0.3.4's gaps again: 2 pages again.
         assert pdf_pages() == 2 and payload["result"]["length"]["full_pages"] == 3
 
         # (b) the same action again changes nothing.

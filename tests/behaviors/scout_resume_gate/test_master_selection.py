@@ -887,13 +887,15 @@ def test_measure_markdown_is_the_shipped_layout_headerless(master: Master) -> No
 
     pages, fill = measure_markdown(markdown, spacing_scale=1.0)
     assert pages == 8 and 0.0 < fill <= 1.0
-    # The same page count the renderer reports for the PDF it compiles at that spacing, headerless.  Below 1.0 the
-    # PDF's body lines are tighter than an estimate's (0.1.11.5 (a)), so there the count that equals the PDF's is
-    # ``printed`` and the estimate is never under it (at 0.9 they were equal by chance until part (d) saved lines).
-    for scale in (0.9, 1.0):
-        pdf_pages = render_markdown_pdf(markdown, None, timestamp=STAMP, spacing_scale=scale, auto_fit=False).pages
-        assert measure_markdown(markdown, spacing_scale=scale, printed=True)[0] == pdf_pages <= measure_markdown(markdown, spacing_scale=scale)[0]
-    assert measure_markdown(markdown, spacing_scale=1.0)[0] == render_markdown_pdf(markdown, None, timestamp=STAMP, spacing_scale=1.0, auto_fit=False).pages
+    # The estimate is never under the page count of the PDF the renderer compiles at that spacing, headerless.  Below
+    # 1.0 the PDF's body lines are tighter than an estimate's (0.1.11.5 (a)), so there the count that equals the PDF's
+    # is ``printed`` (at 0.9 the plain estimate equals it too since part (d) saved lines).  At 1.0 the estimates are
+    # one page OVER this PDF since 0.3.6 (8 and 7): they reserve the header block at its largest
+    # (``HEADER_RESERVE_LINES``) and a headerless PDF has none; on 0.3.4 the two were equal only by chance.
+    pdf_pages = render_markdown_pdf(markdown, None, timestamp=STAMP, spacing_scale=0.9, auto_fit=False).pages
+    assert measure_markdown(markdown, spacing_scale=0.9, printed=True)[0] == pdf_pages == measure_markdown(markdown, spacing_scale=0.9)[0]
+    pdf_pages = render_markdown_pdf(markdown, None, timestamp=STAMP, spacing_scale=1.0, auto_fit=False).pages
+    assert pdf_pages <= measure_markdown(markdown, spacing_scale=1.0, printed=True)[0] == measure_markdown(markdown, spacing_scale=1.0)[0] == pages
     # Tighter spacing never ends later; an out-of-range scale is clamped to the slider's range.
     assert measure_markdown(markdown, spacing_scale=0.7) <= measure_markdown(markdown, spacing_scale=1.4)
     assert measure_markdown(markdown, spacing_scale=0.1) == measure_markdown(markdown, spacing_scale=0.7)

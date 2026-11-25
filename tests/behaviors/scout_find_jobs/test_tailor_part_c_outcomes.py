@@ -258,7 +258,7 @@ def test_what_was_left_out_for_length_is_recorded_whole_and_one_restore_puts_it_
     # 0.1.11.5 PE: restored in full it PRINTS on 2 pages (was 3): below 1.0 the gaps tighten faster.  The length rule's
     # own count is the page estimate (plain gaps), which did not move: cutting again leaves the same things out (below).
     # 0.3.5 (gigai-lc3): the 4pt bullet gaps and the 12.5pt line floor took that room back: it printed on 3 pages.
-    # 0.3.6 (gigai-3jj): 0.3.4's gaps and floor again, and auto fit aims at the page limit: 2 pages again.
+    # 0.3.6 (gigai-3jj): 0.3.4's gaps and floor again: 2 pages again.
     assert _pages(fx) == 2
 
     # Restoring again changes nothing; cutting again leaves exactly the same things out.
