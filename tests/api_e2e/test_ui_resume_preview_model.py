@@ -26,11 +26,15 @@ const answer = (pages, spacing_scale, extra = {}) => ({ pages, max_pages: 2, spa
 console.log(JSON.stringify({
   labels: [m.pagesLabel(1), m.pagesLabel(2), m.pagesLabel(3)],
   fits: m.pagesLine(m.previewOf(answer(2, 0.85))),
-  over: m.pagesLine(m.previewOf(answer(3, 1.0))),
-  overAtTightest: m.pagesLine(m.previewOf(answer(3, 0.7))),
+  over: m.pagesLine(m.previewOf(answer(3, 1.0, { tightest_pages: 2 }))),
+  overUnknown: m.pagesLine(m.previewOf(answer(3, 1.0))),
+  overUnreachable: m.pagesLine(m.previewOf(answer(4, 1.2, { tightest_pages: 3, lines_to_cut: 9 }))),
+  overAtTightest: m.pagesLine(m.previewOf(answer(3, 0.7, { tightest_pages: 3, lines_to_cut: 1 }))),
+  overAtTightestUncounted: m.pagesLine(m.previewOf(answer(3, 0.7))),
   noLimit: m.pagesLine(m.previewOf(answer(3, 1.0, { max_pages: null }))),
   none: m.pagesLine(null),
-  preview: m.previewOf(answer(2, 0.85, { saved: true, note: "A note." })),
+  preview: m.previewOf(answer(2, 0.85, { saved: true, note: "A note.", header_note: "Your contact line runs onto 2 lines (8 items)." })),
+  counts: ["tightestPages", "linesToCut", "headerNote"].map((key) => [m.previewOf(answer(3, 1.0, { tightest_pages: 2, lines_to_cut: 4 }))[key], m.previewOf(answer(2, 0.85, { tightest_pages: "2", lines_to_cut: -1, header_note: 7 }))[key]]),
   notOne: [m.previewOf(null), m.previewOf({ pages: 2 }), m.previewOf({ images: [] })],
   range: m.sliderRange(null),
   headerNamed: m.previewHeader({ name: "Zora Quillfeather", email: "" }),
@@ -56,8 +60,13 @@ def test_the_page_count_is_said_in_plain_words() -> None:
     out = _run()
     assert out["labels"] == ["1 page", "2 pages", "3 pages"]
     assert out["fits"] == {"text": "2 pages", "over": False, "hint": None}
+    # 0.3.6 (gigai-3jj.4): the slider is named only when the tightest spacing reaches the limit (the answer's
+    # `tightest_pages`); else the hint says what the tightest spacing prints and about how many lines to leave out.
     assert out["over"] == {"text": "3 pages", "over": True, "hint": "Move the slider left to reach 2 pages."}
-    assert out["overAtTightest"] == {"text": "3 pages", "over": True, "hint": "This is the tightest spacing: the resume does not reach 2 pages. Shorten it, or keep it at 3 pages."}
+    assert out["overUnknown"] == out["over"], "an answer of before 0.3.6 (no count) keeps the slider hint"
+    assert out["overUnreachable"] == {"text": "4 pages", "over": True, "hint": "Even the tightest spacing prints 3 pages. Leave out about 9 lines to reach 2 pages."}
+    assert out["overAtTightest"] == {"text": "3 pages", "over": True, "hint": "Even the tightest spacing prints 3 pages. Leave out about 1 line to reach 2 pages."}
+    assert out["overAtTightestUncounted"] == {"text": "3 pages", "over": True, "hint": "Even the tightest spacing prints 3 pages. Shorten the resume to reach 2 pages."}
     assert out["noLimit"] == {"text": "3 pages", "over": False, "hint": None} and out["none"] is None
     assert out["texts"] == ["Updating the preview", "Making the preview"]
 
@@ -68,6 +77,8 @@ def test_the_answer_is_read_into_pictures_a_spacing_and_the_slider_range() -> No
     assert preview["images"] == ["data:image/png;base64,QUJD"] * 2 and (preview["pages"], preview["maxPages"], preview["spacing"], preview["saved"], preview["note"]) == (2, 2, 0.85, True, "A note.")
     assert preview["range"] == out["range"] == {"min": 0.7, "max": 1.4, "step": 0.05}
     assert out["notOne"] == [None, None, None]
+    # The counts and the contact-line warning are read as the server sends them; anything else reads as nothing.
+    assert out["counts"] == [[2, None], [4, None], [None, None]] and preview["headerNote"] == "Your contact line runs onto 2 lines (8 items)."
     # A header goes with the request only when it has a name (what Generate PDF needs too); the same header asks nothing new.
     assert out["headerNamed"] == {"name": "Zora Quillfeather", "email": ""} and out["headerUnnamed"] is None
     assert out["keys"] == ["", True, False]
@@ -82,6 +93,7 @@ def test_the_line_under_the_preview_says_whose_header_it_shows_and_never_a_value
     assert out["noPreviewLine"] is None
     preview = (UI_SRC / "components" / "ResumePreview.jsx").read_text(encoding="utf-8")
     assert "const headerNote = headerLine(preview);" in preview and '<p className="muted small" data-role="preview-header-note">' in preview
+    assert '<p className="muted small" data-role="preview-contact-note">{preview.headerNote}</p>' in preview, "the contact-line warning is shown under the preview"
     for source in (UI_SRC / "resumePreviewModel.js", UI_SRC / "components" / "ResumePreview.jsx", UI_SRC / "components" / "JobResumePanel.jsx"):
         text = source.read_text(encoding="utf-8")
         assert "Shown without your name and contact details" not in text and "NO_HEADER_TEXT" not in text and "postPdfHeader" not in text, f"{source.name}: the old wording, or the page reading the header file's values itself"

@@ -46,11 +46,12 @@ HEADER = {
 #: 0.1.11.3 item 6: the optional line; invented, with a marker no fixture holds.
 WORK_AUTHORIZATION = "TN status, no sponsorship needed (ZQ-4410)"
 SENT = {**HEADER, "work_authorization": WORK_AUTHORIZATION}
-#: The server's own sentence for a resume that does not fit its pages (`resume_pdf.over_limit_note`, pinned in
-#: tests/behaviors/scout_find_jobs/test_pdf_fits_page_limit.py), laid over a real response where a test needs it.
+#: The server's own sentence for a resume that does not fit its pages even at the tightest spacing
+#: (`resume_pdf.over_limit_note` with `lines`, 0.3.6; pinned in tests/behaviors/scout_find_jobs/test_pdf_fits_page_limit.py),
+#: laid over a real response where a test needs it.
 OVER_LIMIT_NOTE = (
-    "This resume takes 3 pages: it does not fit on 2 pages even with the tightest spacing. To get 2 pages, remove a point or two on the "
-    "job's page, then generate the PDF again. Or keep it at 3 pages."
+    "This resume takes 3 pages: it does not fit on 2 pages even with the tightest spacing. To get 2 pages, leave out about 4 lines "
+    "on the job's page, then generate the PDF again. Or keep it at 3 pages."
 )
 PDF_WALL_SECONDS = FIRST_LOAD_WALL_SECONDS  # a render, not a click: 0.08 to 0.10 s measured on a three-line resume
 PDF_CPU_SECONDS = 5.0  # 0.07 measured; the renderer's first run on a machine reads its fonts
@@ -187,7 +188,7 @@ def test_the_over_limit_note_offers_no_shorten_button_and_asks_the_server_nothin
     tighten; the person fits the page with the spacing slider beside the preview and removes a point there.
 
     In the browser: when Generate PDF says the resume does not fit (the note laid over the real PDF response, as in
-    the test above), the form shows the server's sentence, which names removing a point, with NO button, and no
+    the test above), the form shows the server's sentence, which names the lines to leave out, with NO button, and no
     `POST /api/job-resumes/pick` is ever sent. (Until 0.1.11.5 this test,
     `test_shorten_automatically_asks_the_server_once_and_shows_its_sentence`, pinned the button, its one request and
     the two sentences it could show.) What the server answers to an older caller that still sends the action:
@@ -210,7 +211,7 @@ def test_the_over_limit_note_offers_no_shorten_button_and_asks_the_server_nothin
     note = ui.page.locator('[data-role="pdf-fit-note"]')
     note.wait_for()
     said = (note.text_content() or "").strip()
-    assert said == OVER_LIMIT_NOTE and "remove a point" in said and "Shorten automatically" not in said and "--shorten" not in said
+    assert said == OVER_LIMIT_NOTE and "leave out about" in said and "Shorten automatically" not in said and "--shorten" not in said
     assert note.locator("button").count() == 0 and ui.page.locator('[data-action="shorten-resume"]').count() == 0
     assert ui.page.get_by_text("Shorten automatically").count() == 0
     assert sent == [], "nothing asks the server to shorten a resume"

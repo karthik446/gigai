@@ -48,7 +48,15 @@ export function sliderRange(preview) {
   return { min: number(range.min, SPACING_MIN), max: number(range.max, SPACING_MAX), step: number(range.step, SPACING_STEP) };
 }
 
+// A count the server sent (a whole number above 0), else null.
+function countOf(value) {
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+
 // The server's answer as the page holds it, or null when it is not a preview.
+// 0.3.6 (gigai-3jj.4): `tightestPages` (the pages at the tightest spacing, sent only over the limit), `linesToCut`
+// (about how many lines to leave out there, sent only when even it is over) and `headerNote` (the server's sentence
+// when the person's contact line wraps: counts only).
 export function previewOf(answer) {
   if (!answer || typeof answer !== "object" || !Array.isArray(answer.images) || typeof answer.pages !== "number") {
     return null;
@@ -60,13 +68,19 @@ export function previewOf(answer) {
     spacing: clampSpacing(answer.spacing_scale),
     saved: answer.saved === true,
     note: typeof answer.note === "string" && answer.note ? answer.note : null,
+    tightestPages: countOf(answer.tightest_pages),
+    linesToCut: countOf(answer.lines_to_cut),
+    headerNote: typeof answer.header_note === "string" && answer.header_note ? answer.header_note : null,
     headerShown: ["form", "file", "placeholder"].includes(answer.header_shown) ? answer.header_shown : null,
     images: answer.images.filter((image) => typeof image === "string" && image).map((image) => `data:${type};base64,${image}`),
     range: sliderRange(answer),
   };
 }
 
-// What the page says under the count: {text, over}. `over`: more pages than the resume's limit.
+// What the page says under the count: {text, over, hint}. `over`: more pages than the resume's limit.
+// The hint names the slider only when a tighter spacing reaches the limit (0.3.6: the server's `tightest_pages`;
+// an answer without it keeps the slider hint above the tightest spacing). Else it says what the tightest spacing
+// prints and about how many lines to leave out.
 export function pagesLine(preview) {
   if (!preview) {
     return null;
@@ -75,14 +89,15 @@ export function pagesLine(preview) {
   if (preview.maxPages === null || preview.pages <= preview.maxPages) {
     return { text: count, over: false, hint: null };
   }
-  const tightest = preview.spacing <= preview.range.min;
-  return {
-    text: count,
-    over: true,
-    hint: tightest
-      ? `This is the tightest spacing: the resume does not reach ${pagesLabel(preview.maxPages)}. Shorten it, or keep it at ${count}.`
-      : `Move the slider left to reach ${pagesLabel(preview.maxPages)}.`,
-  };
+  const limit = pagesLabel(preview.maxPages);
+  const atTightest = preview.spacing <= preview.range.min;
+  if (!atTightest && (preview.tightestPages === null || preview.tightestPages <= preview.maxPages)) {
+    return { text: count, over: true, hint: `Move the slider left to reach ${limit}.` };
+  }
+  const tightest = pagesLabel(atTightest ? preview.pages : preview.tightestPages);
+  const lines = preview.linesToCut;
+  const cut = lines === null ? `Shorten the resume to reach ${limit}.` : `Leave out about ${lines} line${lines === 1 ? "" : "s"} to reach ${limit}.`;
+  return { text: count, over: true, hint: `Even the tightest spacing prints ${tightest}. ${cut}` };
 }
 
 // The header a preview request carries: the form's values when it has a name

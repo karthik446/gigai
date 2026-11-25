@@ -952,10 +952,18 @@ def resume_pdf_command(
         "finish_url": link,
         "scout_running": running,
         "note": rendered.note,
+        # 0.3.6 (gigai-3jj.4): the header's contact line wrapped (counts only; ``header_note`` is the header file's).
+        "contact_lines": rendered.contact_lines,
+        "contact_note": rendered.contact_note,
     }
     wrote = f"Wrote {shown_path} ({rendered.pages} page{'' if rendered.pages == 1 else 's'}, spacing {rendered.spacing_scale:g})"
     if form is not None:
-        lines = [f"{wrote}, with your name and contact details from {header_file}.", *([rendered.note] if rendered.note else []), *([header_note] if header_note else [])]
+        lines = [
+            f"{wrote}, with your name and contact details from {header_file}.",
+            *([rendered.note] if rendered.note else []),
+            *([rendered.contact_note] if rendered.contact_note else []),
+            *([header_note] if header_note else []),
+        ]
     else:
         lines = [
             f"{wrote}, without your name and contact details.",

@@ -280,7 +280,11 @@ class TailoredResumesRoutesMixin:
 
         0.1.11.5 PH: without ``header`` the pictures show the person's header file to Scout's own page (this server's
         ``Origin``), else the placeholder header: as tall as a real one, so ``pages`` is the count of a PDF with a
-        header.  The file's values are in the pictures only: not stored, not logged, not in any other key."""
+        header.  The file's values are in the pictures only: not stored, not logged, not in any other key.
+
+        0.3.6 (gigai-3jj.4): ``header_note`` / ``contact_lines`` say when the person's contact line wraps (counts
+        only; ``None`` for the placeholder), and over ``max_pages`` ``tightest_pages`` / ``lines_to_cut`` say whether
+        the tightest spacing reaches it (``RenderedPdf``), so the page's hint never points at a slider that cannot."""
 
         import base64
 
@@ -307,6 +311,10 @@ class TailoredResumesRoutesMixin:
             "spacing_scale": rendered.spacing_scale,
             "saved": job_spacing(stored_job_path(stored, home_root, target)) is not None,
             "note": rendered.note,
+            "tightest_pages": rendered.tightest_pages,
+            "lines_to_cut": rendered.lines_to_cut,
+            "header_note": rendered.contact_note,
+            "contact_lines": rendered.contact_lines,
             "spacing": {"min": SPACING_MIN, "max": SPACING_MAX, "step": 0.05},
             "header_shown": shown,
             "image_type": "image/png",

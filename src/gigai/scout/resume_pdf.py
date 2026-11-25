@@ -273,8 +273,9 @@ def _compile_images(template: bytes, directory: str, data: dict[str, object], sc
     return tuple(pages) if isinstance(pages, list) else (pages,)
 
 
-def _end(template: bytes, directory: str, data: dict[str, object], scale: float) -> tuple[int, float]:
-    """(last page, fill of that page 0..1) where the content ends at ``scale``: Typst's own layout, via query."""
+def _layout(template: bytes, directory: str, data: dict[str, object], scale: float) -> tuple[int, float, int]:
+    """(last page, fill of that page 0..1, printed lines of the contact line) at ``scale``: Typst's own layout, via
+    query.  The contact line's count (0.3.6, gigai-3jj.4; 0 with no contact items) is the same at every scale."""
     import typst
 
     try:
@@ -285,7 +286,13 @@ def _end(template: bytes, directory: str, data: dict[str, object], scale: float)
     finally:
         if next(_queries) % QUERIES_PER_EVICTION == 0:
             _evict_layout_cache()
-    return int(found["page"]), float(found["fill"])
+    return int(found["page"]), float(found["fill"]), int(found["contact"])
+
+
+def _end(template: bytes, directory: str, data: dict[str, object], scale: float) -> tuple[int, float]:
+    """(last page, fill of that page 0..1) where the content ends at ``scale``: Typst's own layout, via query."""
+    page, fill, _contact = _layout(template, directory, data, scale)
+    return page, fill
 
 
 #: One layout query in this many is followed by an eviction (``_evict_layout_cache``).  Measured (0.1.10.11 TY, a
@@ -401,6 +408,17 @@ def _lines_over(template: bytes, directory: str, data: dict[str, object], end: t
     return max(1, math.ceil(overflow * bullets / height)) if height > 0 else 1
 
 
+def contact_line_note(lines: int, items: int) -> str:
+    """What a person reads when their contact line wraps (0.3.6, gigai-3jj.4): counts only, never a value.
+
+    The page estimate keeps room for the contact line wrapped ONCE (``HEADER_RESERVE_LINES``), and every line it
+    takes is a line the resume does not get."""
+    return (
+        f"Your contact line runs onto {lines} lines ({items} item{'' if items == 1 else 's'}). "
+        "Each extra line costs one line of the resume; drop an item to win it back."
+    )
+
+
 @dataclass(frozen=True)
 class RenderedPdf:
     pdf: bytes
@@ -413,6 +431,20 @@ class RenderedPdf:
     max_pages: int | None = None
     #: One PNG a page, when the caller asked for the preview's pictures (``images``) instead of the PDF; ``pdf`` is then empty.
     page_images: tuple[bytes, ...] = ()
+    #: 0.3.6 (gigai-3jj.4): the printed lines of the person's contact line, measured in the render's own layout;
+    #: ``None`` with no header of the person's (headerless, or the preview's placeholder).
+    contact_lines: int | None = None
+    #: The items on that line (work authorization included); 0 with no header of the person's.
+    contact_items: int = 0
+    #: Over ``max_pages``: the pages at the tightest spacing (``SPACING_MIN``, same header); else ``None``.
+    tightest_pages: int | None = None
+    #: Over ``max_pages`` even at the tightest spacing: about how many lines to leave out there (``_lines_over``).
+    lines_to_cut: int | None = None
+
+    @property
+    def contact_note(self) -> str | None:
+        """``contact_line_note`` when the contact line wraps; else ``None``."""
+        return contact_line_note(self.contact_lines, self.contact_items) if self.contact_lines is not None and self.contact_lines >= 2 else None
 
 
 #: The header lines under the name that a page ESTIMATE keeps room for (0.1.11.3 item 15): the ONE contact line, and
@@ -514,7 +546,12 @@ def _render(
     0.1.11.5 (d) there was a step between the two, the Skills chips set compactly; the Skills are plain lines now
     and have no second form.)  Auto fit aims at the same limit (``fit_scale``'s ``max_pages``, 0.3.6).  A resume that
     already fits renders exactly as before.  One that cannot be put there renders as its layout says (with auto fit,
-    at the tightest spacing), with ``RenderedPdf.note``, which names about how many lines to leave out (``_lines_over``).
+    at the tightest spacing), with ``RenderedPdf.note`` and ``tightest_pages``.  The note names the slider only when
+    the tightest spacing reaches the limit (0.3.6, gigai-3jj.4); else about how many lines to leave out there
+    (``_lines_over``, also ``lines_to_cut``).
+
+    ``RenderedPdf.contact_lines`` (0.3.6): the printed lines of the person's contact line, read from a layout query
+    the render made anyway (one more only when it made none); never for a placeholder header.
 
     ``fixed`` (0.1.11.5): ``spacing_scale`` is the person's own choice for THIS job (the job page's slider) and is
     used as given: nothing tightens it; over its limit there, the note.  ``images``: the same document as one PNG a
@@ -530,12 +567,13 @@ def _render(
         template = (Path(directory) / "resume.typ").read_bytes()
 
         data = _data(sections, header, company)
-        measured: dict[float, tuple[int, float]] = {}
+        measured: dict[float, tuple[int, float, int]] = {}
 
         def measure(candidate: float) -> tuple[int, float]:
             if candidate not in measured:
-                measured[candidate] = _end(template, directory, data, candidate)
-            return measured[candidate]
+                measured[candidate] = _layout(template, directory, data, candidate)
+            page, fill, _contact = measured[candidate]
+            return page, fill
 
         def placed(floor: float = FIT_FLOOR) -> tuple[float, int | None]:
             scale = fit_scale(measure, max_pages) if auto_fit else clamp_scale(spacing_scale)
@@ -549,20 +587,30 @@ def _render(
             return scale, measure(scale)[0]
 
         scale, pages = placed()
-        note = None
+        note: str | None = None
+        tightest: int | None = None
+        lines: int | None = None
         if max_pages is not None and pages is not None and pages > max_pages:
             # Auto fit over its limit is at the tightest spacing already; the slider's own spacing is never tightened.
             tight_scale, tight_pages = (scale, pages) if fixed or auto_fit else placed(SPACING_MIN)
             if tight_pages is not None and tight_pages <= max_pages:
                 scale, pages = tight_scale, tight_pages
-            elif fixed and scale > SPACING_MIN:
-                note = over_limit_note(pages, max_pages, scale)
             else:
-                note = over_limit_note(pages, max_pages, lines=_lines_over(template, directory, data, measure(SPACING_MIN), max_pages))
-        if images:
-            pictures = _compile_images(template, directory, data, scale)
-            return RenderedPdf(b"", len(pictures), scale, note, max_pages, pictures)
-        return RenderedPdf(_compile(template, directory, data, scale, timestamp), pages, scale, note, max_pages)
+                tightest = measure(SPACING_MIN)[0]
+                if fixed and scale > SPACING_MIN and tightest <= max_pages:
+                    note = over_limit_note(pages, max_pages, scale)
+                else:
+                    lines = _lines_over(template, directory, data, measure(SPACING_MIN), max_pages)
+                    note = over_limit_note(pages, max_pages, lines=lines)
+        contact_lines: int | None = None
+        contact_items = 0
+        if header is not None and not header.placeholder:
+            contact_items = len(data["contact"])  # type: ignore[arg-type]
+            # The same at every spacing: any layout the render made says it (one more query only when it made none).
+            contact_lines = next(iter(measured.values()))[2] if measured else (_layout(template, directory, data, scale)[2] if contact_items else 0)
+        pictures = _compile_images(template, directory, data, scale) if images else ()
+        pdf = b"" if images else _compile(template, directory, data, scale, timestamp)
+        return RenderedPdf(pdf, len(pictures) if images else pages, scale, note, max_pages, pictures, contact_lines, contact_items, tightest, lines)
 
 
 def render_pdf(

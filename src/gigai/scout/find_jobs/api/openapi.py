@@ -2103,8 +2103,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "Returns application/pdf with Content-Disposition: attachment; filename=`<company>-<role>-<YYYY-MM-DD>.pdf` (never your name); changes nothing. "
             "X-GigAI-Pages and X-GigAI-Spacing-Scale say what was rendered. 0.1.11.5: a job whose spacing was saved (the job page's slider, "
             "POST /api/tailored-resumes/preview) is rendered at that spacing as saved; below 1.0 the spacing also tightens the body's line height "
-            "(14.3pt at 1.0 down to 12.5pt at 0.7; the type size never changes, and the gap between two bullets stays 4pt at every spacing, 0.3.5), "
-            "so 0.7 holds between a sixth (long points) and a third (one-line points) more text than 1.0. "
+            "(14.3pt at 1.0 down to 11.5pt at 0.7; the type size never changes, and the gaps tighten with the spacing: 0.3.6 restores 0.3.4's), "
+            "so 0.7 holds more text than 1.0. "
             + _HEADER_NOTE
             + " The PDF stays on the resume's page limit: a saved spacing that would run past it is tightened (to 0.8), then the spacing goes to 0.7 at most; "
             "when no spacing fits, the PDF is rendered as saved and X-GigAI-Fit-Note says so in one plain sentence (page counts and what to do; nothing of the resume). "
@@ -2114,7 +2114,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     ),
     RouteSpec(
         "POST", "/api/tailored-resumes/preview", "Show the stored tailored resume as it will print (page pictures), and save this job's spacing.", "write", "none",
-        {"pages": 2, "max_pages": 2, "spacing_scale": 0.85, "saved": True, "note": None, "spacing": {"min": 0.7, "max": 1.4, "step": 0.05}, "header_shown": "placeholder", "image_type": "image/png", "images": ["iVBORw0KGgo..."]},
+        {
+            "pages": 2, "max_pages": 2, "spacing_scale": 0.85, "saved": True, "note": None, "tightest_pages": None, "lines_to_cut": None,
+            "header_note": None, "contact_lines": None, "spacing": {"min": 0.7, "max": 1.4, "step": 0.05}, "header_shown": "placeholder",
+            "image_type": "image/png", "images": ["iVBORw0KGgo..."],
+        },
         params=(
             _b("profile_id", "string", 'Optional (0.1.11.9: a job has one resume, and the job names it). Still taken from callers of before; "ephemeral" names a pasted resume\'s.'), _b("job_identity", "string", "The job identity.", required=True),
             _HEADER_PARAM,
@@ -2125,8 +2129,13 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description=(
             "The job page's preview: the same render as POST /api/tailored-resumes/pdf (same template, header, spacing and fit; no model call), as one "
             "base64 PNG a page in `images`, so `pages` is the PDF's page count. `spacing_scale` in the reply is the spacing rendered: the one saved for "
-            "this job (`saved` true), else the saved layout's (auto fit: the loosest spacing on the fewest pages). `max_pages` is the resume's page limit; "
-            "when `pages` is over it `note` says so in one plain sentence. Sending `spacing_scale` writes ONE small file beside this job's stored resume and "
+            "this job (`saved` true), else the saved layout's (auto fit: the loosest spacing on the fewest pages; 0.3.6: the tightest when even that is over the page limit). `max_pages` is the resume's page limit; "
+            "when `pages` is over it `note` says so in one plain sentence, and `tightest_pages` is the page count at the tightest spacing (0.7), with the same "
+            "header: at most `max_pages`, a tighter spacing reaches the limit (the note names the slider); over it, `lines_to_cut` is about how many lines "
+            "to leave out to reach it there (the note names them). Both are null when `pages` is within the limit. 0.3.6: `contact_lines` is how many "
+            "printed lines the header's contact line takes, measured in this render's own layout, and `header_note` says so in one plain sentence when "
+            "it wraps (counts only: \"Your contact line runs onto 2 lines (8 items). ...\"; each extra line costs one line of the resume); both null for "
+            "the placeholder header. Sending `spacing_scale` writes ONE small file beside this job's stored resume and "
             "nothing else: the stored resume itself (its lines, `edited`, `updated_at`) is not written, nor the master, nor the saved layout "
             "(PUT /api/resume-display); a later pick of the job's resume keeps it. `header` is used for these pictures only and is never stored. "
             "0.1.11.5: the pictures always show a header, and `header_shown` says which, never a value: `form` (the `header` you sent); `placeholder` "

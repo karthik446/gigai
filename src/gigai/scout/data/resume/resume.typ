@@ -231,5 +231,11 @@
     for b in e.bullets { bullet(b) }
   }
 }
-// Where the content ends, for auto fit (read with `typst query`, never printed).
-#context [#metadata((page: here().page(), fill: (here().position().y - margin-y) / (page.height - 2 * margin-y))) <fit-end>]
+// Where the content ends, for auto fit (read with `typst query`, never printed).  `contact` (0.3.6, gigai-3jj.4): the
+// printed lines of the contact line (each one 14.3pt line box; 0 with no contact items), so the renderer can say when
+// it wraps.  Measured only, from the same query: the layout is the same.
+#context [#metadata((
+  page: here().page(),
+  fill: (here().position().y - margin-y) / (page.height - 2 * margin-y),
+  contact: if d.contact.len() > 0 { int(calc.round(measure(block(width: page.width - 2 * margin-x, contact-line(d.contact))).height / lh-full)) } else { 0 },
+)) <fit-end>]
