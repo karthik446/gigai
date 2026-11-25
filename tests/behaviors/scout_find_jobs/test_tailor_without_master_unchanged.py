@@ -55,9 +55,11 @@ GOLDEN: dict[str, tuple[str, str]] = {
     # 0.3.5 (gigai-lc3), the same ONE case a third time: the PDF's 4pt bullet gap, 12.5pt line floor and Regular 400
     # hold fewer lines on a page, so the estimate loses the third old role again and the case is byte for byte back at
     # the digests of item 15.  Before (0.3.4): sha256:4a3e6dbf... (JSON), sha256:e2023da0... (markdown).
+    # 0.3.6 (gigai-3jj): 0.3.4's gaps and line floor again, so the third old role fits again and the case is back at
+    # 0.3.4's digests (0.3.5's were sha256:41ddaf29... and sha256:06c4afce...).
     "over_long": (
-        "sha256:41ddaf29d2a130348e291c1e2b57c0a6efdfe339a9e812ea45d98ce93718dbc0",
-        "sha256:06c4afcea8aecea58a8237352ed08e6adaebef18f9ef75935eee8bc5e768fbd6",
+        "sha256:4a3e6dbf8a39bdb732e2c827862e14a5d4ae099d8b2e3224e2176fa78f546875",
+        "sha256:e2023da068e589dc654ac7616b9eb380f5322a4b2146cb5b65fed47d5aa2af59",
     ),
 }
 

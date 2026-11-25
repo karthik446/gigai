@@ -30,6 +30,21 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.3.6
+
+A patch release: fixes to the resume PDF and its page count. It changes no stored data, and your points and their words are untouched; it makes no new model call.
+
+#### Fixed (Scout)
+
+- **A two-page resume prints on two pages again, as it did in 0.3.4.** 0.3.5's fixed gap between points and its higher line-height floor pushed many two-page resumes onto a third page. The gaps tighten with the spacing slider again and the line height goes down to 11.5 pt at the tightest spacing, as in 0.3.4. The body keeps 0.3.5's Regular weight and darker ink, set a hair tighter so the same words fit. A resume picked under 0.3.5 that printed on three pages usually prints on two again without a Re-pick; the page count beside the slider is always the count the PDF will have.
+- **Auto fit aims at the resume's page limit.** When even the tightest spacing cannot bring a resume onto its page limit, auto fit now uses the tightest spacing, so the resume is as close to the limit as spacing can bring it. Before, it used the loosest spacing, so the extra page was as long as it could be.
+- **When a resume does not fit, the message says how much to leave out.** If even the tightest spacing prints too many pages, Generate PDF and `gigai scout resume pdf` now say about how many lines to leave out on the job's page to reach the limit, instead of "remove a point or two".
+- **The page count beside the slider only points to the slider when the slider can help.** "Move the slider left to reach 2 pages." now shows only when a tighter spacing really reaches 2 pages. Otherwise it says what the tightest spacing prints and about how many lines to leave out, for example "Even the tightest spacing prints 3 pages. Leave out about 4 lines to reach 2 pages."
+
+#### Added (Scout)
+
+- **Scout says when your contact line wraps.** A contact line that runs onto a second line takes a line the resume could use. The job page's preview and `gigai scout resume pdf` now say so in counts only, for example "Your contact line runs onto 2 lines (8 items). Each extra line costs one line of the resume; drop an item to win it back." The message never shows a value from your header and is never printed in the PDF.
+
 ### 0.3.5
 
 A patch release: one change to how the resume PDF looks. It changes no stored data, and your points and their words are untouched; it makes no new model call.

@@ -50,9 +50,13 @@ def test_tailored_resume_preview_journey(tmp_path: Path, monkeypatch: pytest.Mon
         assert first.status_code == 200, first.text
         assert first.headers["content-type"].startswith("application/json")
         opened = first.json()
-        assert sorted(opened) == ["header_shown", "image_type", "images", "max_pages", "note", "pages", "saved", "spacing", "spacing_scale"]
-        # 0.1.11.5 PH: no header sent and no Origin (an agent): the placeholder header, never cached.
+        assert sorted(opened) == [
+            "contact_lines", "header_note", "header_shown", "image_type", "images", "lines_to_cut", "max_pages", "note", "pages", "saved", "spacing",
+            "spacing_scale", "tightest_pages",
+        ]
+        # 0.1.11.5 PH: no header sent and no Origin (an agent): the placeholder header, never cached; 0.3.6: no contact-line count for it.
         assert opened["header_shown"] == "placeholder" and first.headers["cache-control"] == "no-store"
+        assert (opened["header_note"], opened["contact_lines"], opened["tightest_pages"], opened["lines_to_cut"]) == (None, None, None, None)
         pictures = [base64.b64decode(image) for image in opened["images"]]
         assert opened["image_type"] == "image/png" and pictures and all(picture.startswith(b"\x89PNG\r\n") for picture in pictures)
         pdf = client.post("/api/tailored-resumes/pdf", json=key)

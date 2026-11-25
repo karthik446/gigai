@@ -237,9 +237,9 @@ def _index(page: list[tuple[float, float, str, float]], start: int, test: object
 def test_every_vertical_gap_is_a_multiple_of_the_spacing_unit() -> None:
     """Baseline to baseline = the upper line's box below its baseline + k units + the lower line's box above.
 
-    0.3.5 (gigai-lc3): the ONE exception is the gap between two bullets, a constant 4pt at every scale; the unit is
-    the scale's own at every scale (``gap-tighten`` is gone), the body's line box never goes under 12.5pt, and the
-    Summary, the first section, prints straight under the contact line with no title."""
+    0.3.5 (gigai-lc3) made the gap between two bullets a constant 4pt, dropped ``gap-tighten`` and raised the body's
+    line floor to 12.5pt; 0.3.6 (gigai-3jj) put all three back, so every gap is units again.  The Summary, the first
+    section, prints straight under the contact line with no title (0.3.5, kept)."""
     for scale in (0.7, 0.85, 1.0, 1.4):
         page = _lines(_pdf(_result(), spacing_scale=scale, auto_fit=False))[0]
         texts = [t.strip() for _, _, t, _ in page]
@@ -249,10 +249,13 @@ def test_every_vertical_gap_is_a_multiple_of_the_spacing_unit() -> None:
         first_bullet = _index(page, org, lambda line: line[2].startswith("•"))
         second_bullet = _index(page, first_bullet + 1, lambda line: line[2].startswith("•"))
         next_org = _index(page, second_bullet, lambda line: abs(line[3]) > 10.5)  # the organisation size
-        # 0.1.11.5: below 1.0 the BODY's line box tightens in a straight line from 14.3pt down to the floor at 0.7 (an
+        # 0.1.11.5: below 1.0 the BODY's line box tightens in a straight line from 14.3pt down to 11.5pt at 0.7 (an
         # organisation line keeps at least 13pt); the header's lines keep 14.3pt, and at 1.0 and above nothing moved.
-        # 0.3.5: the floor is 12.5pt (was 11.5pt, Inter's single-spaced line: no air between lines).
-        lh = 14.3 if scale >= 1.0 else max(12.5, 14.3 - (14.3 - 12.5) * (1.0 - scale) / 0.3)
+        lh = 14.3 if scale >= 1.0 else max(11.5, 14.3 - (14.3 - 11.5) * (1.0 - scale) / 0.3)
+        # 0.1.11.5 PE: below 1.0 the gap unit shrinks twice as fast as the scale (``gap-tighten`` in resume.typ): 0.85
+        # has the gaps 0.70 had, 0.70 has 0.40 of the unit; at 1.0 and above the unit is the scale's, as before.
+        gap_scale = scale if scale >= 1.0 else 1.0 - 2.0 * (1.0 - scale)
+        assert {0.7: 0.4, 0.85: 0.7}.get(scale, scale) == pytest.approx(gap_scale)
         body, entry = _box(9.5, lh), _box(10.7, max(lh, 13.0))
         assert (scale < 1.0) or (body, entry) == (BODY, ORG)
         pairs = (  # (upper line, lower line, upper box, lower box, units)
@@ -263,15 +266,13 @@ def test_every_vertical_gap_is_a_multiple_of_the_spacing_unit() -> None:
             (experience, org, SECTION, entry, 8),  # after a section title
             (org, org + 1, entry, body, 0),  # the role line sits directly under the organisation
             (org + 1, first_bullet, body, body, 2),  # after the role line
+            (second_bullet - 1, second_bullet, body, body, 1),  # between bullets
             (next_org - 1, next_org, body, entry, 7),  # between entries
         )
         for upper, lower, a, b, units in pairs:
             gap = page[upper][0] - page[lower][0]
-            expected = a[1] + units * UNIT * scale + b[0]
+            expected = a[1] + units * UNIT * gap_scale + b[0]
             assert abs(gap - expected) <= 0.1, f"scale {scale}: {texts[upper][:20]!r} -> {texts[lower][:20]!r} is {gap:.2f}pt, expected {units}s = {expected:.2f}pt"
-        # 0.3.5 (gigai-lc3): between two bullets a constant 4pt at every scale, never the unit (0.7pt at 0.7).
-        between = page[second_bullet - 1][0] - page[second_bullet][0]
-        assert abs(between - (body[1] + 4.0 + body[0])) <= 0.1, f"scale {scale}: between bullets {between:.2f}pt, expected the line box + 4pt"
 
 
 def test_slider_extremes_render_one_or_two_pages_without_overlap() -> None:
@@ -313,7 +314,8 @@ def test_auto_fit_spreads_a_long_two_page_resume_to_fill_page_two() -> None:
     0.1.11.5 PB5: 72% at 1.4x, with page 1 full to 96%.  Before, page 2 was 82% full because a whole role had left
     page 1, which ended at 85%: the same content, the empty band in another place.
     0.3.5 (gigai-lc3): 27 filler lines, were 21: the 4pt bullet gap and Regular 400 fill a page sooner, and the
-    fixture of 21 left page 2 only 69% full at 1.4x (74% now, page 1 full to 97%)."""
+    fixture of 21 left page 2 only 69% full at 1.4x (74% now, page 1 full to 97%).  0.3.6 (gigai-3jj): still 27, page 2
+    62% full at 1.0x and 72% after auto fit."""
     result = _sized(3, 27)
     pages, fill = _last_fill(_pdf(result, spacing_scale=1.0, auto_fit=False))
     assert pages == 2 and 0.55 <= fill <= 0.75, f"fixture drifted: {pages} pages, page 2 {fill:.2f} full at 1.0x"
@@ -326,7 +328,7 @@ def test_auto_fit_spreads_a_long_two_page_resume_to_fill_page_two() -> None:
 
 def test_auto_fit_pulls_a_just_over_one_page_resume_onto_one_page() -> None:
     """(b) ~1.06 pages at 1.0x: auto fit tightens the spacing (never below 0.7x, never smaller type) to one page."""
-    result = _sized(1, 16)  # 0.1.11.5 (d): the Skills are plain lines, so the fixture needs four more lines to pass one page; 0.3.5 (gigai-lc3): 16, 12 fit one page at Regular 400 with the 4pt bullet gap
+    result = _sized(1, 18)  # 0.1.11.5 (d): the Skills are plain lines, so the fixture needs four more lines to pass one page; 0.3.5 (gigai-lc3): 16; 0.3.6 (gigai-3jj): 18, 17 fit one page at 1.0 with 0.3.4's gaps and the -0.08pt tracking
     assert len(_lines(_pdf(result, spacing_scale=1.0, auto_fit=False))) == 2
     data = _pdf(result)
     assert len(_lines(data)) == 1

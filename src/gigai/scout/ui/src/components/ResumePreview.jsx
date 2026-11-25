@@ -157,6 +157,10 @@ export default function ResumePreview({ profileId, jobIdentity, header = null, o
             {headerNote}
           </p>
         )}
+        {preview && preview.headerNote && (
+          // 0.3.6 (gigai-3jj.4): the server's sentence when the contact line wraps (counts only, never a value).
+          <p className="muted small" data-role="preview-contact-note">{preview.headerNote}</p>
+        )}
         {error && (
           <div className="callout danger" role="alert" data-role="preview-error">
             The preview could not be made. {error}

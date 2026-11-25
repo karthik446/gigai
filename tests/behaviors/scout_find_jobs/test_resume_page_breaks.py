@@ -103,9 +103,10 @@ def _lines(name: str, spacing: float) -> tuple[Line, ...]:
 
 
 def _body_line(spacing: float) -> float:
-    """The body's line box at ``spacing`` (``lh-body`` in resume.typ; 0.3.5: the floor is 12.5pt, was 11.5pt)."""
+    """The body's line box at ``spacing`` (``lh-body`` in resume.typ; the floor is 11.5pt: 0.3.5 raised it to 12.5pt,
+    0.3.6, gigai-3jj, put it back)."""
 
-    return 14.3 if spacing >= 1.0 else max(12.5, 14.3 - (14.3 - 12.5) * (1.0 - spacing) / 0.3)
+    return 14.3 if spacing >= 1.0 else max(11.5, 14.3 - (14.3 - 11.5) * (1.0 - spacing) / 0.3)
 
 
 def _bands(name: str, spacing: float) -> list[float]:
@@ -208,8 +209,9 @@ def test_an_entry_splits_across_a_page_break_and_one_bullet_may_end_or_start_a_p
 #: The most a page break may leave empty before the last two pages, in body lines: an entry's heading, its role line and
 #: a three-line bullet with their gaps do not fit (rules 1 and 2), so the page ends before them.  Reached: 6.0 (the PE
 #: fixture at 1.10).  BEFORE this change: 14.8 (a whole role of three bullets left the page).  0.3.5 (gigai-lc3): 6.5,
-#: reached 5.3: with the 4pt bullet gap and Regular 400 a page holds fewer lines, and the piece that fails to fit is smaller.
-BAND_LINES = 6.5
+#: reached 5.3.  0.3.6 (gigai-3jj): 5.0, reached 3.7 (the split fixture at 0.90): the unit bullet gap, the 11.5pt floor
+#: and the -0.08pt tracking leave a smaller piece to fail to fit.
+BAND_LINES = 5.0
 #: The same for the page before the last.  0.3.3 (gigai-0rs): the short sections no longer move whole, so the page
 #: before the last is short by one piece like any other, and the largest piece is a section title with its first
 #: entry (its heading, two lines of technologies and a three-line bullet).  Reached: 7.9 (the Skills last at 1.00:
@@ -273,16 +275,16 @@ def test_the_last_project_may_end_a_page_before_its_last_bullet() -> None:
 
 #: (the automatic spacing, its pages), measured 2026-10-07.  BEFORE this change: the PE fixture 0.85, split 0.70,
 #: split with 16 bullets 0.80, three earlier roles 0.70, five 0.70, the Skills last 0.70, the earlier roles last 1.05 / 1.40.
-#: 0.3.5 (gigai-lc3): the 4pt bullet gap, the 12.5pt line floor and Regular 400 hold fewer lines on a page: the real
-#: fixture fits 2 pages at 0.75 (was 0.85), and the split fixtures (the real pick with more) no longer fit 2 pages at
-#: any spacing, so auto fit ends them on 3 pages at the loosest (1.4): the fewest pages any spacing reaches.
+#: 0.3.5 (gigai-lc3): the real fixture 0.75 and every split fixture 3 pages at 1.4 (the 4pt bullet gap, the 12.5pt line
+#: floor and Regular 400).  0.3.6 (gigai-3jj: 0.3.4's gaps and floor, Regular 400 tracked -0.08pt): every one fits 2
+#: pages again, at 0.3.4's spacing or a step looser (16 bullets 0.85, was 0.80; five earlier roles 0.75, was 0.70).
 AUTO_FIT = {
-    "real": (0.75, 2),
-    "split": (1.4, 3),
-    "split, 16 bullets": (1.4, 3),
-    "split, three earlier roles": (1.4, 3),
-    "split, five earlier roles": (1.4, 3),
-    "split, the Skills last": (1.4, 3),
+    "real": (0.85, 2),
+    "split": (0.75, 2),
+    "split, 16 bullets": (0.85, 2),
+    "split, three earlier roles": (0.75, 2),
+    "split, five earlier roles": (0.75, 2),
+    "split, the Skills last": (0.75, 2),
     "split, the earlier roles last": (1.4, 2),
     "real, the earlier roles last": (1.4, 2),
 }
@@ -298,9 +300,9 @@ def test_the_automatic_spacing_is_as_loose_as_before_or_looser() -> None:
 
 def test_the_split_fixture_is_on_fewer_pages_where_a_page_break_wasted_room() -> None:
     # BEFORE this change: 3 pages at 0.75 (now 2), and 4 pages from 1.10 up (now 3).
-    # 0.3.5 (gigai-lc3): 3 pages at every spacing (the 4pt bullet gap, the 12.5pt line floor and Regular 400 hold fewer lines).
+    # 0.3.5 (gigai-lc3): 3 pages at every spacing.  0.3.6 (gigai-3jj): as before 0.3.5 again, 2 pages at 0.70 and 0.75.
     pages = {spacing: len(PdfReader(io.BytesIO(_pdf("split", spacing))).pages) for spacing in (0.7, 0.75, 0.85, 1.0, 1.1, 1.4)}
-    assert pages == {0.7: 3, 0.75: 3, 0.85: 3, 1.0: 3, 1.1: 3, 1.4: 3}
+    assert pages == {0.7: 2, 0.75: 2, 0.85: 3, 1.0: 3, 1.1: 3, 1.4: 3}
 
 
 def test_the_previews_pictures_are_the_pdfs_pages() -> None:

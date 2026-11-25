@@ -52,8 +52,9 @@ a line left out says it "scores lower for this posting than the lines this role 
 yourself with the spacing slider beside the preview on the job's page, which says how many
 pages the resume prints on ("2 pages", or "3 pages" when it runs over). Such a pick is never
 cut to fit a page count, and a resume that prints on 3 pages is not held back for it. To get
-to 2 pages, move the spacing slider left; if the tightest spacing is not enough, remove a point
-on the job's page (`resume pick --shorten` is retired: it changes nothing and says so).
+to 2 pages, move the spacing slider left; if the tightest spacing is not enough, the page says
+so and about how many lines to leave out on the job's page (`resume pick --shorten` is
+retired: it changes nothing and says so).
 
 **When Scout's own rules picked the lines** (a draft for a held job, or no usable pick from the
 assessment: `picked_by` is `code`), the resume is cut to **2 pages at the default spacing**
@@ -106,21 +107,24 @@ only Education, or the last lines of the Skills and Education.
 The resume card on a job's page has one view: the resume as the PDF prints it, one picture a
 page, with the controls beside it. There is no other view to switch to.
 
-- **Spacing** is one slider, from 0.70 ("Tighter") to 1.40 ("Looser"). It changes the gaps between roles and
-  sections and, below 1.00, the line height (never below 12.5 pt); the 4 pt gap between points and
-  the type size never change. Until you move it the page says
+- **Spacing** is one slider, from 0.70 ("Tighter") to 1.40 ("Looser"). It changes the gaps, the
+  gap between points included, and, below 1.00, the line height (never below 11.5 pt); it never
+  changes the type size. Until you move it the page says
   "Fitted automatically. Move the slider to set this job's spacing; it is saved for this job."
   After a move it says "Saved for this job. Generate PDF uses this spacing." There is no Save
   button, and the spacing of one job changes no other job.
   `gigai scout resume pdf --job-url <url>` uses the same spacing.
 - **The page count** is beside the slider and follows every change: "2 pages". When the resume
-  runs over, it says "3 pages" and "Move the slider left to reach 2 pages." At the tightest
-  spacing it says so: "This is the tightest spacing: the resume does not reach 2 pages. Shorten
-  it, or keep it at 3 pages."
+  runs over and a tighter spacing reaches the limit, it says "3 pages" and "Move the slider
+  left to reach 2 pages." When even the tightest spacing does not, it says what that spacing
+  prints and about how many lines to leave out: "Even the tightest spacing prints 3 pages.
+  Leave out about 4 lines to reach 2 pages." Generate PDF's note says the same in a sentence.
 - **The header.** The preview always shows a header, so the page count is the one your PDF will
   have. With a [header file](#your-header-file) that has your name, it is yours, and the page
   says "Showing your header from header.json". Without one it is a grey "Your Name" with the
   line "Placeholder header: add yours in Generate PDF". The placeholder is never in a PDF.
+  When your contact line wraps, the page says so in counts only: "Your contact line runs onto
+  2 lines (8 items). Each extra line costs one line of the resume; drop an item to win it back."
   While the Generate PDF form is open with a name in it, the preview shows what the form holds.
 - **Generate PDF**, at the top of the card, makes the PDF with the spacing you see. The preview
   and the PDF are the same render.
@@ -272,7 +276,9 @@ details): `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`:
   field of its own under its label. The PDF prints each link's address in the contact line.
 - The PDF header is your name and ONE line under it: location | work authorization | links |
   email | phone. A field you leave empty leaves no gap. A line too long for the page is set
-  in slightly smaller type first, and wraps only when that is not enough.
+  in slightly smaller type first, and wraps only when that is not enough. Each extra line
+  is a line the resume does not get: the preview and `gigai scout resume pdf` say when the
+  line wraps and how many items it holds (never a value; never in the PDF).
 - `github` and `linkedin` take just your id (`github.com/<id>`, `linkedin.com/in/<id>`); a
   full address works too. `website` takes a site address. Each prints without `https://` or
   `www.` and is a clickable link. A link named both here and in `links` prints once.

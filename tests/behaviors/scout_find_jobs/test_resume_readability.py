@@ -1,9 +1,10 @@
 """0.3.5 (gigai-lc3): the resume PDF reads at every spacing, and the page estimate stays an upper bound on it.
 
-Read from the PDF itself (pypdf text positions, fonts and fill colours): every bullet is its own unit (a constant
-4pt gap between bullets at every spacing, always more than the leading inside one), the body is Inter Regular in
-near-black with a line box of at least 12.5pt, the role line is ``Title | dates`` on one line and the Summary prints
-straight under the header with no title.  Synthetic resumes only (``tests/support/resume_spacing_fixture``)."""
+Read from the PDF itself (pypdf text positions, fonts and fill colours): every bullet is its own unit (a gap of one
+spacing unit between bullets at every spacing, on top of the line box), the body is Inter Regular in near-black with
+a line box of at least 11.5pt, the role line is ``Title | dates`` on one line and the Summary prints straight under
+the header with no title.  0.3.6 (gigai-3jj): the bullet gap is the unit again (0.3.5: a constant 4pt) and the floor
+11.5pt again (0.3.5: 12.5pt), as in 0.3.4.  Synthetic resumes only (``tests/support/resume_spacing_fixture``)."""
 
 from __future__ import annotations
 
@@ -20,9 +21,10 @@ from tests.support.resume_spacing_fixture import resume
 STAMP = datetime(2026, 11, 22, tzinfo=timezone.utc)
 HEADER = PdfHeader("Riley Example", "Staff Software Engineer", (ContactItem("Denver, Colorado", None), ContactItem("riley@example.com", None), ContactItem("github.com/example", "https://github.com/example")))
 TOL = 0.1
-#: ``resume.typ``: ``bullet-gap``, ``lh-tight``, ``lh-full``, ``ink`` (#1C1C1E as Typst writes it, 8 significant digits).
-BULLET_GAP = 4.0
-LH = {0.7: 12.5, 0.85: 13.4, 1.0: 14.3, 1.4: 14.3}
+#: ``resume.typ``: the bullet gap ``s`` (1.71pt x ``gap-scale``, to 0.1pt), ``lh-tight``, ``lh-full``, ``ink`` (#1C1C1E as
+#: Typst writes it, 8 significant digits).  0.3.5 (gigai-lc3): a constant 4pt gap, LH 12.5 / 13.4 below 1.0.
+BULLET_GAP = {0.7: 0.7, 0.85: 1.2, 1.0: 1.7, 1.4: 2.4}
+LH = {0.7: 11.5, 0.85: 12.9, 1.0: 14.3, 1.4: 14.3}
 INK = b"0.10980392 0.10980392 0.11764706"
 #: A four-to-five-line point; ``{n}`` keeps every bullet its own text.
 LONG = (
@@ -84,8 +86,8 @@ def _bullet_groups(page: list[tuple[float, float, str, str]]) -> list[list[float
 
 @pytest.mark.parametrize("scale", sorted(LH))
 def test_every_bullet_is_its_own_unit_at_every_spacing(scale: float) -> None:
-    """The gap between two bullets is 4pt at every spacing (not the gap unit, which at 0.7 was under 1pt), and the
-    body's line box is never under 12.5pt: the leading inside a bullet and the gap between bullets both stay readable."""
+    """The gap between two bullets is one spacing unit at every spacing (0.3.5 made it a constant 4pt; 0.3.6 put the
+    unit back), on top of the body's line box, which is never under 11.5pt: each bullet starts on a line of its own."""
 
     within: set[float] = set()
     between: list[float] = []
@@ -99,7 +101,7 @@ def test_every_bullet_is_its_own_unit_at_every_spacing(scale: float) -> None:
     assert abs(leading - LH[scale]) <= TOL, f"line box {leading} at {scale}, expected {LH[scale]}"
     assert between, "no two bullets in a row"
     gaps = {round(b - leading, 1) for b in between}
-    assert gaps == {BULLET_GAP}, f"bullet gaps {gaps} at {scale}: expected the constant {BULLET_GAP}pt over the leading {leading}"
+    assert gaps == {BULLET_GAP[scale]}, f"bullet gaps {gaps} at {scale}: expected the unit {BULLET_GAP[scale]}pt over the leading {leading}"
 
 
 def test_body_is_regular_near_black_with_the_reference_look() -> None:

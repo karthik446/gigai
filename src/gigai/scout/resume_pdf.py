@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import math
 import re
 from contextlib import ExitStack
 from datetime import date, datetime, timezone
@@ -29,6 +30,7 @@ from collections.abc import Callable
 from urllib.parse import quote
 
 from dataclasses import dataclass
+from typing import Any
 
 from gigai.scout.resume_display import (
     SPACING_DEFAULT, SPACING_MAX, SPACING_MIN, ContactItem, DisplaySettings, PdfHeader, form_header, load_display, profile_title, valid_spacing,
@@ -271,18 +273,32 @@ def _compile_images(template: bytes, directory: str, data: dict[str, object], sc
     return tuple(pages) if isinstance(pages, list) else (pages,)
 
 
-def _end(template: bytes, directory: str, data: dict[str, object], scale: float) -> tuple[int, float]:
-    """(last page, fill of that page 0..1) where the content ends at ``scale``: Typst's own layout, via query."""
+def _query(template: bytes, directory: str, data: dict[str, object], scale: float) -> dict[str, Any]:
+    """The ``<fit-end>`` metadata at ``scale``: Typst's own layout, via query.  Every template's has ``page`` and
+    ``fill``; resume.typ's also ``contact`` (0.3.6), letter.typ's not."""
     import typst
 
     try:
-        found = json.loads(typst.query(
+        return json.loads(typst.query(
             template, "<fit-end>", field="value", one=True, font_paths=[directory], ignore_system_fonts=True,
             sys_inputs={"data": json.dumps(data, ensure_ascii=False), "scale": repr(scale)},
         ))
     finally:
         if next(_queries) % QUERIES_PER_EVICTION == 0:
             _evict_layout_cache()
+
+
+def _layout(template: bytes, directory: str, data: dict[str, object], scale: float) -> tuple[int, float, int]:
+    """(last page, fill of that page 0..1, printed lines of the contact line) at ``scale``, resume.typ's only: one
+    layout query.  The contact line's count (0.3.6, gigai-3jj.4; 0 with no contact items) is the same at every scale."""
+    found = _query(template, directory, data, scale)
+    return int(found["page"]), float(found["fill"]), int(found["contact"])
+
+
+def _end(template: bytes, directory: str, data: dict[str, object], scale: float) -> tuple[int, float]:
+    """(last page, fill of that page 0..1) where the content ends at ``scale``: any template (the resume's, the
+    letter's), one layout query."""
+    found = _query(template, directory, data, scale)
     return int(found["page"]), float(found["fill"])
 
 
@@ -314,16 +330,25 @@ def _evict_layout_cache() -> None:
         pass  # the measurement stands; the next eviction, or the next PDF, ages the cache out
 
 
-def fit_scale(measure: Callable[[float], tuple[int, float]]) -> float:
+def fit_scale(measure: Callable[[float], tuple[int, float]], max_pages: int | None = None) -> float:
     """Auto fit: the LARGEST scale on the grid that still ends on the fewest pages any scale reaches.
 
-    Content close to one page is pulled onto one page (down to 0.7x, where the body's lines are tighter too
-    (0.1.11.5, ``resume.typ``); never smaller type); content that needs
+    Content close to one page is pulled onto one page (down to 0.7x, where the body's lines and gaps are tighter
+    too (0.1.11.5, ``resume.typ``); never smaller type); content that needs
     two pages spreads to the loosest spacing that does not start a third, so page 2 is as full as the range
     allows.  Pages only grow with the scale, so a binary search needs at most 6 measurements (0.7x, 1.4x, 4
     between); the result is a pure function of the content.
+
+    ``max_pages`` (0.3.6, gigai-3jj): the page limit auto fit aims at.  When the fewest pages (at 0.7x) are within
+    it, the rule above stands: the loosest scale on those fewest pages, so a resume on fewer pages than its limit
+    stays on them and is never spread onto the limit's last page.  When even 0.7x is over it, the TIGHTEST scale,
+    0.7x (``_GRID[-1]``; ``_GRID`` is loosest first), after one measurement: the resume is as close to its limit as
+    the spacing can bring it, and the note names the lines to leave out (``_render``).  Before, the loosest scale
+    on the fewest pages: a resume one line over its limit printed at 1.40x, its extra page as long as it could be.
     """
     fewest = measure(_GRID[-1])[0]
+    if max_pages is not None and fewest > max_pages:
+        return _GRID[-1]
     if measure(_GRID[0])[0] <= fewest:
         return _GRID[0]
     lo, hi = len(_GRID) - 1, 0  # _GRID[lo] fits in ``fewest`` pages; _GRID[hi] does not
@@ -346,20 +371,67 @@ def clamp_scale(value: float) -> float:
 FIT_FLOOR = 0.8
 
 
-def over_limit_note(pages: int, max_pages: int, at_spacing: float | None = None) -> str:
+def over_limit_note(
+    pages: int, max_pages: int, at_spacing: float | None = None, *, lines: int | None = None, where: str | None = "the job's page",
+) -> str:
     """What a person reads when the resume cannot be put on ``max_pages`` pages: plain words, ASCII (a header value).
 
     ``at_spacing`` (0.1.11.5): the spacing was the person's own (the job page's slider) and a tighter one exists, so
-    the sentence names the slider first."""
+    the sentence names the slider first.  Otherwise the resume is over its limit even at the tightest spacing, and
+    ``lines`` (0.3.6, gigai-3jj) is about how many lines to leave out to reach it there (``_lines_over``); ``None``
+    when the layout gives no such count (no bullet to measure a line by): the note then names no number.
+
+    ``where`` (0.3.6 fix C): the page the person shortens the resume on; ``None`` for resume markdown of their own
+    (``render_markdown_pdf``), which has no such page: the lines are left out in the resume itself."""
     limit = f"{max_pages} page{'' if max_pages == 1 else 's'}"
     if at_spacing is not None and at_spacing > SPACING_MIN:
         return (
             f"This resume takes {pages} pages at spacing {at_spacing:.2f}: its limit is {limit}. "
             f"Move the spacing slider on the job's page down, or remove a point there, then generate the PDF again. Or keep it at {pages} pages."
         )
+    count = None if lines is None else f"about {lines} line{'' if lines == 1 else 's'}"
+    if where is None:
+        cut = "shorten the resume" if count is None else f"leave out {count} in the resume"
+    else:
+        cut = f"shorten the resume on {where}" if count is None else f"leave out {count} on {where}"
     return (
         f"This resume takes {pages} pages: it does not fit on {limit} even with the tightest spacing. "
-        f"To get {limit}, remove a point or two on the job's page, then generate the PDF again. Or keep it at {pages} pages."
+        f"To get {limit}, {cut}, then generate the PDF again. "
+        f"Or keep it at {pages} pages."
+    )
+
+
+def _lines_over(template: bytes, directory: str, data: dict[str, object], end: tuple[int, float], max_pages: int) -> int | None:
+    """About how many lines to leave out so a resume that ends at ``end`` (``_end`` at ``SPACING_MIN``) fits ``max_pages``.
+
+    From the real layout, at the tightest spacing: the OVERFLOW is the height past the limit's last page (the pages
+    after it, the last one ``fill`` full), and a line's height is the resume's MEAN bullet height: the height every
+    bullet takes (the layout's height less that of the same resume with no bullet, ONE more layout query) over the
+    bullets.  ``ceil(overflow / mean)``, at least 1.  A count, never a promise: which lines go is the person's choice,
+    and a page break can take a line more.  ``None`` (0.3.6 fix C) when there is no bullet height to count by (no
+    bullet, or the bullets take no height): no number is honest then."""
+    sections: list[dict[str, Any]] = data["sections"]  # type: ignore[assignment]
+    bullets = sum(1 for s in sections for line in s["lines"] if line["bullet"]) + sum(len(e["bullets"]) for s in sections for e in s["entries"])
+    if not bullets:
+        return None
+    bare = [
+        {**s, "lines": [line for line in s["lines"] if not line["bullet"]], "entries": [{**e, "bullets": []} for e in s["entries"]]}
+        for s in sections
+    ]
+    without = _end(template, directory, {**data, "sections": bare}, SPACING_MIN)
+    height = (end[0] - 1 + end[1]) - (without[0] - 1 + without[1])  # in pages of text area
+    overflow = end[0] - 1 - max_pages + end[1]
+    return max(1, math.ceil(overflow * bullets / height)) if height > 0 else None
+
+
+def contact_line_note(lines: int, items: int) -> str:
+    """What a person reads when their contact line wraps (0.3.6, gigai-3jj.4): counts only, never a value.
+
+    The page estimate keeps room for the contact line wrapped ONCE (``HEADER_RESERVE_LINES``), and every line it
+    takes is a line the resume does not get."""
+    return (
+        f"Your contact line runs onto {lines} lines ({items} item{'' if items == 1 else 's'}). "
+        "Each extra line costs one line of the resume; drop an item to win it back."
     )
 
 
@@ -375,6 +447,22 @@ class RenderedPdf:
     max_pages: int | None = None
     #: One PNG a page, when the caller asked for the preview's pictures (``images``) instead of the PDF; ``pdf`` is then empty.
     page_images: tuple[bytes, ...] = ()
+    #: 0.3.6 (gigai-3jj.4): the printed lines of the person's contact line, measured in the render's own layout;
+    #: ``None`` with no header of the person's (headerless, or the preview's placeholder), or when the render made no
+    #: layout query and the caller reports no count (neither ``count_pages`` nor ``images``: a plain ``render_pdf``).
+    contact_lines: int | None = None
+    #: The items on that line (work authorization included); 0 with no header of the person's.
+    contact_items: int = 0
+    #: Over ``max_pages``: the pages at the tightest spacing (``SPACING_MIN``, same header); else ``None``.
+    tightest_pages: int | None = None
+    #: Over ``max_pages`` even at the tightest spacing: about how many lines to leave out there (``_lines_over``);
+    #: ``None`` there too when the layout gives no count (no bullet to measure a line by).
+    lines_to_cut: int | None = None
+
+    @property
+    def contact_note(self) -> str | None:
+        """``contact_line_note`` when the contact line wraps; else ``None``."""
+        return contact_line_note(self.contact_lines, self.contact_items) if self.contact_lines is not None and self.contact_lines >= 2 else None
 
 
 #: The header lines under the name that a page ESTIMATE keeps room for (0.1.11.3 item 15): the ONE contact line, and
@@ -434,10 +522,10 @@ def _estimate(sections: list[dict[str, object]], spacing_scale: float, header_li
     its largest (``HEADER_RESERVE_LINES``).  No PDF is compiled.
 
     0.1.11.5: an estimate keeps the body's FULL line height at every spacing (the template's ``fixed_lines``), as
-    it did before the spacing scale also tightened the lines; every gap is the PDF's own (0.3.5: the bullet gap is
-    a constant 4pt, the rest the unit's multiples at every scale).  What a pick or the length rule budgets does not
-    move, and the PDF, whose lines do tighten below 1.0, never takes more pages than the estimate counted.  ``printed``
-    measures as the PDF prints instead."""
+    it did before the spacing scale also tightened the lines, and the gap unit untightened (the scale's own; the PDF's
+    shrinks twice as fast below 1.0, ``gap-tighten``), so every gap is at least the PDF's.  What a pick or the length
+    rule budgets does not move, and the PDF, whose lines and gaps do tighten below 1.0, never takes more pages than
+    the estimate counted.  ``printed`` measures as the PDF prints instead."""
     root = resources.files("gigai.scout").joinpath("data", "resume")
     with ExitStack() as stack:
         directory = str(stack.enter_context(resources.as_file(root)))
@@ -466,7 +554,7 @@ def pages_at(result: TailoredResume, spacing_scale: float, *, header_lines: int 
 
 def _render(
     sections: list[dict[str, object]], header: PdfHeader | None, *, company: str, timestamp: datetime, spacing_scale: float, auto_fit: bool,
-    count_pages: bool = False, max_pages: int | None = None, fixed: bool = False, images: bool = False,
+    count_pages: bool = False, max_pages: int | None = None, fixed: bool = False, images: bool = False, where: str | None = "the job's page",
 ) -> RenderedPdf:
     """``header`` ``None``: no header, a blank block of the header's height reserved (an agent's PDF).
 
@@ -474,8 +562,16 @@ def _render(
     the loosest spacing down to ``FIT_FLOOR`` that stays on it, then down to ``SPACING_MIN``.  That is what holds a
     resume to its pages when a saved spacing is looser than it needs or a contact line wraps twice.  (Until
     0.1.11.5 (d) there was a step between the two, the Skills chips set compactly; the Skills are plain lines now
-    and have no second form.)  A resume that already fits renders exactly as before.  One that cannot be put there
-    renders as its layout says, with ``RenderedPdf.note``.
+    and have no second form.)  Auto fit aims at the same limit (``fit_scale``'s ``max_pages``, 0.3.6).  A resume that
+    already fits renders exactly as before.  One that cannot be put there renders as its layout says (with auto fit,
+    at the tightest spacing), with ``RenderedPdf.note`` and ``tightest_pages``.  The note names the slider only when
+    the tightest spacing reaches the limit (0.3.6, gigai-3jj.4); else about how many lines to leave out there
+    (``_lines_over``, also ``lines_to_cut``), on ``where`` (``over_limit_note``'s).
+
+    ``RenderedPdf.contact_lines`` (0.3.6): the printed lines of the person's contact line, read from a layout query
+    the render made anyway; one more only for a caller that reports it (``count_pages`` or ``images``: the CLI, the
+    API's page count, the preview), else ``None`` (a plain ``render_pdf``: one compile, no query); never for a
+    placeholder header.
 
     ``fixed`` (0.1.11.5): ``spacing_scale`` is the person's own choice for THIS job (the job page's slider) and is
     used as given: nothing tightens it; over its limit there, the note.  ``images``: the same document as one PNG a
@@ -490,37 +586,54 @@ def _render(
         directory = str(stack.enter_context(resources.as_file(root)))
         template = (Path(directory) / "resume.typ").read_bytes()
 
-        def placed(data: dict[str, object], floor: float = FIT_FLOOR) -> tuple[float, int | None]:
-            measured: dict[float, tuple[int, float]] = {}
+        data = _data(sections, header, company)
+        measured: dict[float, tuple[int, float, int]] = {}
 
-            def measure(candidate: float) -> tuple[int, float]:
-                if candidate not in measured:
-                    measured[candidate] = _end(template, directory, data, candidate)
-                return measured[candidate]
+        def measure(candidate: float) -> tuple[int, float]:
+            if candidate not in measured:
+                measured[candidate] = _layout(template, directory, data, candidate)
+            page, fill, _contact = measured[candidate]
+            return page, fill
 
-            scale = fit_scale(measure) if auto_fit else clamp_scale(spacing_scale)
+        def placed(floor: float = FIT_FLOOR) -> tuple[float, int | None]:
+            scale = fit_scale(measure, max_pages) if auto_fit else clamp_scale(spacing_scale)
             if max_pages is None:
                 # Auto fit already measured the scale it chose; otherwise the count costs one layout query, only on request.
                 return scale, measured[scale][0] if scale in measured else (measure(scale)[0] if count_pages else None)
-            if not auto_fit and not fixed and measure(scale)[0] > max_pages:  # auto fit already ends on the fewest pages any spacing reaches
+            if not auto_fit and not fixed and measure(scale)[0] > max_pages:  # auto fit already aimed at the limit (fit_scale)
                 tighter = [candidate for candidate in _GRID if floor <= candidate < scale]  # loosest first
                 if tighter and measure(tighter[-1])[0] <= max_pages:
                     scale = next(candidate for candidate in tighter if measure(candidate)[0] <= max_pages)
             return scale, measure(scale)[0]
 
-        data = _data(sections, header, company)
-        scale, pages = placed(data)
-        note = None
+        scale, pages = placed()
+        note: str | None = None
+        tightest: int | None = None
+        lines: int | None = None
         if max_pages is not None and pages is not None and pages > max_pages:
-            tight_scale, tight_pages = (scale, pages) if fixed else placed(data, SPACING_MIN)
+            # Auto fit over its limit is at the tightest spacing already; the slider's own spacing is never tightened.
+            tight_scale, tight_pages = (scale, pages) if fixed or auto_fit else placed(SPACING_MIN)
             if tight_pages is not None and tight_pages <= max_pages:
                 scale, pages = tight_scale, tight_pages
             else:
-                note = over_limit_note(pages, max_pages, scale if fixed else None)
-        if images:
-            pictures = _compile_images(template, directory, data, scale)
-            return RenderedPdf(b"", len(pictures), scale, note, max_pages, pictures)
-        return RenderedPdf(_compile(template, directory, data, scale, timestamp), pages, scale, note, max_pages)
+                tightest = measure(SPACING_MIN)[0]
+                if fixed and scale > SPACING_MIN and tightest <= max_pages:
+                    note = over_limit_note(pages, max_pages, scale)
+                else:
+                    lines = _lines_over(template, directory, data, measure(SPACING_MIN), max_pages)
+                    note = over_limit_note(pages, max_pages, lines=lines, where=where)
+        contact_lines: int | None = None
+        contact_items = 0
+        if header is not None and not header.placeholder:
+            contact_items = len(data["contact"])  # type: ignore[arg-type]
+            # The same at every spacing: any layout the render made says it; one more query only for a caller that reports it.
+            if measured:
+                contact_lines = next(iter(measured.values()))[2]
+            elif count_pages or images:
+                contact_lines = _layout(template, directory, data, scale)[2] if contact_items else 0
+        pictures = _compile_images(template, directory, data, scale) if images else ()
+        pdf = b"" if images else _compile(template, directory, data, scale, timestamp)
+        return RenderedPdf(pdf, len(pictures) if images else pages, scale, note, max_pages, pictures, contact_lines, contact_items, tightest, lines)
 
 
 def render_pdf(
@@ -706,10 +819,18 @@ def printed_text(markdown: str) -> str:
 def render_markdown_pdf(
     markdown: str, header: PdfHeader | None, *, timestamp: datetime, spacing_scale: float = SPACING_DEFAULT, auto_fit: bool = True, company: str = "",
 ) -> RenderedPdf:
-    """Resume markdown (``parse_resume_markdown``) through the tailored-resume template, header and auto fit; pages counted."""
+    """Resume markdown (``parse_resume_markdown``) through the tailored-resume template, header and auto fit; pages counted.
+
+    With auto fit, the page limit is the length rule's (``LENGTH_RULE.max_pages``, 0.3.6 fix C), as for a stored
+    resume: one that cannot reach it prints at the tightest spacing with the lines to leave out, in the resume (the
+    markdown has no job page: ``over_limit_note``'s ``where``).  A spacing given without auto fit is the person's own
+    and has no limit: used as given, never tightened, no note."""
 
     _name, sections = parse_resume_markdown(markdown)
-    return _render(sections, header, company=company, timestamp=timestamp, spacing_scale=spacing_scale, auto_fit=auto_fit, count_pages=True)
+    return _render(
+        sections, header, company=company, timestamp=timestamp, spacing_scale=spacing_scale, auto_fit=auto_fit, count_pages=True,
+        max_pages=LENGTH_RULE.max_pages if auto_fit else None, where=None,
+    )
 
 
 def measure_markdown(

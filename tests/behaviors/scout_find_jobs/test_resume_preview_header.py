@@ -110,7 +110,7 @@ def test_the_placeholder_previews_page_count_is_the_pdfs_with_a_header_of_that_s
         payload = _invoke(fx, "resume", "pdf", "--job-url", JOB, "--header", str(same_size), "--out", str(out))
         assert (payload["spacing_scale"], payload["pages"], _pages(out.read_bytes())) == (spacing, shown["pages"], shown["pages"])
         counts[spacing] = shown["pages"]
-    assert counts == {0.7: 2, 0.85: 2, 1.0: 2, 1.05: 3, 1.2: 3}  # 0.3.5 (gigai-lc3): 3 pages at 1.05, was 2
+    assert counts == {0.7: 2, 0.85: 2, 1.0: 2, 1.05: 2, 1.2: 3}  # 0.3.6 (gigai-3jj): 2 pages at 1.05 again, as in 0.3.4 (0.3.5: 3)
     # A saved title prints under the name in a real header, so the placeholder holds that line too: still the PDF's pages.
     save_display(fx.home_root, DisplaySettings(titles={fx.profile_id: "Staff Platform Engineer"}))
     titled, pictures = _preview(server, origin=True, spacing_scale=1.05)

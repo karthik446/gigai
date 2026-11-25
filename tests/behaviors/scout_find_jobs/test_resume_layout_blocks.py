@@ -15,7 +15,7 @@ synthetic data (``tests/support/resume_spacing_fixture.py`` and ``tests/support/
 - ONE RENDER PATH: the stored resume and its own markdown give the template the same data, and the preview's
   pictures are the PDF's pages;
 - WHAT IS NOT ONE OF THE FOUR BLOCKS DOES NOT MOVE at 1.0 and above (where the roles and the project end is what the
-  template measured at 0.3.5 (gigai-lc3: the 4pt bullet gap, Regular 400 and the one-line role), to the last digit);
+  template measured until 0.3.4, to the last digit: 0.3.6, gigai-3jj, restored its gaps; 0.3.5 had moved them);
 - THE PAGES: both fixtures with a header fit 2 pages at the automatic spacing, and that spacing is 0.85 or looser;
 - AN EDITED RESUME is set by the same rules and none of its words change: every stored line is in the PDF as it is
   stored, and rendering writes nothing.
@@ -290,11 +290,10 @@ def test_the_summary_is_a_plain_paragraph_at_the_left_margin() -> None:
 #: 0.1.11.5 PB5 (an entry splits across pages) moved 1.2 on purpose, from (2, 0.6041618497109827): there a role had left
 #: page 1 whole and page 2 began with it; page 1 now runs to its foot and page 2 ends higher.  1.0 and 1.4, where no
 #: block had left a page early, are as they were to the last digit.
-#: 0.3.5 (gigai-lc3): every spacing moved on purpose, from (2, 0.4505...), (2, 0.5126...), (2, 0.6239...): the bullet gap
-#: is a constant 4pt (was 2 * 1.71pt * scale), the role line prints "Title | dates" on one line and the body is
-#: Regular 400, wider than Light 300, so more bullets wrap.  The rule the test keeps: the roles end where the PDF
-#: prints them at 1.0 and above, and nothing moves between runs.
-UNMOVED = {1.0: (2, 0.5108670520231215), 1.2: (2, 0.6210520231213873), 1.4: (2, 0.6378554913294799)}
+#: 0.3.5 (gigai-lc3) moved every spacing, to (2, 0.5108...), (2, 0.6210...), (2, 0.6378...), with a constant 4pt bullet
+#: gap.  0.3.6 (gigai-3jj): the bullet gap is the unit again (1.71pt x the scale), and the roles end where they did
+#: until 0.3.4, to the last digit (Regular 400 tracked -0.08pt wraps no bullet of this fixture that Light 300 did not).
+UNMOVED = {1.0: (2, 0.45052023121387297), 1.2: (2, 0.5126069364161852), 1.4: (2, 0.6239306358381504)}
 
 
 def test_at_one_and_above_the_roles_their_bullets_and_the_project_end_where_they_did() -> None:
@@ -312,11 +311,12 @@ def test_at_one_and_above_the_roles_their_bullets_and_the_project_end_where_they
 #: spacing fixture 3 pages at 1.0 and automatic 0.85; the pick fixture 3 pages at 1.0 and automatic 0.95.
 #: 0.1.11.5 PB5 (an entry splits across pages): the pick fixture's automatic spacing is 1.25 (was 1.0: from 1.05 up a
 #: role that did not fit page 1 left it whole, and the resume ran to a 3rd page).
-#: 0.3.5 (gigai-lc3): the spacing fixture is 3 pages at 1.0 and automatic 0.95 (were 2 and 1.05): the 4pt bullet gap,
-#: the 12.5pt line floor and Regular 400 hold fewer lines on a page; the pick fixture's automatic spacing is 1.3 (was 1.25).
+#: 0.3.5 (gigai-lc3): the spacing fixture 3 pages at 1.0 and automatic 0.95; the pick fixture automatic 1.3.
+#: 0.3.6 (gigai-3jj: 0.3.4's gaps and line floor): the spacing fixture is 2 pages at 1.0 and automatic 1.05 again; the
+#: pick fixture fits 2 pages at the loosest spacing, 1.4 (the untitled Summary and the one-line role, both 0.3.5).
 PAGES = {
-    "spacing_fixture": ({1.0: 3, 0.85: 2, 0.75: 2, 0.7: 2}, 0.95),
-    "pick_cap_fixture": ({1.0: 2, 0.85: 2, 0.75: 2, 0.7: 2}, 1.3),
+    "spacing_fixture": ({1.0: 2, 0.85: 2, 0.75: 2, 0.7: 2}, 1.05),
+    "pick_cap_fixture": ({1.0: 2, 0.85: 2, 0.75: 2, 0.7: 2}, 1.4),
 }
 
 

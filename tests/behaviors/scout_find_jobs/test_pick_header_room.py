@@ -301,7 +301,8 @@ def test_a_pick_holds_twenty_bullets_and_the_pdf_says_its_real_pages(
     payload, pages = _cli_pdf(fx, tmp_path)
     assert len(_header_lines(pages[0])) == 3, f"the header is not at its largest (name, two contact lines): {_header_lines(pages[0])}"
     assert len(pages) == payload["pages"] == 3, f"the fixture is not a pick that prints on 3 pages: {len(pages)}"
-    assert payload["note"] and payload["note"].startswith("This resume takes 3 pages") and "remove a point" in payload["note"]
+    # 0.3.5 (gigai-lc3): "remove a point".  0.3.6 (gigai-3jj): about how many lines to leave out.
+    assert payload["note"] and payload["note"].startswith("This resume takes 3 pages") and "leave out about" in payload["note"]
 
     # ... and the page's Generate PDF, over HTTP, with the form: the same pages.
     response = server.pdf()
@@ -388,10 +389,11 @@ def test_the_shorten_route_is_retired_says_what_to_do_instead_and_writes_nothing
     _assess(fx)
     over = server.pdf()
     note = over.headers["x-gigai-fit-note"]
-    # The over-limit sentence no longer names the button or the command: it names removing a point.
+    # The over-limit sentence no longer names the button or the command: it names leaving out lines (0.3.5,
+    # gigai-lc3: "remove a point or two"; 0.3.6, gigai-3jj: about how many, measured: 4).
     assert note == (
         "This resume takes 3 pages: it does not fit on 2 pages even with the tightest spacing. "
-        "To get 2 pages, remove a point or two on the job's page, then generate the PDF again. Or keep it at 3 pages."
+        "To get 2 pages, leave out about 4 lines on the job's page, then generate the PDF again. Or keep it at 3 pages."
     )
     assert "shorten" not in note.lower() and note.isascii()
     _view(fx)  # one read first: a scratch cache may be written by the first read of a home

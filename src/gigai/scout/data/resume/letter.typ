@@ -20,12 +20,12 @@
 #let asc = 0.96875
 #let desc = 0.2412109375
 #let edges(size, lh) = (top-edge: (lh + (asc - desc) * size) / 2, bottom-edge: -(lh - (asc - desc) * size) / 2)
-#let t(body, size: 9.5pt, lh: 14.3pt, weight: 400, fill: ink, tracking: 0pt) = text(size: size, weight: weight, fill: fill, tracking: tracking, ..edges(size, lh), body)
+#let t(body, size: 9.5pt, lh: 14.3pt, weight: 400, fill: ink, tracking: -0.08pt) = text(size: size, weight: weight, fill: fill, tracking: tracking, ..edges(size, lh), body)
 // The resume's header, line for line (resume.typ): its placeholder form is the resume PREVIEW's only; a letter's data never sets it.
 #let placeholder = d.at("placeholder", default: false)
 #let faint = rgb("#A6A8AD")
 #set document(title: d.doc_title, author: if d.name == "" or placeholder { () } else { d.name })
-#set text(font: "Inter", size: 9.5pt, weight: 400, fill: ink, lang: "en", ..edges(9.5pt, 14.3pt))
+#set text(font: "Inter", size: 9.5pt, weight: 400, fill: ink, lang: "en", tracking: -0.08pt, ..edges(9.5pt, 14.3pt))
 #set par(leading: 0pt, spacing: 0pt)
 #set block(spacing: 0pt)
 #set page(paper: "us-letter", margin: (x: margin-x, y: margin-y))

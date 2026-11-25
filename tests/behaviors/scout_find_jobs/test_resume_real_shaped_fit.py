@@ -152,17 +152,17 @@ def _grouped(rows: list[Row]) -> dict[tuple[int, float], list[Row]]:
 #: Pages at every slider position, header on (measured 2026-10-07).  BEFORE this change (HEAD 315b207e) the same
 #: resume: 2 pages at 0.70 and 0.75, 3 from 0.80 up, automatic 0.75.  With the degree, the project line and the
 #: orphan rule alone: 2 pages up to 0.80, automatic 0.80; the gaps that tighten faster below 1.0 give 0.85.
-#: 0.3.5 (gigai-lc3): 2 pages up to 0.75, automatic 0.75 (were 0.85): the 4pt bullet gap, the 12.5pt line floor and
-#: Regular 400 hold fewer lines on a page; readability was chosen over the 0.85 target, which the fixture no longer meets.
-PAGES = {0.7: 2, 0.75: 2, 0.8: 3, 0.85: 3, 0.9: 3, 0.95: 3, 1.0: 3, 1.05: 3, 1.1: 3, 1.15: 3, 1.2: 3, 1.25: 3, 1.3: 3, 1.35: 3, 1.4: 3}
-AUTO_FIT = 0.75
+#: 0.3.5 (gigai-lc3): 2 pages up to 0.75, automatic 0.75 (the 4pt bullet gap, the 12.5pt line floor and Regular 400).
+#: 0.3.6 (gigai-3jj: 0.3.4's gaps and floor, Regular 400 tracked -0.08pt): 2 pages up to 0.85 and automatic 0.85 again.
+PAGES = {0.7: 2, 0.75: 2, 0.8: 2, 0.85: 2, 0.9: 3, 0.95: 3, 1.0: 3, 1.05: 3, 1.1: 3, 1.15: 3, 1.2: 3, 1.25: 3, 1.3: 3, 1.35: 3, 1.4: 3}
+AUTO_FIT = 0.85
 
 
 def test_the_pages_at_every_slider_position_and_the_automatic_spacing() -> None:
     markdown = real.resume()
     assert {spacing: _pdf(markdown, spacing).pages for spacing in SLIDER} == PAGES
     fitted = resume_pdf.render_markdown_pdf(markdown, HEADER, timestamp=STAMP)
-    assert (fitted.spacing_scale, fitted.pages) == (AUTO_FIT, 2) and AUTO_FIT >= 0.75, "the target: a real-shaped pick fits 2 pages at 0.75 or looser (0.3.5, gigai-lc3: was 0.85)"
+    assert (fitted.spacing_scale, fitted.pages) == (AUTO_FIT, 2) and AUTO_FIT >= 0.85, "the target: a real-shaped pick fits 2 pages at 0.85 or looser"
     assert len(PdfReader(io.BytesIO(fitted.pdf)).pages) == 2
 
 
@@ -225,9 +225,10 @@ def test_a_degree_that_fits_keeps_the_size_it_had() -> None:
 
 
 def test_a_degree_too_long_for_one_line_puts_only_its_years_on_a_second_line() -> None:
-    # The school and its degree fit one line at the smallest size, but not with the years after them.
-    rows = _education("### Example State University\nMaster of Science, Computer Science and Information Systems | 2008 - 2010\n")
-    assert _lines(rows) == ["EXAMPLE STATE UNIVERSITY | Master of Science, Computer Science and Information Systems", "2008 - 2010"]
+    # The school and its degree fit one line at the smallest size, but not with the years after them.  (0.3.6, gigai-3jj:
+    # "Management" added; the body's -0.08pt tracking put "... and Information Systems | 2008 - 2010" on one line.)
+    rows = _education("### Example State University\nMaster of Science, Computer Science and Management Information Systems | 2008 - 2010\n")
+    assert _lines(rows) == ["EXAMPLE STATE UNIVERSITY | Master of Science, Computer Science and Management Information Systems", "2008 - 2010"]
     assert SMALLEST <= rows[1][3] <= BODY and rows[2][3] == BODY and RIGHT - 60 < rows[2][2] < RIGHT
     # Too long even without the years: it wraps at the body's size, every word printed, the years at the right margin of its last line.
     rows = _education("### Example Institute of Technology and Applied Sciences\nMaster of Science, Computer Science and Information Systems | 2008 - 2010\n")
